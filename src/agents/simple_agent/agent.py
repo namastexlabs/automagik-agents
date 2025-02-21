@@ -3,14 +3,13 @@ import logging
 import os
 from datetime import datetime
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import Dict, List
 
 import logfire
-
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse
 from src.agents.simple_agent.models.response import SimpleAgentResponse
 from src.agents.simple_agent.prompts.simple_agent_prompt import SIMPLE_AGENT_PROMPT
+from src.memory.message_history import MessageHistory
 
 # Configure prettier logging
 class PrettyFormatter(logging.Formatter):
@@ -41,43 +40,6 @@ logger.handlers = [handler]  # Replace any existing handlers
 
 # Disable httpx logging
 logging.getLogger('httpx').setLevel(logging.WARNING)
-
-class MessageHistory:
-    def __init__(self):
-        self._messages: List[ModelMessage] = []
-
-    def add(self, content: str) -> ModelMessage:
-        """Add a user message to history."""
-        message = ModelRequest(parts=[UserPromptPart(content=content)])
-        self._messages.append(message)
-        return message
-
-    def add_response(self, content: str) -> ModelMessage:
-        """Add an assistant response."""
-        message = ModelResponse(parts=[TextPart(content=content)])
-        self._messages.append(message)
-        return message
-
-    def remove(self, index: int) -> Optional[ModelMessage]:
-        """Remove a message at the given index."""
-        if 0 <= index < len(self._messages):
-            return self._messages.pop(index)
-        return None
-
-    def clear(self) -> None:
-        """Clear all messages."""
-        self._messages.clear()
-
-    @property
-    def messages(self) -> List[ModelMessage]:
-        """Get the messages for the API."""
-        return self._messages
-
-    def __len__(self) -> int:
-        return len(self._messages)
-
-    def __getitem__(self, index: int) -> ModelMessage:
-        return self._messages[index]
 
 @dataclass
 class Deps:
