@@ -20,7 +20,7 @@ class SimpleAgent:
             deps_type=Deps
         )
         self.deps = Deps()
-        self.message_history = MessageHistory()
+        self.message_history = MessageHistory(system_prompt=SIMPLE_AGENT_PROMPT)
         self.register_tools()
 
     def register_tools(self):
