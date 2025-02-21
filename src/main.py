@@ -1,23 +1,13 @@
 import asyncio
-import json
 import logging
 import os
 import logfire
-from src.agents.simple_agent.agent import SimpleAgent, PrettyFormatter
+from src.agents.simple_agent.agent import SimpleAgent
 from src.config import init_config
+from src.utils.logging import configure_logging
 
-# Configure root logger with pretty formatting
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-
-# Remove any existing handlers
-for handler in root_logger.handlers:
-    root_logger.removeHandler(handler)
-
-# Add our pretty handler
-handler = logging.StreamHandler()
-handler.setFormatter(PrettyFormatter())
-root_logger.addHandler(handler)
+# Configure logging
+configure_logging()
 
 # Get our module's logger
 logger = logging.getLogger(__name__)

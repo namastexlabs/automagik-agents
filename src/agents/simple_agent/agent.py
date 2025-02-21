@@ -1,45 +1,11 @@
-import json
 import logging
-import os
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict
 
-import logfire
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from src.agents.simple_agent.models.response import SimpleAgentResponse
 from src.agents.simple_agent.prompts.simple_agent_prompt import SIMPLE_AGENT_PROMPT
 from src.memory.message_history import MessageHistory
-
-# Configure prettier logging
-class PrettyFormatter(logging.Formatter):
-    def format(self, record):
-        # Add color based on level
-        colors = {
-            logging.INFO: '\033[92m',  # Green
-            logging.ERROR: '\033[91m',  # Red
-            logging.WARNING: '\033[93m',  # Yellow
-            logging.DEBUG: '\033[94m'  # Blue
-        }
-        reset = '\033[0m'
-        color = colors.get(record.levelno, '')
-        
-        # Format the message
-        if isinstance(record.msg, (dict, list)):
-            record.msg = json.dumps(record.msg, indent=2)
-        
-        # Simplified format: just emoji + message
-        emoji = '🤖' if 'Agent' in record.name else '📝'
-        return f"{color}{emoji} {record.msg}{reset}"
-
-# Configure logger
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-handler.setFormatter(PrettyFormatter())
-logger.handlers = [handler]  # Replace any existing handlers
-
-# Disable httpx logging
-logging.getLogger('httpx').setLevel(logging.WARNING)
 
 @dataclass
 class Deps:
@@ -85,35 +51,8 @@ class SimpleAgent:
             # Add the assistant response
             self.message_history.add_response(response_text)
             
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug({
-                    'history': [
-                        {
-                            'type': msg.kind,
-                            'content': [p.content for p in msg.parts]
-                        } for msg in self.message_history.messages
-                    ]
-                })
-            
             return SimpleAgentResponse(
                 message=response_text,
                 error=None
             )
         
-        return SimpleAgentResponse(
-            message=result.data,
-            tool_calls=getattr(result, 'tool_calls', None),
-            tool_outputs=getattr(result, 'tool_outputs', None)
-        )
-
-    def get_all_messages(self) -> List[Dict[str, str]]:
-        # Return the message history parsed from string content
-        messages = []
-        for msg in self.message_history:
-            if msg.startswith("User:"):
-                messages.append({"role": "user", "content": msg[len("User:"):].strip()})
-            elif msg.startswith("Assistant:"):
-                messages.append({"role": "assistant", "content": msg[len("Assistant:"):].strip()})
-            else:
-                messages.append({"role": "unknown", "content": msg})
-        return messages
