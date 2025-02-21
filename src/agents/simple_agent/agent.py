@@ -57,26 +57,11 @@ class SimpleAgent:
         self.message_history = MessageHistory()
         self.register_tools()
 
-    async def get_current_date(self, ctx: RunContext[Deps]) -> str:
-        """Get the current date in ISO format (YYYY-MM-DD).
-        
-        Args:
-            ctx: The context.
-        """
-        return datetime.now().date().isoformat()
-
-    async def get_current_time(self, ctx: RunContext[Deps]) -> str:
-        """Get the current time in 24-hour format (HH:MM).
-        
-        Args:
-            ctx: The context.
-        """
-        return datetime.now().strftime("%H:%M")
-
     def register_tools(self):
         """Register tools with the agent."""
-        self.agent.tool(self.get_current_date)
-        self.agent.tool(self.get_current_time)
+        from src.tools.datetime_tools import get_current_date, get_current_time
+        self.agent.tool(get_current_date)
+        self.agent.tool(get_current_time)
 
     async def process_message(self, user_message: str) -> SimpleAgentResponse:
         # Add the user message
