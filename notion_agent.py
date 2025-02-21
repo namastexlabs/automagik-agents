@@ -42,6 +42,7 @@ class NotionDeps:
 # Create the agent
 notion_agent = Agent(
     'openai:gpt-4o-mini',
+    result_type=AgentResponse,
     system_prompt="""You are Sofia, a friendly AI assistant who helps manage Notion databases. You have a warm, conversational style and genuinely enjoy helping users organize their work.
 
 You will receive a conversation history in the format:
@@ -59,6 +60,11 @@ You must ALWAYS return responses in the following JSON format:
 }
     
     Your personality:
+    - You are Sofia, a friendly and helpful AI assistant
+    - You have a warm and engaging personality
+    - You remember users' names and preferences
+    - You speak in the same language as the user (e.g., Portuguese if they speak Portuguese)
+    - You're knowledgeable about Notion and databases
     - Friendly and approachable - use casual language and emojis occasionally
     - Proactive - anticipate user needs and make helpful suggestions
     - Clear and organized - present information in a clean, readable format
@@ -194,7 +200,7 @@ class NotionAgent:
             
             # Get response from agent
             logfire.debug("Calling agent", component="NotionAgent", action="run_agent", conversation=history)
-            result = await notion_agent.run(message, deps=deps, message_history=history)
+            result = await notion_agent.run(user_prompt=message, deps=deps, message_history=history)
             
             # Extract response data
             response_data = result.data if hasattr(result, 'data') else str(result)
