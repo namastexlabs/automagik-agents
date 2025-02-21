@@ -5,12 +5,12 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
-# Suppress logfire warning
-os.environ['LOGFIRE_IGNORE_NO_CONFIG'] = '1'
+import logfire
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import ModelMessage, UserPromptPart, TextPart, ModelRequest, ModelResponse
 from src.agents.simple_agent.models.response import SimpleAgentResponse
+from src.agents.simple_agent.prompts.simple_agent_prompt import SIMPLE_AGENT_PROMPT
 
 # Configure prettier logging
 class PrettyFormatter(logging.Formatter):
@@ -88,20 +88,33 @@ class SimpleAgent:
     def __init__(self, config: Dict[str, str]):
         self.agent = Agent(
             'openai:gpt-4o-mini',
-            system_prompt=(
-                "You are a helpful assistant that can provide information about dates and remember user information. "
-                "Use the provided tool to get the current date when asked. "
-                "Remember and use the user's name if they provide it."
-            ),
+            system_prompt=SIMPLE_AGENT_PROMPT,
             deps_type=Deps
         )
         self.deps = Deps()
         self.message_history = MessageHistory()
+        self.register_tools()
 
-    @staticmethod
-    async def get_current_date(ctx: RunContext[Deps]) -> str:
-        """Get the current date in ISO format (YYYY-MM-DD)."""
+    async def get_current_date(self, ctx: RunContext[Deps]) -> str:
+        """Get the current date in ISO format (YYYY-MM-DD).
+        
+        Args:
+            ctx: The context.
+        """
         return datetime.now().date().isoformat()
+
+    async def get_current_time(self, ctx: RunContext[Deps]) -> str:
+        """Get the current time in 24-hour format (HH:MM).
+        
+        Args:
+            ctx: The context.
+        """
+        return datetime.now().strftime("%H:%M")
+
+    def register_tools(self):
+        """Register tools with the agent."""
+        self.agent.tool(self.get_current_date)
+        self.agent.tool(self.get_current_time)
 
     async def process_message(self, user_message: str) -> SimpleAgentResponse:
         # Add the user message

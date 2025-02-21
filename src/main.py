@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import logfire
 from src.agents.simple_agent.agent import SimpleAgent, PrettyFormatter
 from src.config import init_config
 
@@ -26,6 +27,15 @@ async def main():
         # Initialize config
         config = init_config()
         logger.info("Configuration initialized")
+        
+        # Configure logfire if token is present
+        if config.get("LOGFIRE_TOKEN"):
+            logfire.configure(
+                send_to_logfire='if-token-present',
+                service_name="simple-agent",
+                service_version="0.1.0"
+            )
+            logger.info("Logfire configured ✓")
 
         # Ensure OPENAI_API_KEY is set in the environment
         os.environ["OPENAI_API_KEY"] = config["OPENAI_API_KEY"]
