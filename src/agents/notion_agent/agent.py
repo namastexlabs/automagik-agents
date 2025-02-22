@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from typing import Dict
 
 from pydantic_ai import Agent
-from src.agents.notion_agent.prompts.prompt import NOTION_AGENT_PROMPT
-from src.agents.notion_agent.models.response import AgentResponse
+from src.agents.models.agent import AgentBaseResponse
+from src.agents.notion_agent.prompts import NOTION_AGENT_PROMPT
 from src.memory.message_history import MessageHistory
 from src.tools.notion_tools import NotionTools
 
@@ -36,7 +36,7 @@ class NotionAgent:
         for tool_func in notion_tools.tools:
             self.agent.tool(tool_func)
 
-    async def process_message(self, user_message: str) -> AgentResponse:
+    async def process_message(self, user_message: str) -> AgentBaseResponse:
         # Add the user message
         self.message_history.add(user_message)
         
@@ -58,8 +58,9 @@ class NotionAgent:
             # Add the assistant response
             self.message_history.add_response(response_text)
             
-            return AgentResponse(
+            return AgentBaseResponse(
                 message=response_text,
+                history=self.message_history,
                 error=None
             )
         

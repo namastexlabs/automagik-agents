@@ -1,7 +1,7 @@
 [project]
-name = "sofia"
+name = "automagik-agents"
 version = "0.1.0"
-description = "Add your description here"
+description = "Automagik agents templates"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

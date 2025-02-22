@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from typing import Dict
 
 from pydantic_ai import Agent
-from src.agents.simple_agent.models.response import SimpleAgentResponse
-from src.agents.simple_agent.prompts.simple_agent_prompt import SIMPLE_AGENT_PROMPT
+from src.agents.models.agent import AgentBaseResponse
+from src.agents.simple_agent.prompts import SIMPLE_AGENT_PROMPT
 from src.memory.message_history import MessageHistory
 
 @dataclass
@@ -29,7 +29,7 @@ class SimpleAgent:
         self.agent.tool(get_current_date)
         self.agent.tool(get_current_time)
 
-    async def process_message(self, user_message: str) -> SimpleAgentResponse:
+    async def process_message(self, user_message: str) -> AgentBaseResponse:
         # Add the user message
         self.message_history.add(user_message)
         
@@ -51,8 +51,9 @@ class SimpleAgent:
             # Add the assistant response
             self.message_history.add_response(response_text)
             
-            return SimpleAgentResponse(
+            return AgentBaseResponse(
                 message=response_text,
+                history=self.message_history,
                 error=None
             )
         
