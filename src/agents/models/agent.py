@@ -20,9 +20,19 @@ class HistoryModel(BaseModel):
             elif isinstance(msg, UserPromptPart):
                 messages.append(MessageModel(role="user", content=msg.prompt))
             elif isinstance(msg, ModelResponse):
-                messages.append(MessageModel(role="assistant", content=str(msg)))
+                # Extract just the text content from ModelResponse
+                content = ""
+                for part in msg.parts:
+                    if hasattr(part, "content"):
+                        content += part.content
+                messages.append(MessageModel(role="assistant", content=content))
             elif isinstance(msg, ModelRequest):
-                messages.append(MessageModel(role="user", content=str(msg)))
+                # Process each part of the ModelRequest separately
+                for part in msg.parts:
+                    if isinstance(part, SystemPromptPart):
+                        messages.append(MessageModel(role="system", content=part.content))
+                    elif isinstance(part, UserPromptPart):
+                        messages.append(MessageModel(role="user", content=part.content))
             else:
                 # For any other type, try to get content or convert to string
                 content = getattr(msg, "content", str(msg))
