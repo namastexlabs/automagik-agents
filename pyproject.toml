@@ -8,6 +8,19 @@ dynamic = ["version"]
 description = "Automagik agents templates"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Cezar Vasconcelos", email = "cezar@namastex.ai"}
+]
+keywords = ["ai", "agents", "pydantic", "fastapi", "notion"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
 dependencies = [
     "python-dotenv>=1.0.1",
     "notion-client>=2.3.0",
@@ -18,7 +31,14 @@ dependencies = [
     "uvicorn>=0.24.0",
     "pydantic-settings>=2.8.0",
     "typer>=0.9.0",
+    "build>=1.2.2.post1",
+    "twine>=6.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/namastexlabs/automagik-agents"
+Repository = "https://github.com/namastexlabs/automagik-agents"
+Issues = "https://github.com/namastexlabs/automagik-agents/issues"
 
 [project.scripts]
 automagik-agents = "src.cli:app"
