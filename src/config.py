@@ -24,21 +24,21 @@ class Environment(str, Enum):
 
 class Settings(BaseSettings):
     # Authentication
-    AUTOMAGIK_AGENTS_API_KEY: str = Field(..., description="API key for authenticating requests")
+    AM_API_KEY: str = Field(..., description="API key for authenticating requests")
 
     # OpenAI
-    AUTOMAGIK_AGENTS_OPENAI_API_KEY: str = Field(..., description="OpenAI API key for agent operations")
+    OPENAI_API_KEY: str = Field(..., description="OpenAI API key for agent operations")
 
     # Notion (Optional)
     NOTION_TOKEN: Optional[str] = Field(None, description="Notion integration token")
 
     # Server
-    AUTOMAGIK_AGENTS_PORT: int = Field(8000, description="Port to run the server on")
-    AUTOMAGIK_AGENTS_HOST: str = Field("0.0.0.0", description="Host to bind the server to")
-    AUTOMAGIK_AGENTS_ENV: Environment = Field(Environment.DEVELOPMENT, description="Environment (development, production, testing)")
+    AM_PORT: int = Field(8000, description="Port to run the server on")
+    AM_HOST: str = Field("0.0.0.0", description="Host to bind the server to")
+    AM_ENV: Environment = Field(Environment.DEVELOPMENT, description="Environment (development, production, testing)")
 
     # Logging
-    AUTOMAGIK_AGENTS_LOG_LEVEL: LogLevel = Field(LogLevel.INFO, description="Logging level")
+    AM_LOG_LEVEL: LogLevel = Field(LogLevel.INFO, description="Logging level")
     LOGFIRE_TOKEN: Optional[str] = Field(None, description="Logfire token for logging service")
     LOGFIRE_IGNORE_NO_CONFIG: bool = Field(True, description="Suppress Logfire warning if no token")
 
@@ -56,11 +56,11 @@ def load_settings() -> Settings:
         
         # Print configuration info
         print("🔧 Configuration loaded:")
-        print(f"├── Environment: {settings.AUTOMAGIK_AGENTS_ENV}")
-        print(f"├── Log Level: {settings.AUTOMAGIK_AGENTS_LOG_LEVEL}")
-        print(f"├── Server: {settings.AUTOMAGIK_AGENTS_HOST}:{settings.AUTOMAGIK_AGENTS_PORT}")
+        print(f"├── Environment: {settings.AM_ENV}")
+        print(f"├── Log Level: {settings.AM_LOG_LEVEL}")
+        print(f"├── Server: {settings.AM_HOST}:{settings.AM_PORT}")
         print(f"├── OpenAI API Key: {settings.OPENAI_API_KEY[:5]}...{settings.OPENAI_API_KEY[-5:]}")
-        print(f"└── API Key: {settings.AUTOMAGIK_AGENTS_API_KEY[:5]}...{settings.AUTOMAGIK_AGENTS_API_KEY[-5:]}")
+        print(f"└── API Key: {settings.AM_API_KEY[:5]}...{settings.AM_API_KEY[-5:]}")
 
         if settings.NOTION_TOKEN:
             print(f"    └── Notion Token: {settings.NOTION_TOKEN[:5]}...{settings.NOTION_TOKEN[-5:]}")

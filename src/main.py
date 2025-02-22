@@ -41,7 +41,7 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 
 async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != settings.AUTOMAGIK_AGENTS_API_KEY:
+    if api_key != settings.AM_API_KEY:
         raise HTTPException(
             status_code=401,
             detail="Invalid API Key"
@@ -75,7 +75,7 @@ async def health_check():
         status="healthy",
         timestamp=datetime.utcnow(),
         version=SERVICE_INFO["version"],
-        environment=settings.AUTOMAGIK_AGENTS_ENV
+        environment=settings.AM_ENV
     )
 
 @app.get("/agents", response_model=List[AgentInfo])
@@ -101,4 +101,4 @@ async def run_agent(agent_name: str, request: AgentRunRequest, api_key: str = De
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.AM_HOST, port=settings.AM_PORT)

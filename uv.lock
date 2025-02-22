@@ -52,6 +52,7 @@ dependencies = [
     { name = "logfire" },
     { name = "notion-client" },
     { name = "pydantic-ai" },
+    { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "uvicorn" },
@@ -63,6 +64,7 @@ requires-dist = [
     { name = "logfire", specifier = ">=3.6.1" },
     { name = "notion-client", specifier = ">=2.3.0" },
     { name = "pydantic-ai", specifier = ">=0.0.24" },
+    { name = "pydantic-settings", specifier = ">=2.8.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "uvicorn", specifier = ">=0.24.0" },
@@ -906,6 +908,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b9/8f/ad685ecca0f610fa204e92f394d190bcab8c9392f7be8f1a83914244d36b/pydantic_graph-0.0.24.tar.gz", hash = "sha256:40550e2310002f411b1fc0636206222caa5459ede7c44da5c856b3526b3096cd", size = 13694 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/23/f6/2f4ef49e75fcb6070f440f05db2898612ada7f5d889209e98ede2fdb3d19/pydantic_graph-0.0.24-py3-none-any.whl", hash = "sha256:29d763cb77a2533bcbd07ff34fff36316617d1e62a926a7a15df59f6103fc74e", size = 16860 },
+]
+
+[[package]]
+name = "pydantic-settings"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/a2/ad2511ede77bb424f3939e5148a56d968cdc6b1462620d24b2a1f4ab65b4/pydantic_settings-2.8.0.tar.gz", hash = "sha256:88e2ca28f6e68ea102c99c3c401d6c9078e68a5df600e97b43891c34e089500a", size = 83347 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/a9/3b9642025174bbe67e900785fb99c9bfe91ea584b0b7126ff99945c24a0e/pydantic_settings-2.8.0-py3-none-any.whl", hash = "sha256:c782c7dc3fb40e97b238e713c25d26f64314aece2e91abcff592fcac15f71820", size = 30746 },
 ]
 
 [[package]]
