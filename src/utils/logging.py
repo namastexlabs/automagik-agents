@@ -44,7 +44,7 @@ def get_log_level(level: LogLevel) -> int:
 def configure_logging():
     """Configure logging with pretty formatting and proper log level."""
     # Get log level from settings
-    log_level = get_log_level(settings.LOG_LEVEL)
+    log_level = get_log_level(settings.AUTOMAGIK_AGENTS_LOG_LEVEL)
     
     # Configure root logger
     root_logger = logging.getLogger()
@@ -60,11 +60,11 @@ def configure_logging():
     root_logger.addHandler(handler)
 
     # Configure Logfire if token is present
-    if settings.LOGFIRE_TOKEN:
+    if settings.AUTOMAGIK_AGENTS_LOGFIRE_TOKEN:
         import logfire
-        logfire.configure(settings.LOGFIRE_TOKEN)
-    elif not settings.LOGFIRE_IGNORE_NO_CONFIG:
-        print("Warning: LOGFIRE_TOKEN is not set. Tracing will be disabled.")
+        logfire.configure(settings.AUTOMAGIK_AGENTS_LOGFIRE_TOKEN)
+    elif not settings.AUTOMAGIK_AGENTS_LOGFIRE_IGNORE_NO_CONFIG:
+        print("Warning: AUTOMAGIK_AGENTS_LOGFIRE_TOKEN is not set. Tracing will be disabled.")
 
     # Disable httpx logging unless in DEBUG mode
     if log_level > logging.DEBUG:

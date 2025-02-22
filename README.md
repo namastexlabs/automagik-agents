@@ -11,6 +11,8 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 - **Health Monitoring**: Built-in health check endpoint with version tracking
 - **Message History**: Maintains conversation context across interactions
 - **Structured Responses**: Standardized response format using Pydantic models
+- **Security**: API key authentication for protected endpoints
+- **CORS Support**: Configurable CORS middleware for cross-origin requests
 
 ## Technical Architecture
 
@@ -43,13 +45,19 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 
 1. Set up environment variables:
    ```bash
+   # Copy the example environment file
+   cp .env-example .env
+   
+   # Edit .env and set your values
+   AUTOMAGIK_AGENTS_API_KEY=your_api_key_here  # Required for authentication
    NOTION_TOKEN=your_notion_integration_token  # Only needed for Notion agent
    ```
 
 2. Install dependencies:
    ```bash
    uv venv
-   uv pip install -r requirements.txt
+   source .venv/bin/activate
+   uv sync
    ```
 
 3. Run the API server:
@@ -59,22 +67,24 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 
 4. Interact with the agents:
 
-   Health Check:
+   Health Check (no authentication required):
    ```bash
    curl http://localhost:8000/health
    ```
 
-   Simple Agent:
+   Simple Agent (requires API key):
    ```bash
    curl -X POST http://localhost:8000/agent/simple/run \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: your_api_key_here" \
      -d '{"message_input": "What time is it?", "context": {}}'
    ```
 
-   Notion Agent:
+   Notion Agent (requires API key):
    ```bash
    curl -X POST http://localhost:8000/agent/notion/run \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: your_api_key_here" \
      -d '{"message_input": "List my databases", "context": {}}'
    ```
 
@@ -95,6 +105,14 @@ All agent responses are processed through:
 2. Response serialization
 3. Error handling
 4. Tool output collection
+
+### Security
+
+The API uses API key authentication for protected endpoints:
+- API key must be provided in the `X-API-Key` header
+- Key is configured via `AUTOMAGIK_AGENTS_API_KEY` environment variable
+- Health check endpoint remains public
+- Invalid or missing API keys return 401 Unauthorized
 
 ## Future Enhancements
 

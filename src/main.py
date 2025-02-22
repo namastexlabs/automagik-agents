@@ -75,7 +75,7 @@ async def health_check():
         status="healthy",
         timestamp=datetime.utcnow(),
         version=SERVICE_INFO["version"],
-        environment=settings.ENV
+        environment=settings.AUTOMAGIK_AGENTS_ENV
     )
 
 @app.get("/agents", response_model=List[AgentInfo])
