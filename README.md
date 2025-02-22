@@ -56,7 +56,7 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 2. Install dependencies:
    ```bash
    uv venv
-   source .venv/bin/activate
+   source .venv/bin/activate ## or .venv\Scripts\activate if on Windows
    uv sync
    ```
 
