@@ -51,7 +51,7 @@ class SimpleAgent:
             # Add the assistant response
             self.message_history.add_response(response_text)
             
-            return AgentBaseResponse(
+            return AgentBaseResponse.from_agent_response(
                 message=response_text,
                 history=self.message_history,
                 error=None
