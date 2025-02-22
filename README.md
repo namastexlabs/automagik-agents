@@ -1,92 +1,105 @@
-# Sofia - Notion AI Assistant
+# Automagik Agents
 
-Sofia is an intelligent AI assistant that helps manage Notion databases through natural language conversations. Built using the Pydantic AI framework, Sofia provides a friendly and intuitive interface for interacting with Notion workspaces.
+A collection of AI agents powered by Pydantic AI and exposed through FastAPI endpoints. This project provides a flexible framework for deploying and interacting with different types of AI agents through a RESTful API.
 
 ## Features
 
-- **Natural Language Interface**: Communicate with Sofia in plain language to manage your Notion databases
-- **Database Operations**: 
-  - List available databases
-  - Query database contents with filters
-  - Create new pages
-  - Update existing pages
-  - Delete/archive pages
-- **Contextual Memory**: Sofia maintains conversation history to provide contextual responses
-- **Rich Response Format**: Responses include both reasoning and final messages
+- **Multiple Agent Support**: 
+  - Simple Agent: Handles basic queries and time-related operations
+  - Notion Agent: Manages Notion databases and workspaces
+- **FastAPI Integration**: RESTful API endpoints for agent interaction
+- **Health Monitoring**: Built-in health check endpoint with version tracking
+- **Message History**: Maintains conversation context across interactions
+- **Structured Responses**: Standardized response format using Pydantic models
 
 ## Technical Architecture
 
 ### Core Components
 
-1. **NotionAgent Class**
-   - Main interface for handling user commands
-   - Manages conversation context and database cache
-   - Processes responses through the Pydantic AI agent
+1. **FastAPI Application**
+   - Health check endpoint (`/health`)
+   - Agent endpoints (`/agent/{agent_type}/run`)
+   - Standardized request/response models
 
-2. **NotionTools Class**
-   - Handles direct interactions with Notion API
-   - Implements database operations (list, query, create, update, delete)
+2. **Agent Framework**
+   - Base agent implementation with common functionality
+   - Specialized agents (Simple, Notion) with specific capabilities
+   - Message history management
+   - Tool registration system
 
-3. **Agent Response Model**
-   - Structured response format using Pydantic
-   - Fields:
-     - `reasoning`: Optional explanation of the agent's thought process
-     - `message`: The actual response to show to the user
+3. **Response Models**
+   - `AgentBaseResponse`: Standard response format
+   - `HistoryModel`: Message history serialization
+   - `MessageModel`: Individual message representation
 
 ### Dependencies
 
+- `fastapi`: Web framework for building APIs
 - `pydantic-ai`: Core AI agent framework
-- `notion-client`: Official Notion API client
-- `rich`: Terminal formatting and display
-- `logfire`: Logging system
+- `notion-client`: Official Notion API client (for Notion agent)
+- `uvicorn`: ASGI server for running the API
 
 ## Usage
 
 1. Set up environment variables:
    ```bash
-   NOTION_TOKEN=your_notion_integration_token
+   NOTION_TOKEN=your_notion_integration_token  # Only needed for Notion agent
    ```
 
-2. Run the agent:
+2. Install dependencies:
    ```bash
-   python notion_agent.py
+   uv venv
+   uv pip install -r requirements.txt
    ```
 
-3. Start interacting with Sofia using natural language commands:
+3. Run the API server:
+   ```bash
+   uvicorn src.main:app --reload
    ```
-   > list databases
-   > show items in Tasks database
-   > create new task with title "Review PR"
+
+4. Interact with the agents:
+
+   Health Check:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+   Simple Agent:
+   ```bash
+   curl -X POST http://localhost:8000/agent/simple/run \
+     -H "Content-Type: application/json" \
+     -d '{"message_input": "What time is it?", "context": {}}'
+   ```
+
+   Notion Agent:
+   ```bash
+   curl -X POST http://localhost:8000/agent/notion/run \
+     -H "Content-Type: application/json" \
+     -d '{"message_input": "List my databases", "context": {}}'
    ```
 
 ## Development
 
-### Agent Initialization
+### Agent Implementation
 
-The agent is initialized with:
-- Model: GPT-4 Mini
-- Result Type: AgentResponse
-- System Prompt: Defines Sofia's personality and response format
+Each agent follows a standard structure:
+- Initialization with configuration
+- Tool registration
+- Message processing
+- Response generation
 
 ### Response Processing
 
-Responses are processed through multiple stages:
-1. Command parsing
-2. Agent execution
-3. Response validation
-4. Memory storage
-5. Display formatting
-
-### Error Handling
-
-- Comprehensive error catching for API calls
-- Graceful fallbacks for failed operations
-- Detailed logging for debugging
+All agent responses are processed through:
+1. Message history management
+2. Response serialization
+3. Error handling
+4. Tool output collection
 
 ## Future Enhancements
 
-- Support for more complex database operations
-- Enhanced memory management
-- Multi-database relationship handling
-- Custom database templates
-- Batch operations support
+- Additional agent types
+- Enhanced tool management system
+- Authentication and rate limiting
+- Response caching
+- Batch operation support
