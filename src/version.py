@@ -1,6 +1,6 @@
 """Service version and metadata information."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 SERVICE_NAME = "automagik-agents"
 SERVICE_DESCRIPTION = "Automagik agents templates and API"
