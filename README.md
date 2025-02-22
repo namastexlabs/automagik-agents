@@ -49,7 +49,7 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
    cp .env-example .env
    
    # Edit .env and set your values
-   AUTOMAGIK_AGENTS_API_KEY=your_api_key_here  # Required for authentication
+   AM_API_KEY=your_api_key_here  # Required for authentication
    NOTION_TOKEN=your_notion_integration_token  # Only needed for Notion agent
    ```
 
@@ -110,7 +110,7 @@ All agent responses are processed through:
 
 The API uses API key authentication for protected endpoints:
 - API key must be provided in the `X-API-Key` header
-- Key is configured via `AUTOMAGIK_AGENTS_API_KEY` environment variable
+- Key is configured via `AM_API_KEY` environment variable
 - Health check endpoint remains public
 - Invalid or missing API keys return 401 Unauthorized
 
