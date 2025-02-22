@@ -13,6 +13,7 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 - **Structured Responses**: Standardized response format using Pydantic models
 - **Security**: API key authentication for protected endpoints
 - **CORS Support**: Configurable CORS middleware for cross-origin requests
+- **CLI Tools**: Command-line interface for creating new agents and managing the API server
 
 ## Technical Architecture
 
@@ -40,6 +41,27 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
 - `pydantic-ai`: Core AI agent framework
 - `notion-client`: Official Notion API client (for Notion agent)
 - `uvicorn`: ASGI server for running the API
+- `typer`: CLI interface builder
+
+### CLI Commands
+
+The package provides a command-line interface with the following commands:
+
+1. **Create a New Agent**
+   ```bash
+   automagik-agents create-agent --name your_agent_name
+   ```
+   This command creates a new agent by cloning the simple agent template and setting up the necessary files.
+
+2. **Start the API Server**
+   ```bash
+   automagik-agents api start [OPTIONS]
+   ```
+   Options:
+   - `--host`, `-h`: Host to bind the server to (overrides AM_HOST from .env)
+   - `--port`, `-p`: Port to bind the server to (overrides AM_PORT from .env)
+   - `--reload`: Enable auto-reload on code changes
+   - `--workers`, `-w`: Number of worker processes
 
 ## Usage
 
@@ -51,6 +73,8 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
    # Edit .env and set your values
    AM_API_KEY=your_api_key_here  # Required for authentication
    NOTION_TOKEN=your_notion_integration_token  # Only needed for Notion agent
+   AM_HOST=0.0.0.0  # Host to bind the server to
+   AM_PORT=8000  # Port to bind the server to
    ```
 
 2. Install dependencies:
@@ -60,12 +84,21 @@ A collection of AI agents powered by Pydantic AI and exposed through FastAPI end
    uv sync
    ```
 
-3. Run the API server:
+3. Create a new agent (optional):
    ```bash
-   uvicorn src.main:app --reload
+   automagik-agents create-agent --name my_custom_agent
    ```
 
-4. Interact with the agents:
+4. Start the API server:
+   ```bash
+   # Start with default settings from .env
+   automagik-agents api start
+
+   # Or start with custom settings
+   automagik-agents api start --host 127.0.0.1 --port 8080 --reload
+   ```
+
+5. Interact with the agents:
 
    Health Check (no authentication required):
    ```bash
