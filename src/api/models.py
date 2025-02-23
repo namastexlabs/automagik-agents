@@ -7,6 +7,7 @@ class AgentRunRequest(BaseModel):
     message_input: str
     context: dict = {}
     session_id: Optional[str] = None
+    message_limit: Optional[int] = 10  # Default to last 10 messages
 
 class AgentInfo(BaseModel):
     """Information about an available agent."""
@@ -50,8 +51,17 @@ class MessageModel(BaseModel):
         json_schema_extra = {"examples": [{"role": "assistant", "content": "Hello!"}]}
         exclude_none = True  # Exclude None values from response
 
+class PaginationParams(BaseModel):
+    """Pagination parameters."""
+    page: int = 1
+    page_size: int = 50
+    sort_desc: bool = True  # True for most recent first
+
 class SessionResponse(BaseModel):
     """Response model for session retrieval."""
     session_id: str
     messages: List[MessageModel]
-    exists: bool 
+    exists: bool
+    total_messages: int
+    current_page: int
+    total_pages: int 

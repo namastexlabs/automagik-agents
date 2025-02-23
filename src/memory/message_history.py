@@ -12,6 +12,7 @@ from pydantic_ai.messages import (
     SystemPromptPart
 )
 from src.memory.message_store import MessageStore, CacheMessageStore
+from datetime import datetime
 
 class TextPart(BaseTextPart):
     """Custom TextPart that includes assistant name."""
@@ -152,6 +153,16 @@ class MessageHistory:
         """
         return self._store.get_messages(self.session_id)
 
+    def update_messages(self, messages: List[ModelMessage]) -> None:
+        """Update all messages in the store.
+        
+        Args:
+            messages: New list of messages to store
+        """
+        self._store.clear_session(self.session_id)
+        for message in messages:
+            self._store.add_message(self.session_id, message)
+
     def __len__(self) -> int:
         return len(self.messages)
 
@@ -184,3 +195,129 @@ class MessageHistory:
                 for msg in self.messages
             ]
         }
+
+    def get_filtered_messages(self, message_limit: Optional[int] = None, sort_desc: bool = True) -> List[ModelMessage]:
+        """Get filtered messages with optional limit and sorting.
+        
+        Args:
+            message_limit: Optional limit on number of non-system messages to return
+            sort_desc: Whether to sort by most recent first
+            
+        Returns:
+            List of messages, optionally filtered and sorted
+        """
+        messages = self.messages
+        system_prompt = next((msg for msg in messages if any(isinstance(p, SystemPromptPart) for p in msg.parts)), None)
+        non_system_messages = [msg for msg in messages if not any(isinstance(p, SystemPromptPart) for p in msg.parts)]
+        
+        # Sort messages by recency
+        sorted_messages = sorted(
+            non_system_messages,
+            key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0)),
+            reverse=True  # Sort descending to get most recent first
+        )
+        
+        # Apply limit if specified
+        if message_limit is not None:
+            sorted_messages = sorted_messages[:message_limit]
+            
+        # Sort chronologically for display if not descending
+        if not sort_desc:
+            sorted_messages = sorted(
+                sorted_messages,
+                key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0))
+            )
+            
+        # Add system prompt at start if it exists
+        return ([system_prompt] if system_prompt else []) + sorted_messages
+
+    def get_paginated_messages(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        sort_desc: bool = True
+    ) -> tuple[List[ModelMessage], int, int, int]:
+        """Get paginated messages with sorting.
+        
+        Args:
+            page: Page number (1-based)
+            page_size: Number of messages per page
+            sort_desc: Sort by most recent first if True
+            
+        Returns:
+            Tuple of (paginated messages, total messages, current page, total pages)
+        """
+        messages = self.messages
+        system_prompt = next((msg for msg in messages if any(isinstance(p, SystemPromptPart) for p in msg.parts)), None)
+        non_system_messages = [msg for msg in messages if not any(isinstance(p, SystemPromptPart) for p in msg.parts)]
+        
+        # Sort messages by timestamp
+        sorted_messages = sorted(
+            non_system_messages,
+            key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0)),
+            reverse=True  # Always sort descending first to get most recent
+        )
+        
+        # Calculate pagination
+        total_messages = len(sorted_messages)
+        total_pages = (total_messages + page_size - 1) // page_size
+        current_page = max(1, min(page, total_pages))
+        start_idx = (current_page - 1) * page_size
+        end_idx = start_idx + page_size
+        
+        # Get paginated messages
+        paginated = sorted_messages[start_idx:end_idx]
+        
+        # Sort chronologically for display if not descending
+        if not sort_desc:
+            paginated = sorted(
+                paginated,
+                key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0))
+            )
+        
+        # Add system prompt at start if it exists
+        final_messages = ([system_prompt] if system_prompt else []) + paginated
+        
+        return final_messages, total_messages, current_page, total_pages
+
+    def format_message_for_api(self, msg: ModelMessage, hide_tools: bool = False) -> Optional[Dict]:
+        """Format a single message for API response.
+        
+        Args:
+            msg: The message to format
+            hide_tools: Whether to exclude tool calls and outputs
+            
+        Returns:
+            Formatted message dictionary or None if message should be skipped
+        """
+        if not msg.parts:
+            return None
+
+        # Determine message role
+        role = "system" if any(isinstance(p, SystemPromptPart) for p in msg.parts) else \
+               "user" if any(isinstance(p, UserPromptPart) for p in msg.parts) else \
+               "assistant"
+
+        # Create base message
+        message_data = {
+            "role": role,
+            "content": msg.parts[0].content
+        }
+
+        # Add assistant name for assistant messages if present
+        if role == "assistant":
+            assistant_name = getattr(msg.parts[0], "assistant_name", None)
+            if assistant_name:
+                message_data["assistant_name"] = assistant_name
+
+        # Add tool calls and outputs if present and not hidden
+        if not hide_tools:
+            tool_calls = [part.tool_call.dict() for part in msg.parts if isinstance(part, ToolCallPart)]
+            tool_outputs = [part.tool_output.dict() for part in msg.parts if isinstance(part, ToolOutputPart)]
+            
+            if tool_calls:
+                message_data["tool_calls"] = tool_calls
+            if tool_outputs:
+                message_data["tool_outputs"] = tool_outputs
+
+        return message_data

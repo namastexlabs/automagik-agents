@@ -52,6 +52,11 @@ def load_settings() -> Settings:
     # Load environment variables from .env file
     load_dotenv()
 
+    # Strip comments from environment variables
+    for key in os.environ:
+        if isinstance(os.environ[key], str):
+            os.environ[key] = os.environ[key].split('#')[0].strip()
+
     try:
         settings = Settings()
         
