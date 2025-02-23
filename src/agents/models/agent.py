@@ -43,19 +43,40 @@ class HistoryModel(BaseModel):
 
 class AgentBaseResponse(BaseModel):
     message: str
-    history: HistoryModel
+    history: Dict
     error: Optional[str] = None
-    tool_calls: Optional[List[Any]] = None
-    tool_outputs: Optional[List[Any]] = None
+    tool_calls: List[Dict] = []
+    tool_outputs: List[Dict] = []
+    session_id: str
 
     @classmethod
-    def from_agent_response(cls, message: str, history: MessageHistory, error: Optional[str] = None, 
-                          tool_calls: Optional[List[Any]] = None, tool_outputs: Optional[List[Any]] = None):
-        history_model = HistoryModel.from_message_history(history)
+    def from_agent_response(
+        cls,
+        message: str,
+        history: MessageHistory,
+        error: Optional[str] = None,
+        tool_calls: List[Dict] = [],
+        tool_outputs: List[Dict] = [],
+        session_id: str = None
+    ) -> "AgentBaseResponse":
+        """Create an AgentBaseResponse from the agent's response components.
+        
+        Args:
+            message: The response message from the agent.
+            history: The message history object.
+            error: Optional error message.
+            tool_calls: List of tool calls made during processing.
+            tool_outputs: List of outputs from tool calls.
+            session_id: The session identifier used for this conversation.
+            
+        Returns:
+            An AgentBaseResponse instance.
+        """
         return cls(
             message=message,
-            history=history_model,
+            history=history.to_dict(),
             error=error,
             tool_calls=tool_calls,
-            tool_outputs=tool_outputs
+            tool_outputs=tool_outputs,
+            session_id=session_id or history.session_id
         )

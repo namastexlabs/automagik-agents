@@ -5,6 +5,7 @@ from pydantic_ai import Agent
 from pydantic_ai.result import RunResult
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
+import time
 
 @dataclass
 class Deps:
@@ -31,7 +32,7 @@ class BaseAgent:
             deps_type=self.get_deps_type()
         )
         self.deps = self.get_deps_type()()
-        self.message_history = MessageHistory(system_prompt=system_prompt)
+        self.system_prompt = system_prompt
         self.register_tools()
 
     def get_deps_type(self):
@@ -87,16 +88,39 @@ class BaseAgent:
         logging.info(f"Matched {len(matched_calls)} tool calls with their outputs")
         return matched_calls, matched_outputs
 
-    async def process_message(self, user_message: str) -> AgentBaseResponse:
-        self.message_history.add(user_message)
+    async def process_message(self, user_message: str, session_id: Optional[str] = None) -> AgentBaseResponse:
+        """Process a user message and return a response.
         
-        logging.info(f"Processing user message: {user_message}")
+        Args:
+            user_message: The message from the user to process.
+            session_id: Optional session identifier. If not provided, a new session will be created.
+            
+        Returns:
+            The agent's response including tool calls and outputs.
+        """
+        # Generate a session ID if none provided
+        if session_id is None:
+            session_id = f"session_{int(time.time())}"
+            logging.info(f"Generated new session ID: {session_id}")
+        else:
+            logging.info(f"Using existing session ID: {session_id}")
+            
+        # Initialize message history with session ID
+        message_history = MessageHistory(session_id)
+        
+        # Add or update system prompt
+        message_history.add_system_prompt(self.system_prompt)
+        
+        # Add user message
+        message_history.add(user_message)
+        
+        logging.info(f"Processing user message in session {session_id}: {user_message}")
 
         try:
             result = await self.agent.run(
                 user_message,
                 deps=self.deps,
-                message_history=self.message_history.messages
+                message_history=message_history.messages
             )
             logging.info(f"Agent run completed. Result type: {type(result)}")
         except Exception as e:
@@ -104,27 +128,29 @@ class BaseAgent:
             logging.error(error_msg)
             return AgentBaseResponse.from_agent_response(
                 message="An error occurred while processing your request.",
-                history=self.message_history,
+                history=message_history,
                 error=error_msg,
                 tool_calls=[],
-                tool_outputs=[]
+                tool_outputs=[],
+                session_id=session_id
             )
         
         response_text = result.data
-        logging.info(f"Response text: {response_text[:100]}...")  # Log first 100 characters
+        logging.info(f"Response text: {response_text[:100]}...")
 
         tool_calls, tool_outputs = self.extract_tool_calls_and_outputs(result)
 
         logging.info(f"Captured {len(tool_calls)} tool calls and {len(tool_outputs)} tool outputs")
         
-        self.message_history.add_response(response_text)
+        message_history.add_response(response_text)
         
         response = AgentBaseResponse.from_agent_response(
             message=response_text,
-            history=self.message_history,
+            history=message_history,
             error=None,
             tool_calls=[tc.__dict__ for tc in tool_calls],
-            tool_outputs=[to.__dict__ for to in tool_outputs]
+            tool_outputs=[to.__dict__ for to in tool_outputs],
+            session_id=session_id
         )
         
         logging.info(f"Returning AgentBaseResponse with {len(response.tool_calls)} tool calls and {len(response.tool_outputs)} tool outputs")
