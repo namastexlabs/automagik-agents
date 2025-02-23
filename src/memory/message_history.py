@@ -126,15 +126,23 @@ class MessageHistory:
         Returns:
             The created message object.
         """
-        parts = [TextPart(content=content, assistant_name=assistant_name)]
+        # Create base text part with content and assistant name if provided
+        text_part = TextPart(content=content)
+        if assistant_name:
+            text_part.assistant_name = assistant_name
+        parts = [text_part]
         
-        # Add tool calls and outputs only if they exist and are not empty
+        # Add only non-empty tool calls
         if tool_calls:
             for tool_call in tool_calls:
-                parts.append(ToolCallPart(tool_call=ToolCall(**tool_call)))
+                if tool_call.get('tool_name'):  # Only add if tool_name is present and non-empty
+                    parts.append(ToolCallPart(tool_call=ToolCall(**tool_call)))
+        
+        # Add only non-empty tool outputs
         if tool_outputs:
             for tool_output in tool_outputs:
-                parts.append(ToolOutputPart(tool_output=ToolOutput(**tool_output)))
+                if tool_output.get('content'):  # Only add if content is present and non-empty
+                    parts.append(ToolOutputPart(tool_output=ToolOutput(**tool_output)))
         
         message = ModelResponse(parts=parts)
         self._store.add_message(self.session_id, message)
@@ -177,21 +185,25 @@ class MessageHistory:
         """
         return {
             "messages": [
-                {
+                {k: v for k, v in {
                     "role": "system" if any(isinstance(p, SystemPromptPart) for p in msg.parts)
                     else "user" if any(isinstance(p, UserPromptPart) for p in msg.parts)
                     else "assistant",
                     "content": msg.parts[0].content if msg.parts else "",
-                    **({
-                        "assistant_name": getattr(msg.parts[0], "assistant_name", None)
-                    } if any(isinstance(p, TextPart) for p in msg.parts) and not any(isinstance(p, (SystemPromptPart, UserPromptPart)) for p in msg.parts) else {}),
-                    **({
-                        "tool_calls": [p.tool_call.dict() for p in msg.parts if isinstance(p, ToolCallPart)]
-                    } if any(isinstance(p, ToolCallPart) for p in msg.parts) else {}),
-                    **({
-                        "tool_outputs": [p.tool_output.dict() for p in msg.parts if isinstance(p, ToolOutputPart)]
-                    } if any(isinstance(p, ToolOutputPart) for p in msg.parts) else {})
-                }
+                    **({"assistant_name": getattr(msg.parts[0], "assistant_name", None)}
+                        if any(isinstance(p, TextPart) for p in msg.parts) 
+                        and not any(isinstance(p, (SystemPromptPart, UserPromptPart)) for p in msg.parts)
+                        and getattr(msg.parts[0], "assistant_name", None) is not None
+                        else {}),
+                    **({"tool_calls": [
+                        {k: v for k, v in p.tool_call.dict().items() if v is not None}
+                        for p in msg.parts if isinstance(p, ToolCallPart)
+                    ]} if any(isinstance(p, ToolCallPart) for p in msg.parts) else {}),
+                    **({"tool_outputs": [
+                        {k: v for k, v in p.tool_output.dict().items() if v is not None}
+                        for p in msg.parts if isinstance(p, ToolOutputPart)
+                    ]} if any(isinstance(p, ToolOutputPart) for p in msg.parts) else {})
+                }.items() if v is not None and (not isinstance(v, list) or v)}
                 for msg in self.messages
             ]
         }
@@ -214,22 +226,18 @@ class MessageHistory:
         sorted_messages = sorted(
             non_system_messages,
             key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0)),
-            reverse=True  # Sort descending to get most recent first
+            reverse=sort_desc  # Sort based on sort_desc parameter
         )
         
         # Apply limit if specified
         if message_limit is not None:
-            sorted_messages = sorted_messages[:message_limit]
-            
-        # Sort chronologically for display if not descending
-        if not sort_desc:
-            sorted_messages = sorted(
-                sorted_messages,
-                key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0))
-            )
-            
-        # Add system prompt at start if it exists
-        return ([system_prompt] if system_prompt else []) + sorted_messages
+            if sort_desc:
+                sorted_messages = sorted_messages[:message_limit]
+            else:
+                sorted_messages = sorted_messages[-message_limit:]
+        
+        # Always put system prompt at the start for context
+        return ([system_prompt] if system_prompt else []) + (sorted_messages if not sort_desc else list(reversed(sorted_messages)))
 
     def get_paginated_messages(
         self,
@@ -255,7 +263,7 @@ class MessageHistory:
         sorted_messages = sorted(
             non_system_messages,
             key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0)),
-            reverse=True  # Always sort descending first to get most recent
+            reverse=sort_desc  # Sort based on sort_desc parameter
         )
         
         # Calculate pagination
@@ -268,15 +276,8 @@ class MessageHistory:
         # Get paginated messages
         paginated = sorted_messages[start_idx:end_idx]
         
-        # Sort chronologically for display if not descending
-        if not sort_desc:
-            paginated = sorted(
-                paginated,
-                key=lambda x: getattr(x, 'timestamp', datetime.min).timestamp() if isinstance(getattr(x, 'timestamp', None), datetime) else float(getattr(x, 'timestamp', 0))
-            )
-        
-        # Add system prompt at start if it exists
-        final_messages = ([system_prompt] if system_prompt else []) + paginated
+        # Always put system prompt at the start for context
+        final_messages = ([system_prompt] if system_prompt else []) + (paginated if not sort_desc else list(reversed(paginated)))
         
         return final_messages, total_messages, current_page, total_pages
 
@@ -298,26 +299,43 @@ class MessageHistory:
                "user" if any(isinstance(p, UserPromptPart) for p in msg.parts) else \
                "assistant"
 
-        # Create base message
+        # Start with minimal message data
         message_data = {
             "role": role,
             "content": msg.parts[0].content
         }
 
-        # Add assistant name for assistant messages if present
+        # Only add assistant-specific fields for assistant messages
         if role == "assistant":
             assistant_name = getattr(msg.parts[0], "assistant_name", None)
             if assistant_name:
                 message_data["assistant_name"] = assistant_name
 
-        # Add tool calls and outputs if present and not hidden
-        if not hide_tools:
-            tool_calls = [part.tool_call.dict() for part in msg.parts if isinstance(part, ToolCallPart)]
-            tool_outputs = [part.tool_output.dict() for part in msg.parts if isinstance(part, ToolOutputPart)]
-            
-            if tool_calls:
-                message_data["tool_calls"] = tool_calls
-            if tool_outputs:
-                message_data["tool_outputs"] = tool_outputs
+            if not hide_tools:
+                # Add non-empty tool calls
+                tool_calls = [
+                    {k: v for k, v in {
+                        "tool_name": part.tool_call.tool_name,
+                        "args": part.tool_call.args,
+                        "tool_call_id": part.tool_call.tool_call_id
+                    }.items() if v is not None}
+                    for part in msg.parts 
+                    if isinstance(part, ToolCallPart) and part.tool_call.tool_name
+                ]
+                if tool_calls:
+                    message_data["tool_calls"] = tool_calls
 
-        return message_data
+                # Add non-empty tool outputs
+                tool_outputs = [
+                    {k: v for k, v in {
+                        "tool_name": part.tool_output.tool_name,
+                        "tool_call_id": part.tool_output.tool_call_id,
+                        "content": part.tool_output.content
+                    }.items() if v is not None}
+                    for part in msg.parts 
+                    if isinstance(part, ToolOutputPart) and part.tool_output.content
+                ]
+                if tool_outputs:
+                    message_data["tool_outputs"] = tool_outputs
+
+        return {k: v for k, v in message_data.items() if v is not None}

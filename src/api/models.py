@@ -1,45 +1,53 @@
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-class AgentRunRequest(BaseModel):
+class BaseResponseModel(BaseModel):
+    """Base model for all response models with common configuration."""
+    model_config = ConfigDict(
+        exclude_none=True,  # Exclude None values from response
+        validate_assignment=True,  # Validate values on assignment
+        extra='ignore'  # Ignore extra fields
+    )
+
+class AgentRunRequest(BaseResponseModel):
     """Request model for running an agent."""
     message_input: str
     context: dict = {}
     session_id: Optional[str] = None
     message_limit: Optional[int] = 10  # Default to last 10 messages
 
-class AgentInfo(BaseModel):
+class AgentInfo(BaseResponseModel):
     """Information about an available agent."""
     name: str
     type: str
 
-class HealthResponse(BaseModel):
+class HealthResponse(BaseResponseModel):
     """Response model for health check endpoint."""
     status: str
     timestamp: datetime
     version: str
     environment: str = "development"  # Default to development if not specified
 
-class DeleteSessionResponse(BaseModel):
+class DeleteSessionResponse(BaseResponseModel):
     """Response model for session deletion."""
     status: str
     session_id: str
     message: str
 
-class ToolCallModel(BaseModel):
+class ToolCallModel(BaseResponseModel):
     """Model for a tool call."""
     tool_name: str
     args: Dict
     tool_call_id: str
 
-class ToolOutputModel(BaseModel):
+class ToolOutputModel(BaseResponseModel):
     """Model for a tool output."""
     tool_name: str
     tool_call_id: str
     content: Any
 
-class MessageModel(BaseModel):
+class MessageModel(BaseResponseModel):
     """Model for a single message in the conversation."""
     role: str
     content: str
@@ -47,17 +55,18 @@ class MessageModel(BaseModel):
     tool_calls: Optional[List[ToolCallModel]] = None
     tool_outputs: Optional[List[ToolOutputModel]] = None
 
-    class Config:
-        json_schema_extra = {"examples": [{"role": "assistant", "content": "Hello!"}]}
-        exclude_none = True  # Exclude None values from response
+    model_config = ConfigDict(
+        exclude_none=True,
+        json_schema_extra={"examples": [{"role": "assistant", "content": "Hello!"}]}
+    )
 
-class PaginationParams(BaseModel):
+class PaginationParams(BaseResponseModel):
     """Pagination parameters."""
     page: int = 1
     page_size: int = 50
     sort_desc: bool = True  # True for most recent first
 
-class SessionResponse(BaseModel):
+class SessionResponse(BaseResponseModel):
     """Response model for session retrieval."""
     session_id: str
     messages: List[MessageModel]

@@ -137,7 +137,7 @@ async def delete_session(session_id: str):
             detail=f"Failed to delete session: {str(e)}"
         )
 
-@app.get("/session/{session_id}", response_model=SessionResponse)
+@app.get("/session/{session_id}", response_model=SessionResponse, response_model_exclude_none=True)
 async def get_session(
     session_id: str,
     page: int = 1,
@@ -165,7 +165,7 @@ async def get_session(
         exists = message_history._store.session_exists(session_id)
         
         if not exists:
-            return SessionResponse(
+            session_response = SessionResponse(
                 session_id=session_id,
                 messages=[],
                 exists=False,
@@ -173,31 +173,36 @@ async def get_session(
                 current_page=1,
                 total_pages=0
             )
-        
-        # Get paginated messages
-        paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
-            page=page,
-            page_size=page_size,
-            sort_desc=sort_desc
-        )
-        
-        # Format messages for API response
-        formatted_messages = [
-            message for message in (
-                message_history.format_message_for_api(msg, hide_tools=hide_tools)
-                for msg in paginated_messages
+        else:
+            # Get paginated messages
+            paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
+                page=page,
+                page_size=page_size,
+                sort_desc=sort_desc
             )
-            if message is not None
-        ]
+            
+            # Format messages for API response
+            formatted_messages = [
+                message for message in (
+                    message_history.format_message_for_api(msg, hide_tools=hide_tools)
+                    for msg in paginated_messages
+                )
+                if message is not None
+            ]
+            
+            # Wrap each formatted message dict into a MessageModel to ensure Pydantic processing
+            clean_messages = [MessageModel(**msg) for msg in formatted_messages]
+            
+            session_response = SessionResponse(
+                session_id=session_id,
+                messages=clean_messages,
+                exists=True,
+                total_messages=total_messages,
+                current_page=current_page,
+                total_pages=total_pages
+            )
         
-        return SessionResponse(
-            session_id=session_id,
-            messages=formatted_messages,
-            exists=True,
-            total_messages=total_messages,
-            current_page=current_page,
-            total_pages=total_pages
-        )
+        return session_response
     except Exception as e:
         logger.error(f"Error retrieving session {session_id}: {str(e)}")
         raise HTTPException(
