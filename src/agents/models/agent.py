@@ -49,10 +49,13 @@ class AgentBaseResponse(BaseModel):
     tool_outputs: Optional[List[Any]] = None
 
     @classmethod
-    def from_agent_response(cls, message: str, history: MessageHistory, error: Optional[str] = None):
+    def from_agent_response(cls, message: str, history: MessageHistory, error: Optional[str] = None, 
+                          tool_calls: Optional[List[Any]] = None, tool_outputs: Optional[List[Any]] = None):
         history_model = HistoryModel.from_message_history(history)
         return cls(
             message=message,
             history=history_model,
-            error=error
+            error=error,
+            tool_calls=tool_calls,
+            tool_outputs=tool_outputs
         )

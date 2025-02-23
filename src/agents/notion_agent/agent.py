@@ -37,30 +37,42 @@ class NotionAgent:
             self.agent.tool(tool_func)
 
     async def process_message(self, user_message: str) -> AgentBaseResponse:
-        # Add the user message
         self.message_history.add(user_message)
         
-        # Run the agent and stream response
-        async with self.agent.run_stream(
-            user_message, 
-            deps=self.deps, 
+        result = await self.agent.run(
+            user_message,
+            deps=self.deps,
             message_history=self.message_history.messages
-        ) as result:
-            # Get the last streamed response
-            response_text = ""
-            last_text = ""
-            async for text in result.stream():
-                # Only add new text that hasn't been seen
-                if text not in last_text:
-                    response_text = text
-                last_text = text
-            
-            # Add the assistant response
-            self.message_history.add_response(response_text)
-            
-            return AgentBaseResponse.from_agent_response(
-                message=response_text,
-                history=self.message_history,
-                error=None
-            )
+        )
         
+        # Get the final response text
+        response_text = result.data
+        
+        # Get tool calls and outputs from the result
+        tool_calls = []
+        tool_outputs = []
+
+        logging.info(result)
+        # Extract tool information from all nodes in the result
+        if hasattr(result, 'nodes'):
+            for node in result.nodes:
+                if hasattr(node, 'tool_calls'):
+                    tool_calls.extend(node.tool_calls)
+                if hasattr(node, 'tool_outputs'):
+                    tool_outputs.extend(node.tool_outputs)
+                # Also check model responses within nodes
+                if hasattr(node, 'model_response'):
+                    if hasattr(node.model_response, 'tool_calls'):
+                        tool_calls.extend(node.model_response.tool_calls)
+                    if hasattr(node.model_response, 'tool_outputs'):
+                        tool_outputs.extend(node.model_response.tool_outputs)
+        
+        self.message_history.add_response(response_text)
+        
+        return AgentBaseResponse.from_agent_response(
+            message=response_text,
+            history=self.message_history,
+            error=None,
+            tool_calls=tool_calls,
+            tool_outputs=tool_outputs
+        )
