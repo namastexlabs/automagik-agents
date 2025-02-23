@@ -90,6 +90,12 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             request.message_input,
             session_id=request.session_id
         )
+        
+        # Log the tool call and output counts
+        tool_call_count = len(response.history.get('messages', [])[-1].get('tool_calls', []))
+        tool_output_count = len(response.history.get('messages', [])[-1].get('tool_outputs', []))
+        logging.info(f"Agent run completed. Tool calls: {tool_call_count}, Tool outputs: {tool_output_count}")
+        
         return response
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -62,7 +62,7 @@ class BaseAgent:
         response_text = result.data
         logging.info(f"Response text: {response_text[:100]}...")
 
-        # Extract tool calls and outputs from result
+        # Extract tool calls and outputs from the current run only
         tool_calls = []
         tool_outputs = []
         for message in result._all_messages:
