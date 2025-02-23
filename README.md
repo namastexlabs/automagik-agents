@@ -1,156 +1,129 @@
 # Automagik Agents
 
-A collection of AI agents powered by Pydantic AI and exposed through FastAPI endpoints. This project provides a flexible framework for deploying and interacting with different types of AI agents through a RESTful API.
+A toolkit for quickly building and deploying AI agents using the Pydantic AI framework. Create custom agents from templates, expose them through a RESTful API, and manage conversations with built-in memory and tool support. Perfect for teams looking to rapidly prototype and deploy AI agents with standardized patterns and best practices.
 
-## Features
+## 🌟 Features
 
-- **Multiple Agent Support**: 
-  - Simple Agent: Handles basic queries and time-related operations
-  - Notion Agent: Manages Notion databases and workspaces
-- **FastAPI Integration**: RESTful API endpoints for agent interaction
-- **Health Monitoring**: Built-in health check endpoint with version tracking
-- **Message History**: Maintains conversation context across interactions
-- **Structured Responses**: Standardized response format using Pydantic models
-- **Security**: API key authentication for protected endpoints
-- **CORS Support**: Configurable CORS middleware for cross-origin requests
-- **CLI Tools**: Command-line interface for creating new agents and managing the API server
+- **Extensible Agent System**
+  - Template-based agent creation
+  - Built-in templates: Simple Agent and Notion Agent
+  - Easy-to-use CLI for creating new agents
+  - Automatic tool registration and management
 
-## Technical Architecture
+- **Powerful API Integration**
+  - FastAPI-based RESTful endpoints
+  - Session management with conversation history
+  - Structured request/response models
+  - Built-in authentication and CORS support
+  - Health monitoring and version tracking
 
-### Core Components
+- **Advanced Memory System**
+  - Persistent conversation history
+  - Session-based memory management
+  - Tool call and output tracking
+  - Structured message storage
 
-1. **FastAPI Application**
-   - Health check endpoint (`/health`)
-   - Agent endpoints (`/agent/{agent_type}/run`)
-   - Standardized request/response models
+- **Built-in Templates**
+  - **Simple Agent**: Basic chat functionality with datetime tools
+  - **Notion Agent**: Full Notion integration with database management
 
-2. **Agent Framework**
-   - Base agent implementation with common functionality
-   - Specialized agents (Simple, Notion) with specific capabilities
-   - Message history management
-   - Tool registration system
+## 🚀 Quick Start
 
-3. **Response Models**
-   - `AgentBaseResponse`: Standard response format
-   - `HistoryModel`: Message history serialization
-   - `MessageModel`: Individual message representation
-
-### Dependencies
-
-- `fastapi`: Web framework for building APIs
-- `pydantic-ai`: Core AI agent framework
-- `notion-client`: Official Notion API client (for Notion agent)
-- `uvicorn`: ASGI server for running the API
-- `typer`: CLI interface builder
-
-### CLI Commands
-
-The package provides a command-line interface with the following commands:
-
-1. **Create a New Agent**
+1. **Installation**
    ```bash
-   automagik-agents create-agent --name your_agent_name
+   pip install automagik-agents
    ```
-   This command creates a new agent by cloning the simple agent template and setting up the necessary files.
 
-2. **Start the API Server**
+2. **Environment Setup**
    ```bash
-   automagik-agents api start [OPTIONS]
-   ```
-   Options:
-   - `--host`, `-h`: Host to bind the server to (overrides AM_HOST from .env)
-   - `--port`, `-p`: Port to bind the server to (overrides AM_PORT from .env)
-   - `--reload`: Enable auto-reload on code changes
-   - `--workers`, `-w`: Number of worker processes
-
-## Usage
-
-1. Set up environment variables:
-   ```bash
-   # Copy the example environment file
+   # Copy example environment file
    cp .env-example .env
+
+   # Configure required variables
+   AM_API_KEY=your_api_key_here
+   AM_HOST=0.0.0.0
+   AM_PORT=8000
+   OPENAI_API_KEY=your_openai_key_here
+   OPENAI_MODEL=openai:gpt-4o-mini  # or your preferred model
    
-   # Edit .env and set your values
-   AM_API_KEY=your_api_key_here  # Required for authentication
-   NOTION_TOKEN=your_notion_integration_token  # Only needed for Notion agent
-   AM_HOST=0.0.0.0  # Host to bind the server to
-   AM_PORT=8000  # Port to bind the server to
+   # For Notion agent (optional)
+   NOTION_TOKEN=your_notion_token
    ```
 
-2. Install dependencies:
+3. **Create a Custom Agent**
    ```bash
-   uv venv
-   source .venv/bin/activate ## or .venv\Scripts\activate if on Windows
-   uv sync
+   # Create from simple template
+   automagik-agents create-agent -n my_agent -t simple_agent
+
+   # Create from Notion template
+   automagik-agents create-agent -n my_notion_agent -t notion_agent
    ```
 
-3. Create a new agent (optional):
+4. **Start the API Server**
    ```bash
-   automagik-agents create-agent --name my_custom_agent
+   automagik-agents api start --reload
    ```
 
-4. Start the API server:
-   ```bash
-   # Start with default settings from .env
-   automagik-agents api start
+## 💡 Usage Examples
 
-   # Or start with custom settings
-   automagik-agents api start --host 127.0.0.1 --port 8080 --reload
-   ```
+### API Endpoints
 
-5. Interact with the agents:
-
-   Health Check (no authentication required):
+1. **Health Check**
    ```bash
    curl http://localhost:8000/health
    ```
 
-   Simple Agent (requires API key):
+2. **Run an Agent**
    ```bash
-   curl -X POST http://localhost:8000/agent/simple/run \
+   # Simple agent
+   curl -X POST http://localhost:8000/agent/simple_agent/run \
+     -H "X-API-Key: your_api_key" \
      -H "Content-Type: application/json" \
-     -H "X-API-Key: your_api_key_here" \
-     -d '{"message_input": "What time is it?", "context": {}}'
+     -d '{
+       "message_input": "What time is it?",
+       "session_id": "optional_session_id"
+     }'
+
+   # Notion agent
+   curl -X POST http://localhost:8000/agent/notion_agent/run \
+     -H "X-API-Key: your_api_key" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "message_input": "List my databases",
+       "session_id": "optional_session_id"
+     }'
    ```
 
-   Notion Agent (requires API key):
+3. **Session Management**
    ```bash
-   curl -X POST http://localhost:8000/agent/notion/run \
-     -H "Content-Type: application/json" \
-     -H "X-API-Key: your_api_key_here" \
-     -d '{"message_input": "List my databases", "context": {}}'
+   # Get session history
+   curl http://localhost:8000/session/your_session_id \
+     -H "X-API-Key: your_api_key"
+
+   # Delete session
+   curl -X DELETE http://localhost:8000/session/your_session_id \
+     -H "X-API-Key: your_api_key"
    ```
 
-## Development
+### Creating Custom Agents
 
-### Agent Implementation
+1. **Create Agent Template**
+   ```bash
+   automagik-agents create-agent -n custom -t simple_agent
+   ```
 
-Each agent follows a standard structure:
-- Initialization with configuration
-- Tool registration
-- Message processing
-- Response generation
+2. **Customize Agent Files**
+   - Edit `src/agents/custom_agent/prompts.py` for system prompts
+   - Modify `src/agents/custom_agent/agent.py` for behavior
+   - Update `src/agents/custom_agent/__init__.py` for configuration
 
-### Response Processing
+3. **Register Tools**
+   ```python
+   def register_tools(self):
+       """Register custom tools with the agent."""
+       self.agent.tool(your_custom_tool)
+   ```
 
-All agent responses are processed through:
-1. Message history management
-2. Response serialization
-3. Error handling
-4. Tool output collection
+## 📄 License
 
-### Security
-
-The API uses API key authentication for protected endpoints:
-- API key must be provided in the `X-API-Key` header
-- Key is configured via `AM_API_KEY` environment variable
-- Health check endpoint remains public
-- Invalid or missing API keys return 401 Unauthorized
-
-## Future Enhancements
-
-- Additional agent types
-- Enhanced tool management system
-- Authentication and rate limiting
-- Response caching
-- Batch operation support
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
