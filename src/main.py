@@ -57,10 +57,11 @@ async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         timestamp=datetime.utcnow(),
-        version=SERVICE_INFO["version"]
+        version=SERVICE_INFO["version"],
+        environment=settings.AM_ENV
     )
 
-@app.get("/agents", response_model=List[AgentInfo])
+@app.get("/agent/list", response_model=List[AgentInfo])
 async def list_agents():
     """List all available agents."""
     return [
@@ -153,18 +154,38 @@ async def get_session(session_id: str):
         messages = message_store.get_messages(session_id)
         
         # Convert messages to response format
-        formatted_messages = [
-            MessageModel(
-                role="system" if any(isinstance(p, SystemPromptPart) for p in msg.parts)
-                else "user" if any(isinstance(p, UserPromptPart) for p in msg.parts)
-                else "assistant",
-                content=msg.parts[0].content if msg.parts else "",
-                assistant_name=msg.parts[0].assistant_name if msg.parts else None,
-                tool_calls=[part.tool_call for part in msg.parts if isinstance(part, ToolCallPart)] if msg.parts else None,
-                tool_outputs=[part.tool_output for part in msg.parts if isinstance(part, ToolOutputPart)] if msg.parts else None
-            )
-            for msg in messages
-        ]
+        formatted_messages = []
+        for msg in messages:
+            if not msg.parts:
+                continue
+
+            # Determine message role
+            role = "system" if any(isinstance(p, SystemPromptPart) for p in msg.parts) else \
+                   "user" if any(isinstance(p, UserPromptPart) for p in msg.parts) else \
+                   "assistant"
+
+            # Get assistant name only for assistant messages
+            assistant_name = None
+            if role == "assistant":
+                assistant_name = getattr(msg.parts[0], "assistant_name", None)
+
+            # Get tool calls and outputs only if they exist
+            tool_calls = [part.tool_call.dict() for part in msg.parts if isinstance(part, ToolCallPart)]
+            tool_outputs = [part.tool_output.dict() for part in msg.parts if isinstance(part, ToolOutputPart)]
+
+            # Create message model with only non-empty fields
+            message_data = {
+                "role": role,
+                "content": msg.parts[0].content
+            }
+            if assistant_name:
+                message_data["assistant_name"] = assistant_name
+            if tool_calls:
+                message_data["tool_calls"] = tool_calls
+            if tool_outputs:
+                message_data["tool_outputs"] = tool_outputs
+
+            formatted_messages.append(MessageModel(**message_data))
         
         logger.info(f"Retrieved session {session_id} with {len(formatted_messages)} messages")
         
