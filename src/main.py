@@ -101,4 +101,9 @@ async def run_agent(agent_name: str, request: AgentRunRequest, api_key: str = De
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.AM_HOST, port=settings.AM_PORT)
+    uvicorn.run(
+        "src.main:app",
+        host=settings.AM_HOST,
+        port=int(settings.AM_PORT),
+        reload=True
+    )
