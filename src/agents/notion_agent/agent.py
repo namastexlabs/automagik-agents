@@ -1,4 +1,3 @@
-import logging
 from typing import Dict
 from pydantic_ai import Agent
 

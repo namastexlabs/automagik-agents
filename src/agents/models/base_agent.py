@@ -2,7 +2,6 @@ import logging
 from typing import Dict, Optional
 from pydantic import BaseModel
 from pydantic_ai import Agent
-from pydantic_ai.result import RunResult
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
 import time
