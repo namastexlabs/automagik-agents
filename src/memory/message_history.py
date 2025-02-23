@@ -1,6 +1,8 @@
 """Message history management for Sofia."""
 
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any, Union
+import json
+from pydantic import BaseModel, field_validator
 from pydantic_ai.messages import (
     ModelMessage, 
     UserPromptPart, 
@@ -18,13 +20,39 @@ class TextPart(BaseTextPart):
         self.assistant_name = assistant_name
         self.part_kind = "text"
 
-class ToolCallPart:
-    def __init__(self, tool_call: Dict):
+class ToolCall(BaseModel):
+    """Model for a tool call."""
+    tool_name: str
+    args: Union[str, Dict]
+    tool_call_id: str
+
+    @field_validator('args')
+    @classmethod
+    def parse_args(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return {}
+        return v
+
+class ToolOutput(BaseModel):
+    """Model for a tool output."""
+    tool_name: str
+    tool_call_id: str
+    content: Any
+
+class ToolCallPart(BaseTextPart):
+    """Part representing a tool call in a message."""
+    def __init__(self, tool_call: ToolCall):
+        super().__init__(content=tool_call.tool_name)
         self.tool_call = tool_call
         self.part_kind = "tool-call"
 
-class ToolOutputPart:
-    def __init__(self, tool_output: Dict):
+class ToolOutputPart(BaseTextPart):
+    """Part representing a tool output in a message."""
+    def __init__(self, tool_output: ToolOutput):
+        super().__init__(content=str(tool_output.content))
         self.tool_output = tool_output
         self.part_kind = "tool-output"
 
@@ -102,10 +130,10 @@ class MessageHistory:
         # Add tool calls and outputs only if they exist and are not empty
         if tool_calls:
             for tool_call in tool_calls:
-                parts.append(ToolCallPart(tool_call))
+                parts.append(ToolCallPart(tool_call=ToolCall(**tool_call)))
         if tool_outputs:
             for tool_output in tool_outputs:
-                parts.append(ToolOutputPart(tool_output))
+                parts.append(ToolOutputPart(tool_output=ToolOutput(**tool_output)))
         
         message = ModelResponse(parts=parts)
         self._store.add_message(self.session_id, message)
@@ -147,10 +175,10 @@ class MessageHistory:
                         "assistant_name": getattr(msg.parts[0], "assistant_name", None)
                     } if any(isinstance(p, TextPart) for p in msg.parts) and not any(isinstance(p, (SystemPromptPart, UserPromptPart)) for p in msg.parts) else {}),
                     **({
-                        "tool_calls": [p.tool_call for p in msg.parts if isinstance(p, ToolCallPart)]
+                        "tool_calls": [p.tool_call.dict() for p in msg.parts if isinstance(p, ToolCallPart)]
                     } if any(isinstance(p, ToolCallPart) for p in msg.parts) else {}),
                     **({
-                        "tool_outputs": [p.tool_output for p in msg.parts if isinstance(p, ToolOutputPart)]
+                        "tool_outputs": [p.tool_output.dict() for p in msg.parts if isinstance(p, ToolOutputPart)]
                     } if any(isinstance(p, ToolOutputPart) for p in msg.parts) else {})
                 }
                 for msg in self.messages

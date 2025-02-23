@@ -72,15 +72,15 @@ class BaseAgent:
                     if hasattr(part, 'part_kind'):
                         if part.part_kind == 'tool-call':
                             tool_calls.append({
-                                'tool_name': part.tool_name,
-                                'args': part.args,
-                                'tool_call_id': part.tool_call_id
+                                'tool_name': getattr(part, 'tool_name', ''),
+                                'args': getattr(part, 'args', {}),
+                                'tool_call_id': getattr(part, 'tool_call_id', '')
                             })
                         elif part.part_kind == 'tool-return':
                             tool_outputs.append({
-                                'tool_name': part.tool_name,
-                                'tool_call_id': part.tool_call_id,
-                                'content': part.content
+                                'tool_name': getattr(part, 'tool_name', ''),
+                                'tool_call_id': getattr(part, 'tool_call_id', ''),
+                                'content': getattr(part, 'content', '')
                             })
 
         logging.info(f"Captured {len(tool_calls)} tool calls and {len(tool_outputs)} tool outputs")

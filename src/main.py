@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from pydantic_ai.messages import SystemPromptPart, UserPromptPart
 
 from src.agents.simple_agent.agent import SimpleAgent
@@ -14,6 +13,14 @@ from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
 from src.auth import APIKeyMiddleware
 from src.memory.message_history import MessageHistory, ToolCallPart, ToolOutputPart
+from src.api.models import (
+    AgentRunRequest,
+    AgentInfo,
+    HealthResponse,
+    DeleteSessionResponse,
+    MessageModel,
+    SessionResponse
+)
 
 # Configure logging
 configure_logging()
@@ -38,38 +45,6 @@ app.add_middleware(
 
 # Add authentication middleware
 app.add_middleware(APIKeyMiddleware)
-
-class AgentRunRequest(BaseModel):
-    message_input: str
-    context: dict = {}
-    session_id: Optional[str] = None
-
-class AgentInfo(BaseModel):
-    name: str
-    type: str
-
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: datetime
-    version: str
-    environment: str
-
-class DeleteSessionResponse(BaseModel):
-    status: str
-    session_id: str
-    message: str
-
-class MessageModel(BaseModel):
-    role: str
-    content: str
-    assistant_name: Optional[str] = None
-    tool_calls: Optional[List[Dict]] = None
-    tool_outputs: Optional[List[Dict]] = None
-
-class SessionResponse(BaseModel):
-    session_id: str
-    messages: List[MessageModel]
-    exists: bool
 
 @app.get("/")
 async def root():
