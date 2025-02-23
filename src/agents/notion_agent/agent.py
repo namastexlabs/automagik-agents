@@ -15,6 +15,9 @@ class NotionAgent(BaseAgent):
     def __init__(self, config: Dict[str, str]):
         super().__init__(config, NOTION_AGENT_PROMPT)
 
+    def get_assistant_name(self) -> str:
+        return "Notion Agent"
+
     def get_deps_type(self):
         return Deps
 

@@ -16,7 +16,7 @@ from src.config import settings, load_settings, Settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
 from src.auth import verify_api_key, API_KEY_NAME, api_key_header
-from src.memory.message_history import MessageHistory
+from src.memory.message_history import MessageHistory, ToolCallPart, ToolOutputPart
 
 # Configure logging
 configure_logging()
@@ -62,6 +62,9 @@ class DeleteSessionResponse(BaseModel):
 class MessageModel(BaseModel):
     role: str
     content: str
+    assistant_name: Optional[str] = None
+    tool_calls: Optional[List[Dict]] = None
+    tool_outputs: Optional[List[Dict]] = None
 
 class SessionResponse(BaseModel):
     session_id: str
@@ -182,7 +185,10 @@ async def get_session(session_id: str, api_key: str = Depends(verify_api_key)):
                 role="system" if any(isinstance(p, SystemPromptPart) for p in msg.parts)
                 else "user" if any(isinstance(p, UserPromptPart) for p in msg.parts)
                 else "assistant",
-                content=msg.parts[0].content if msg.parts else ""
+                content=msg.parts[0].content if msg.parts else "",
+                assistant_name=msg.parts[0].assistant_name if msg.parts else None,
+                tool_calls=[part.tool_call for part in msg.parts if isinstance(part, ToolCallPart)] if msg.parts else None,
+                tool_outputs=[part.tool_output for part in msg.parts if isinstance(part, ToolOutputPart)] if msg.parts else None
             )
             for msg in messages
         ]

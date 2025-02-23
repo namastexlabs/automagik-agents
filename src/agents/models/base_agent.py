@@ -33,10 +33,15 @@ class BaseAgent:
         )
         self.deps = self.get_deps_type()()
         self.system_prompt = system_prompt
+        self.assistant_name = self.get_assistant_name()
         self.register_tools()
 
     def get_deps_type(self):
         return Deps
+
+    def get_assistant_name(self) -> str:
+        """Get the name of the assistant. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement get_assistant_name method")
 
     def register_tools(self):
         raise NotImplementedError("Subclasses must implement register_tools method")
@@ -139,20 +144,26 @@ class BaseAgent:
         logging.info(f"Response text: {response_text[:100]}...")
 
         tool_calls, tool_outputs = self.extract_tool_calls_and_outputs(result)
+        tool_calls_dict = [tc.__dict__ for tc in tool_calls]
+        tool_outputs_dict = [to.__dict__ for to in tool_outputs]
 
         logging.info(f"Captured {len(tool_calls)} tool calls and {len(tool_outputs)} tool outputs")
         
-        message_history.add_response(response_text)
+        # Add response with tool information
+        message_history.add_response(
+            content=response_text,
+            assistant_name=self.assistant_name,
+            tool_calls=tool_calls_dict,
+            tool_outputs=tool_outputs_dict
+        )
         
         response = AgentBaseResponse.from_agent_response(
             message=response_text,
             history=message_history,
             error=None,
-            tool_calls=[tc.__dict__ for tc in tool_calls],
-            tool_outputs=[to.__dict__ for to in tool_outputs],
             session_id=session_id
         )
         
-        logging.info(f"Returning AgentBaseResponse with {len(response.tool_calls)} tool calls and {len(response.tool_outputs)} tool outputs")
+        logging.info(f"Returning AgentBaseResponse for session {session_id}")
         
         return response 
