@@ -16,6 +16,3 @@ class SimpleAgent(BaseAgent):
         from src.tools.datetime_tools import get_current_date, get_current_time
         self.agent.tool(get_current_date)
         self.agent.tool(get_current_time)
-
-# Remove the process_message method as it's now handled by BaseAgent
-        
