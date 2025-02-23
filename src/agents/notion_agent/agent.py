@@ -1,45 +1,22 @@
 import logging
-from dataclasses import dataclass
 from typing import Dict, List, Any, Tuple, Optional
 
-from pydantic_ai import Agent
-from pydantic_ai.result import RunResult
-from src.agents.models.agent import AgentBaseResponse
+from src.agents.models.base_agent import BaseAgent, Deps, ToolCall, ToolOutput
 from src.agents.notion_agent.prompts import NOTION_AGENT_PROMPT
-from src.memory.message_history import MessageHistory
 from src.tools.notion_tools import NotionTools
+from src.agents.models.agent import AgentBaseResponse
+from pydantic_ai.result import RunResult
 
 class NotionAgentError(Exception):
     """Custom exception for NotionAgent errors."""
     pass
 
-@dataclass
-class Deps:
-    # Add any dependencies your agent might need
-    pass
-
-@dataclass
-class ToolCall:
-    tool_name: str
-    args: str
-    tool_call_id: str
-
-@dataclass
-class ToolOutput:
-    tool_name: str
-    tool_call_id: str
-    content: Any
-
-class NotionAgent:
+class NotionAgent(BaseAgent):
     def __init__(self, config: Dict[str, str]):
-        self.agent = Agent(
-            'openai:gpt-4o-mini',
-            system_prompt=NOTION_AGENT_PROMPT,
-            deps_type=Deps
-        )
-        self.deps = Deps()
-        self.message_history = MessageHistory(system_prompt=NOTION_AGENT_PROMPT)
-        self.register_tools()
+        super().__init__(config, NOTION_AGENT_PROMPT)
+
+    def get_deps_type(self):
+        return Deps
 
     def register_tools(self):
         """Register tools with the agent."""
@@ -57,41 +34,6 @@ class NotionAgent:
     def format_tool_info(info: Dict[str, Any]) -> str:
         """Format tool call or output information for logging."""
         return ", ".join(f"{k}: {v}" for k, v in info.items())
-
-    def extract_tool_calls_and_outputs(self, result: RunResult) -> Tuple[List[ToolCall], List[ToolOutput]]:
-        tool_calls: List[ToolCall] = []
-        tool_outputs: List[ToolOutput] = []
-        current_tool_call: Optional[ToolCall] = None
-
-        for message in result._all_messages:
-            if hasattr(message, 'parts'):
-                for part in message.parts:
-                    if hasattr(part, 'part_kind'):
-                        if part.part_kind == 'tool-call':
-                            current_tool_call = ToolCall(
-                                tool_name=part.tool_name,
-                                args=part.args,
-                                tool_call_id=part.tool_call_id
-                            )
-                            tool_calls.append(current_tool_call)
-                            logging.info(f"Tool call: {current_tool_call}")
-                        elif part.part_kind == 'tool-return':
-                            if current_tool_call:
-                                tool_output = ToolOutput(
-                                    tool_name=current_tool_call.tool_name,
-                                    tool_call_id=current_tool_call.tool_call_id,
-                                    content=part.content
-                                )
-                                tool_outputs.append(tool_output)
-                                logging.info(f"Tool output: {tool_output}")
-                                current_tool_call = None
-                            else:
-                                logging.warning("Received tool-return without a preceding tool-call")
-
-        if current_tool_call:
-            logging.warning(f"Unmatched tool call: {current_tool_call}")
-
-        return tool_calls, tool_outputs
 
     async def process_message(self, user_message: str) -> AgentBaseResponse:
         self.message_history.add(user_message)

@@ -1,19 +1,20 @@
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Type, List
+from typing import Dict, Type, List, Optional
 
 import logfire
 from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from src.agents.models.agent import AgentBaseResponse
 from src.agents.simple_agent.agent import SimpleAgent
 from src.agents.notion_agent.agent import NotionAgent
-from src.config import settings
+from src.config import settings, load_settings, Settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
+from src.auth import verify_api_key, API_KEY_NAME, api_key_header
 
 # Configure logging
 configure_logging()
@@ -35,18 +36,6 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
-
-# API Key authentication
-API_KEY_NAME = "X-API-Key"
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
-
-async def verify_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != settings.AM_API_KEY:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API Key"
-        )
-    return api_key
 
 class AgentRunRequest(BaseModel):
     message_input: str
