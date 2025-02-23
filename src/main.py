@@ -1,21 +1,18 @@
 import logging
-import os
 from datetime import datetime
-from typing import Dict, Type, List, Optional
+from typing import Dict, List, Optional
 
-import logfire
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pydantic_ai.messages import SystemPromptPart, UserPromptPart
 
-from src.agents.models.agent import AgentBaseResponse
 from src.agents.simple_agent.agent import SimpleAgent
 from src.agents.notion_agent.agent import NotionAgent
-from src.config import settings, load_settings, Settings
+from src.config import settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
-from src.auth import verify_api_key, API_KEY_NAME, api_key_header
+from src.auth import APIKeyMiddleware
 from src.memory.message_history import MessageHistory, ToolCallPart, ToolOutputPart
 
 # Configure logging
@@ -38,6 +35,9 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Add authentication middleware
+app.add_middleware(APIKeyMiddleware)
 
 class AgentRunRequest(BaseModel):
     message_input: str
@@ -95,7 +95,7 @@ async def list_agents():
     ]
 
 @app.post("/agent/{agent_name}/run")
-async def run_agent(agent_name: str, request: AgentRunRequest, api_key: str = Depends(verify_api_key)):
+async def run_agent(agent_name: str, request: AgentRunRequest):
     if agent_name not in ["simple", "notion"]:
         raise HTTPException(status_code=404, detail=f"Agent {agent_name} not found")
     
@@ -108,11 +108,11 @@ async def run_agent(agent_name: str, request: AgentRunRequest, api_key: str = De
         )
         return response
     except Exception as e:
-        logger.error(f"Error running agent {agent_name}: {str(e)}")
+        logger.exception(f"Error running agent {agent_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/session/{session_id}")
-async def delete_session(session_id: str, api_key: str = Depends(verify_api_key)):
+async def delete_session(session_id: str):
     """Delete a session's message history.
     
     Args:
@@ -152,7 +152,7 @@ async def delete_session(session_id: str, api_key: str = Depends(verify_api_key)
         )
 
 @app.get("/session/{session_id}", response_model=SessionResponse)
-async def get_session(session_id: str, api_key: str = Depends(verify_api_key)):
+async def get_session(session_id: str):
     """Get a session's message history.
     
     Args:
