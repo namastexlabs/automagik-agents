@@ -10,10 +10,15 @@ class NotionAgent(BaseAgent):
     """Notion-specific agent implementation."""
     
     def __init__(self, config: Dict[str, str]):
+        """Initialize the Notion agent with configuration."""
         super().__init__(config, NOTION_AGENT_PROMPT)
+        
+        # Ensure Notion token is provided
+        if 'notion_token' not in config:
+            raise ValueError("Notion token is required for NotionAgent")
 
     def initialize_agent(self) -> Agent:
-        """Initialize the Notion agent with custom configuration."""
+        """Initialize the Notion agent with configuration."""
         return Agent(
             model=self.config.model,
             system_prompt=self.system_prompt,

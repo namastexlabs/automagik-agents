@@ -6,8 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic_ai.messages import SystemPromptPart, UserPromptPart
 
-from src.agents.simple_agent.agent import SimpleAgent
-from src.agents.notion_agent.agent import NotionAgent
+from src.agents.models.agent_factory import AgentFactory
 from src.config import settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
@@ -54,34 +53,33 @@ async def root():
     }
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         timestamp=datetime.utcnow(),
-        version=SERVICE_INFO["version"],
-        environment=settings.AM_ENV
+        version=SERVICE_INFO["version"]
     )
 
 @app.get("/agents", response_model=List[AgentInfo])
 async def list_agents():
+    """List all available agents."""
     return [
-        AgentInfo(name=name, type=agent_class.__name__)
-        for name, agent_class in {"simple": SimpleAgent, "notion": NotionAgent}.items()
+        AgentInfo(name=name, type=AgentFactory._agents[name].__name__)
+        for name in AgentFactory.list_available_agents()
     ]
 
 @app.post("/agent/{agent_name}/run")
 async def run_agent(agent_name: str, request: AgentRunRequest):
-    if agent_name not in ["simple", "notion"]:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_name} not found")
-    
+    """Run an agent with the given name."""
     try:
-        agent_class = {"simple": SimpleAgent, "notion": NotionAgent}[agent_name]
-        agent = agent_class({})
+        agent = AgentFactory.get_agent(agent_name)
         response = await agent.process_message(
             request.message_input,
             session_id=request.session_id
         )
         return response
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception(f"Error running agent {agent_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

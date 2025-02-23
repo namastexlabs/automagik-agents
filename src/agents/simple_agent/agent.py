@@ -8,10 +8,11 @@ class SimpleAgent(BaseAgent):
     """Simple agent implementation for basic chat functionality."""
     
     def __init__(self, config: Dict[str, str]):
+        """Initialize the simple agent with configuration."""
         super().__init__(config, SIMPLE_AGENT_PROMPT)
 
     def initialize_agent(self) -> Agent:
-        """Initialize the simple agent with default configuration."""
+        """Initialize the simple agent with configuration."""
         return Agent(
             model=self.config.model,
             system_prompt=self.system_prompt,
