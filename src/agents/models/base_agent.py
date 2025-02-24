@@ -19,7 +19,7 @@ class BaseAgent:
         self.config = AgentConfig(model=config.get("model", "openai:gpt-4o-mini"))
         self.system_prompt = system_prompt
         self.agent = self.initialize_agent()
-        self.register_tools()
+        self.post_init()
 
     def initialize_agent(self) -> Agent:
         """Initialize the agent. Must be implemented by subclasses."""
@@ -28,6 +28,10 @@ class BaseAgent:
     def register_tools(self):
         """Register tools with the agent. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement register_tools method")
+
+    def post_init(self):
+        """Post-initialization tasks. Can be overridden by subclasses."""
+        self.register_tools()
 
     async def process_message(self, user_message: str, session_id: Optional[str] = None) -> AgentBaseResponse:
         """Process a user message and return a response."""

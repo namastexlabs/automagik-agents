@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Notion (Optional)
     NOTION_TOKEN: Optional[str] = Field(None, description="Notion integration token")
 
+    # Discord
+    DISCORD_BOT_TOKEN: str = Field(..., description="Discord bot token for authentication")
+
     # Server
     AM_PORT: int = Field(8000, description="Port to run the server on")
     AM_HOST: str = Field("0.0.0.0", description="Host to bind the server to")
@@ -66,10 +69,13 @@ def load_settings() -> Settings:
         print(f"├── Log Level: {settings.AM_LOG_LEVEL}")
         print(f"├── Server: {settings.AM_HOST}:{settings.AM_PORT}")
         print(f"├── OpenAI API Key: {settings.OPENAI_API_KEY[:5]}...{settings.OPENAI_API_KEY[-5:]}")
-        print(f"└── API Key: {settings.AM_API_KEY[:5]}...{settings.AM_API_KEY[-5:]}")
+        print(f"├── API Key: {settings.AM_API_KEY[:5]}...{settings.AM_API_KEY[-5:]}")
+        print(f"├── Discord Bot Token: {settings.DISCORD_BOT_TOKEN[:5]}...{settings.DISCORD_BOT_TOKEN[-5:]}")
 
         if settings.NOTION_TOKEN:
-            print(f"    └── Notion Token: {settings.NOTION_TOKEN[:5]}...{settings.NOTION_TOKEN[-5:]}")
+            print(f"└── Notion Token: {settings.NOTION_TOKEN[:5]}...{settings.NOTION_TOKEN[-5:]}")
+        else:
+            print("└── Notion Token: Not set")
 
         return settings
     except Exception as e:

@@ -33,6 +33,7 @@ dependencies = [
     "typer>=0.9.0",
     "build>=1.2.2.post1",
     "twine>=6.1.0",
+    "discord-py>=2.4.0",
 ]
 
 [project.urls]
