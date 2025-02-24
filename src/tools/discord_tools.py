@@ -125,7 +125,13 @@ class DiscordTools:
                         "author": str(msg.author),
                         "timestamp": str(msg.created_at),
                         "attachments": [{"filename": a.filename, "url": a.url} for a in msg.attachments],
-                        "embeds": [e.to_dict() for e in msg.embeds]
+                        "embeds": [e.to_dict() for e in msg.embeds],
+                        "type": str(msg.type),
+                        "reference": {
+                            "message_id": str(msg.reference.message_id),
+                            "channel_id": str(msg.reference.channel_id),
+                            "guild_id": str(msg.reference.guild_id)
+                        } if msg.reference else None
                     }
                     for msg in messages
                 ]
