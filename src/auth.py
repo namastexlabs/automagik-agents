@@ -7,8 +7,17 @@ API_KEY_NAME = "x-api-key"
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for health check and root endpoints
-        if request.url.path in ["/health", "/"]:
+        # Skip auth for health check, root, and documentation endpoints
+        no_auth_paths = [
+            "/health", 
+            "/",
+            "/api/v1/docs",
+            "/api/v1/redoc",
+            "/api/v1/openapi.json"
+        ]
+        
+        # Check if this path should bypass authentication
+        if request.url.path in no_auth_paths:
             return await call_next(request)
 
         api_key = request.headers.get(API_KEY_NAME) or request.query_params.get(API_KEY_NAME)
