@@ -69,7 +69,7 @@ class BaseAgent:
         # Extract tool calls and outputs from the current run only
         tool_calls = []
         tool_outputs = []
-        for message in result._all_messages:
+        for message in result.all_messages():
             if hasattr(message, 'parts'):
                 for part in message.parts:
                     if hasattr(part, 'part_kind'):
