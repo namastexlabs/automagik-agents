@@ -1,6 +1,6 @@
 """Discord tools for Sofia."""
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 from pydantic_ai.tools import Tool
 from pydantic_ai import RunContext
 import discord
@@ -14,11 +14,33 @@ class DiscordError(Exception):
 class DiscordTools:
     def __init__(self, bot_token: str):
         self.bot_token = bot_token
-        self.client = discord.Client(intents=discord.Intents.default())
 
-    async def _run_coroutine(self, coroutine):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, asyncio.run, coroutine)
+    async def _with_temp_client(self, func: Callable[[discord.Client], Awaitable[Any]]) -> Any:
+        """
+        Helper function to create a temporary Discord client, perform an operation, then close the client.
+        """
+        client = discord.Client(intents=discord.Intents.default())
+        ready_event = asyncio.Event()
+
+        @client.event
+        async def on_ready():
+            ready_event.set()
+
+        await client.login(self.bot_token)
+        # Start the client in the background
+        client_task = asyncio.create_task(client.connect())
+        # Wait until the client signals it is ready
+        await ready_event.wait()
+        # Optional delay to ensure connection stability and guild population
+        await asyncio.sleep(2)
+        
+        try:
+            result = await func(client)
+        finally:
+            await client.close()
+            await client_task
+        
+        return result
 
     async def list_guilds_and_channels(self, ctx: RunContext[Dict]) -> Dict[str, Any]:
         """
@@ -29,20 +51,21 @@ class DiscordTools:
         Returns:
             Dict[str, Any]: Dictionary containing guilds and their channels
         """
-        async def _list_guilds_and_channels():
-            await self.client.login(self.bot_token)
+        async def _list(client: discord.Client):
             guilds_info = []
-            for guild in self.client.guilds:
-                channels_info = [{"name": channel.name, "id": str(channel.id), "type": str(channel.type)} for channel in guild.channels]
+            for guild in client.guilds:
+                channels_info = [
+                    {"name": channel.name, "id": str(channel.id), "type": str(channel.type)}
+                    for channel in guild.channels
+                ]
                 guilds_info.append({
                     "name": guild.name,
                     "id": str(guild.id),
                     "channels": channels_info
                 })
-            await self.client.close()
             return guilds_info
 
-        guilds_info = await self._run_coroutine(_list_guilds_and_channels())
+        guilds_info = await self._with_temp_client(_list)
         return {"success": True, "guilds": guilds_info}
 
     async def get_guild_info(self, ctx: RunContext[Dict], guild_id: str) -> Dict[str, Any]:
@@ -57,9 +80,8 @@ class DiscordTools:
         Returns:
             Dict[str, Any]: Information about the guild
         """
-        async def _get_guild_info():
-            await self.client.login(self.bot_token)
-            guild = self.client.get_guild(int(guild_id))
+        async def _get(client: discord.Client):
+            guild = client.get_guild(int(guild_id))
             if guild:
                 info = {
                     "name": guild.name,
@@ -69,10 +91,9 @@ class DiscordTools:
                 }
             else:
                 info = None
-            await self.client.close()
             return info
 
-        guild_info = await self._run_coroutine(_get_guild_info())
+        guild_info = await self._with_temp_client(_get)
         if guild_info:
             return {"success": True, "guild_info": guild_info}
         else:
@@ -91,11 +112,12 @@ class DiscordTools:
         Returns:
             Dict[str, Any]: Dictionary containing fetched messages
         """
-        async def _fetch_messages():
-            await self.client.login(self.bot_token)
-            channel = self.client.get_channel(int(channel_id))
+        async def _fetch(client: discord.Client):
+            channel = client.get_channel(int(channel_id))
             if isinstance(channel, discord.TextChannel):
-                messages = await channel.history(limit=limit).flatten()
+                messages = []
+                async for msg in channel.history(limit=limit):
+                    messages.append(msg)
                 message_data = [
                     {
                         "id": str(msg.id),
@@ -109,10 +131,9 @@ class DiscordTools:
                 ]
             else:
                 message_data = None
-            await self.client.close()
             return message_data
 
-        messages = await self._run_coroutine(_fetch_messages())
+        messages = await self._with_temp_client(_fetch)
         if messages is not None:
             return {"success": True, "messages": messages}
         else:
@@ -131,9 +152,8 @@ class DiscordTools:
         Returns:
             Dict[str, Any]: Information about the sent message
         """
-        async def _send_message():
-            await self.client.login(self.bot_token)
-            channel = self.client.get_channel(int(channel_id))
+        async def _send(client: discord.Client):
+            channel = client.get_channel(int(channel_id))
             if isinstance(channel, discord.TextChannel):
                 message = await channel.send(content)
                 result = {
@@ -144,10 +164,9 @@ class DiscordTools:
                 }
             else:
                 result = None
-            await self.client.close()
             return result
 
-        sent_message = await self._run_coroutine(_send_message())
+        sent_message = await self._with_temp_client(_send)
         if sent_message:
             return {"success": True, "message": sent_message}
         else:
