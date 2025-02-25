@@ -11,8 +11,12 @@ from src.api.models import (
     AgentInfo,
     DeleteSessionResponse,
     MessageModel,
-    SessionResponse
+    SessionResponse,
+    SessionListResponse,
+    SessionInfo
 )
+from src.memory.pg_message_store import PostgresMessageStore
+from src.utils.db import execute_query
 
 # Create API router for v1 endpoints
 router = APIRouter()
@@ -34,8 +38,31 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
     try:
         agent = AgentFactory.get_agent(agent_name)
         
-        # Get message history
-        message_history = MessageHistory(request.session_id) if request.session_id else None
+        # Check if session_id is provided
+        if not request.session_id:
+            # If no session_id is provided, generate a new one
+            from src.memory.pg_message_store import PostgresMessageStore
+            store = PostgresMessageStore()
+            # Generate a new session with an empty string (this will create a new session in the database)
+            new_session_id = store._ensure_session_exists("", request.user_id)
+            request.session_id = new_session_id
+            logger.info(f"Created new session with ID: {new_session_id}")
+        else:
+            # Check if the provided session exists, if not create it
+            from src.memory.pg_message_store import PostgresMessageStore
+            store = PostgresMessageStore()
+            if not store.session_exists(request.session_id):
+                # Create the session with the provided ID
+                store._ensure_session_exists(request.session_id, request.user_id)
+                logger.info(f"Created session with provided ID: {request.session_id}")
+            else:
+                logger.info(f"Using existing session: {request.session_id}")
+        
+        # Get message history with user_id
+        message_history = MessageHistory(request.session_id, user_id=request.user_id)
+        
+        # Link the agent to the session in the database
+        AgentFactory.link_agent_to_session(agent_name, request.session_id)
         
         if message_history and message_history.messages:
             # Get filtered messages up to the limit
@@ -45,15 +72,37 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             )
             message_history.update_messages(filtered_messages)
 
+        # Get the agent database ID if available
+        agent_id = getattr(agent, "db_id", None)
+        
+        # If agent_id is not set, try to get it from the database
+        if agent_id is None:
+            from src.agents.models.agent_db import get_agent_by_name
+            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
+            if db_agent:
+                agent_id = db_agent["id"]
+                # Save it back to the agent instance for future use
+                agent.db_id = agent_id
+                logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
+            else:
+                logging.warning(f"Could not find agent ID for agent {agent_name}")
+        
         response = await agent.process_message(
             request.message_input,
-            session_id=request.session_id
+            session_id=request.session_id,
+            agent_id=agent_id,  # Pass the agent ID to be stored with the messages
+            user_id=request.user_id  # Pass the user ID
         )
         
-        # Log the tool call and output counts
-        tool_call_count = len(response.history.get('messages', [])[-1].get('tool_calls', []))
-        tool_output_count = len(response.history.get('messages', [])[-1].get('tool_outputs', []))
-        logging.info(f"Agent run completed. Tool calls: {tool_call_count}, Tool outputs: {tool_output_count}")
+        # Log the tool call and output counts more safely
+        messages = response.history.get('messages', [])
+        if messages:  # Only try to access if there are messages
+            last_message = messages[-1]
+            tool_call_count = len(last_message.get('tool_calls', []))
+            tool_output_count = len(last_message.get('tool_outputs', []))
+            logging.info(f"Agent run completed. Tool calls: {tool_call_count}, Tool outputs: {tool_output_count}")
+        else:
+            logging.info("Agent run completed. No messages in history.")
         
         return response
     except ValueError as e:
@@ -83,8 +132,15 @@ async def delete_session(session_id: str):
                 detail=f"Session {session_id} not found"
             )
         
-        # Clear the session
+        # Clear the session messages
         message_store.clear_session(session_id)
+        
+        # Also delete the session from the sessions table
+        execute_query(
+            "DELETE FROM sessions WHERE id = %s",
+            (session_id,),
+            fetch=False
+        )
         
         logger.info(f"Successfully deleted session: {session_id}")
         
@@ -173,4 +229,51 @@ async def get_session(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve session: {str(e)}"
+        )
+
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    page: int = 1, 
+    page_size: int = 50, 
+    sort_desc: bool = True
+):
+    """List all sessions with pagination.
+    
+    Args:
+        page: Page number (1-based).
+        page_size: Number of sessions per page.
+        sort_desc: Sort by most recent first if True.
+        
+    Returns:
+        List of sessions with pagination info.
+    """
+    try:
+        # Get message store
+        message_store = PostgresMessageStore()
+        
+        # Get all sessions
+        result = message_store.get_all_sessions(
+            page=page,
+            page_size=page_size,
+            sort_desc=sort_desc
+        )
+        
+        # Convert to session info objects
+        sessions = [SessionInfo(**session) for session in result['sessions']]
+        
+        # Create response
+        response = SessionListResponse(
+            sessions=sessions,
+            total_count=result['total_count'],
+            page=result['page'],
+            page_size=result['page_size'],
+            total_pages=result['total_pages']
+        )
+        
+        return response
+    except Exception as e:
+        logger.error(f"Error listing sessions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list sessions: {str(e)}"
         ) 

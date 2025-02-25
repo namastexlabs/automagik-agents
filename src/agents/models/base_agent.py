@@ -16,7 +16,11 @@ class BaseAgent:
     
     def __init__(self, config: Dict[str, str], system_prompt: str):
         """Initialize base agent functionality."""
-        self.config = AgentConfig(model=config.get("model", "openai:gpt-4o-mini"))
+        # Store the original config dictionary
+        self.raw_config = config
+        # Create AgentConfig object using the model from config or default
+        model = config["model"] if "model" in config else "openai:gpt-4o-mini"
+        self.config = AgentConfig(model=model)
         self.system_prompt = system_prompt
         self.agent = self.initialize_agent()
         self.post_init()
@@ -33,17 +37,35 @@ class BaseAgent:
         """Post-initialization tasks. Can be overridden by subclasses."""
         self.register_tools()
 
-    async def process_message(self, user_message: str, session_id: Optional[str] = None) -> AgentBaseResponse:
-        """Process a user message and return a response."""
-        if session_id is None:
-            session_id = f"session_{int(time.time())}"
-            logging.info(f"Generated new session ID: {session_id}")
-        else:
-            logging.info(f"Using existing session ID: {session_id}")
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: str = "default_user") -> AgentBaseResponse:
+        """Process a user message and return a response.
+        
+        Args:
+            user_message: The message from the user
+            session_id: Optional session ID for message history
+            agent_id: Optional agent ID for database tracking
+            user_id: User ID for database association, defaults to "default_user"
             
-        message_history = MessageHistory(session_id)
-        message_history.add_system_prompt(self.system_prompt)
-        message_history.add(user_message)
+        Returns:
+            AgentBaseResponse containing the response and metadata
+        """
+        if not session_id:
+            # Using empty string is no longer allowed - we need a valid session ID
+            logging.error("Empty session_id provided, session must be created before calling process_message")
+            return AgentBaseResponse.from_agent_response(
+                message="Error: No valid session ID provided. A session must be created before processing messages.",
+                history=MessageHistory(""),
+                error="No valid session ID provided",
+                session_id=""
+            )
+            
+        logging.info(f"Using existing session ID: {session_id}")
+            
+        message_history = MessageHistory(session_id, user_id=user_id)
+        message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
+        
+        # Add agent_id to the user message metadata
+        user_message_obj = message_history.add(user_message, agent_id=agent_id)
         
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 
@@ -88,12 +110,17 @@ class BaseAgent:
 
         logging.info(f"Captured {len(tool_calls)} tool calls and {len(tool_outputs)} tool outputs")
         
+        # Add the response with assistant info and agent_id
         message_history.add_response(
             content=response_text,
             assistant_name=self.__class__.__name__,
             tool_calls=tool_calls,
-            tool_outputs=tool_outputs
+            tool_outputs=tool_outputs,
+            agent_id=agent_id
         )
+        
+        # Use the potentially updated session_id from message_history
+        session_id = message_history.session_id
         
         response = AgentBaseResponse.from_agent_response(
             message=response_text,

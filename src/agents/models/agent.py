@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Any, Dict
+import logging
 
 from src.memory.message_history import MessageHistory
 from pydantic_ai.messages import SystemPromptPart, UserPromptPart, ModelResponse, ModelRequest
@@ -70,9 +71,17 @@ class AgentBaseResponse(BaseModel):
         Returns:
             An AgentBaseResponse instance.
         """
+        # Create a safe history dict
+        try:
+            history_dict = history.to_dict()
+        except Exception as e:
+            # If history serialization fails, provide a minimal valid dict
+            logging.error(f"Error serializing history: {str(e)}")
+            history_dict = {"messages": []}
+            
         return cls(
             message=message,
-            history=history.to_dict(),
+            history=history_dict,
             error=error,
             session_id=session_id or history.session_id
         )

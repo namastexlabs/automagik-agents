@@ -13,6 +13,10 @@ from pydantic_ai.messages import (
 )
 from src.memory.message_store import MessageStore, CacheMessageStore
 from datetime import datetime
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
 
 class TextPart(BaseTextPart):
     """Custom TextPart that includes assistant name."""
@@ -77,76 +81,142 @@ class MessageHistory:
         """
         cls._store = store
     
-    def __init__(self, session_id: str, system_prompt: Optional[str] = None):
-        """Initialize message history.
+    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: str = "default_user"):
+        """Initialize a new message history for a session.
         
         Args:
-            session_id: Unique identifier for the conversation session.
-            system_prompt: Optional system prompt to initialize history with.
+            session_id: The unique session identifier.
+            system_prompt: Optional system prompt to set at initialization.
+            user_id: The user identifier to associate with this session.
         """
         self.session_id = session_id
+        self.user_id = user_id
+        
+        # Add system prompt if provided
         if system_prompt:
             self.add_system_prompt(system_prompt)
-
-    def add_system_prompt(self, content: str) -> ModelMessage:
-        """Add or update system prompt in history.
+    
+    def add_system_prompt(self, content: str, agent_id: Optional[str] = None) -> ModelMessage:
+        """Add or update the system prompt for this conversation.
         
         Args:
             content: The system prompt content.
+            agent_id: Optional agent ID associated with the message.
             
         Returns:
-            The created message object.
+            The created system prompt message.
         """
         message = ModelRequest(parts=[SystemPromptPart(content=content)])
-        self._store.update_system_prompt(self.session_id, content)
+        
+        # Add agent ID if provided
+        if agent_id:
+            message.agent_id = agent_id
+        
+        # Don't try to create a session if it doesn't exist - the API should handle this
+        if not self.session_id:
+            logger.warning("Empty session_id provided to add_system_prompt, this may cause issues")
+        
+        self._store.update_system_prompt(self.session_id, content, self.user_id, agent_id=agent_id)
         return message
-
-    def add(self, content: str) -> ModelMessage:
-        """Add a user message to history.
+    
+    def add(self, content: str, agent_id: Optional[str] = None) -> ModelMessage:
+        """Add a user message to the history.
         
         Args:
-            content: The message content from the user.
+            content: The message content.
+            agent_id: Optional agent ID associated with the message.
             
         Returns:
-            The created message object.
+            The created user message.
         """
         message = ModelRequest(parts=[UserPromptPart(content=content)])
-        self._store.add_message(self.session_id, message)
+        
+        # Add agent ID if provided
+        if agent_id:
+            message.agent_id = agent_id
+        
+        # Don't try to create a session if it doesn't exist - the API should handle this
+        if not self.session_id:
+            logger.warning("Empty session_id provided to add, this may cause issues")
+            
+        self._store.add_message(self.session_id, message, self.user_id)
         return message
-
-    def add_response(self, content: str, assistant_name: str = None, tool_calls: List[Dict] = None, tool_outputs: List[Dict] = None) -> ModelMessage:
-        """Add an assistant response.
+    
+    def add_response(
+        self, 
+        content: str, 
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        tool_outputs: Optional[List[Dict[str, Any]]] = None,
+        assistant_name: Optional[str] = None,
+        agent_id: Optional[str] = None
+    ) -> None:
+        """Add a response to the message history.
         
         Args:
-            content: The response content from the assistant.
-            assistant_name: The name of the assistant providing the response.
-            tool_calls: Optional list of tool calls made during processing.
-            tool_outputs: Optional list of outputs from tool calls.
+            content: The text content of the response.
+            tool_calls: Optional list of tool calls to include in the response.
+            tool_outputs: Optional list of tool outputs to include in the response.
+            assistant_name: Optional name of the assistant.
+            agent_id: Optional agent ID associated with the message.
             
         Returns:
-            The created message object.
+            None: This method doesn't return anything, it just adds the message to history.
         """
-        # Create base text part with content and assistant name if provided
+        # Don't try to create a session if it doesn't exist - the API should handle this
+        if not self.session_id:
+            logger.warning("Empty session_id provided to add_response, this may cause issues")
+            
+        # Create text part with response content
         text_part = TextPart(content=content)
+        
+        # Add assistant name if provided
         if assistant_name:
             text_part.assistant_name = assistant_name
+        
+        # Start with the text part
         parts = [text_part]
         
-        # Add only non-empty tool calls
+        # Add any tool calls
         if tool_calls:
-            for tool_call in tool_calls:
-                if tool_call.get('tool_name'):  # Only add if tool_name is present and non-empty
-                    parts.append(ToolCallPart(tool_call=ToolCall(**tool_call)))
+            for tc in tool_calls:
+                if isinstance(tc, dict) and "tool_name" in tc:
+                    try:
+                        # Create a ToolCall object
+                        tool_call = ToolCall(
+                            tool_name=tc["tool_name"],
+                            args=tc.get("args", {}),
+                            tool_call_id=tc.get("tool_call_id", "")
+                        )
+                        # Add it as a part
+                        parts.append(ToolCallPart(tool_call=tool_call))
+                    except Exception as e:
+                        logger.error(f"Error adding tool call: {str(e)}")
         
-        # Add only non-empty tool outputs
+        # Add any tool outputs
         if tool_outputs:
-            for tool_output in tool_outputs:
-                if tool_output.get('content'):  # Only add if content is present and non-empty
-                    parts.append(ToolOutputPart(tool_output=ToolOutput(**tool_output)))
+            for to in tool_outputs:
+                if isinstance(to, dict) and "tool_name" in to and "content" in to:
+                    try:
+                        # Create a ToolOutput object
+                        tool_output = ToolOutput(
+                            tool_name=to["tool_name"],
+                            content=to["content"],
+                            tool_call_id=to.get("tool_call_id", "")
+                        )
+                        # Add it as a part
+                        parts.append(ToolOutputPart(tool_output=tool_output))
+                    except Exception as e:
+                        logger.error(f"Error adding tool output: {str(e)}")
         
-        message = ModelResponse(parts=parts)
-        self._store.add_message(self.session_id, message)
-        return message
+        # Create the response message with all parts
+        response = ModelResponse(parts=parts)
+        
+        # Add agent ID if provided
+        if agent_id:
+            response.agent_id = agent_id
+        
+        # Add the message to history
+        self._store.add_message(self.session_id, response, self.user_id)
 
     def clear(self) -> None:
         """Clear all messages in the current session."""
@@ -177,36 +247,89 @@ class MessageHistory:
     def __getitem__(self, index: int) -> ModelMessage:
         return self.messages[index]
 
-    def to_dict(self) -> dict:
-        """Convert message history to a dictionary format.
+    def to_dict(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Convert the message history to a dictionary.
         
         Returns:
-            Dictionary containing messages in a format suitable for JSON serialization.
+            Dictionary representation of the message history.
         """
-        return {
-            "messages": [
-                {k: v for k, v in {
-                    "role": "system" if any(isinstance(p, SystemPromptPart) for p in msg.parts)
-                    else "user" if any(isinstance(p, UserPromptPart) for p in msg.parts)
-                    else "assistant",
-                    "content": msg.parts[0].content if msg.parts else "",
-                    **({"assistant_name": getattr(msg.parts[0], "assistant_name", None)}
-                        if any(isinstance(p, TextPart) for p in msg.parts) 
-                        and not any(isinstance(p, (SystemPromptPart, UserPromptPart)) for p in msg.parts)
-                        and getattr(msg.parts[0], "assistant_name", None) is not None
-                        else {}),
-                    **({"tool_calls": [
-                        {k: v for k, v in p.tool_call.dict().items() if v is not None}
-                        for p in msg.parts if isinstance(p, ToolCallPart)
-                    ]} if any(isinstance(p, ToolCallPart) for p in msg.parts) else {}),
-                    **({"tool_outputs": [
-                        {k: v for k, v in p.tool_output.dict().items() if v is not None}
-                        for p in msg.parts if isinstance(p, ToolOutputPart)
-                    ]} if any(isinstance(p, ToolOutputPart) for p in msg.parts) else {})
-                }.items() if v is not None and (not isinstance(v, list) or v)}
-                for msg in self.messages
-            ]
-        }
+        try:
+            result = {"messages": []}
+            
+            for message in self.messages:
+                if not message or not hasattr(message, "parts") or not message.parts:
+                    logger.warning("Skipping invalid message in to_dict")
+                    continue
+                    
+                # Determine role based on message parts
+                role = "assistant"  # default role
+                
+                if any(isinstance(p, SystemPromptPart) for p in message.parts):
+                    role = "system"
+                elif any(isinstance(p, UserPromptPart) for p in message.parts):
+                    role = "user"
+                
+                # Extract content from message parts, handling TextPart specially
+                content = ""
+                for part in message.parts:
+                    if isinstance(part, TextPart):
+                        content = part.content
+                        break
+                
+                # Create the message dictionary with basic properties
+                message_dict = {
+                    "role": role,
+                    "content": content
+                }
+                
+                # If it's an assistant message, add assistant_name if available
+                if role == "assistant":
+                    for part in message.parts:
+                        if isinstance(part, TextPart) and hasattr(part, "assistant_name") and part.assistant_name:
+                            message_dict["assistant_name"] = part.assistant_name
+                            break
+                
+                # Add tool calls if any
+                tool_calls = []
+                for part in message.parts:
+                    if isinstance(part, ToolCallPart):
+                        try:
+                            tool_calls.append({
+                                "tool_name": part.tool_call.tool_name,
+                                "args": part.tool_call.args,
+                                "tool_call_id": part.tool_call.tool_call_id
+                            })
+                        except Exception as e:
+                            logger.error(f"Error serializing tool call: {str(e)}")
+                
+                if tool_calls:
+                    message_dict["tool_calls"] = tool_calls
+                
+                # Add tool outputs if any
+                tool_outputs = []
+                for part in message.parts:
+                    if isinstance(part, ToolOutputPart):
+                        try:
+                            tool_outputs.append({
+                                "tool_name": part.tool_output.tool_name,
+                                "tool_call_id": part.tool_output.tool_call_id,
+                                "content": part.tool_output.content
+                            })
+                        except Exception as e:
+                            logger.error(f"Error serializing tool output: {str(e)}")
+                
+                if tool_outputs:
+                    message_dict["tool_outputs"] = tool_outputs
+                
+                # Remove any None or empty list values
+                message_dict = {k: v for k, v in message_dict.items() if v is not None and v != []}
+                
+                result["messages"].append(message_dict)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error in to_dict: {str(e)}")
+            return {"messages": [{"role": "system", "content": "Error converting message history"}]}
 
     def get_filtered_messages(self, message_limit: Optional[int] = None, sort_desc: bool = True) -> List[ModelMessage]:
         """Get filtered messages with optional limit and sorting.
@@ -281,61 +404,84 @@ class MessageHistory:
         
         return final_messages, total_messages, current_page, total_pages
 
-    def format_message_for_api(self, msg: ModelMessage, hide_tools: bool = False) -> Optional[Dict]:
-        """Format a single message for API response.
+    def format_message_for_api(self, message: ModelMessage, hide_tools: bool = False) -> Dict[str, Any]:
+        """Format a message for API responses.
         
         Args:
-            msg: The message to format
-            hide_tools: Whether to exclude tool calls and outputs
+            message: The message to format.
+            hide_tools: Whether to hide tool calls and outputs in the formatted message.
             
         Returns:
-            Formatted message dictionary or None if message should be skipped
+            Formatted message dictionary for API response.
         """
-        if not msg.parts:
-            return None
-
-        # Determine message role
-        role = "system" if any(isinstance(p, SystemPromptPart) for p in msg.parts) else \
-               "user" if any(isinstance(p, UserPromptPart) for p in msg.parts) else \
-               "assistant"
-
-        # Start with minimal message data
-        message_data = {
-            "role": role,
-            "content": msg.parts[0].content
-        }
-
-        # Only add assistant-specific fields for assistant messages
-        if role == "assistant":
-            assistant_name = getattr(msg.parts[0], "assistant_name", None)
-            if assistant_name:
-                message_data["assistant_name"] = assistant_name
-
+        try:
+            if not message or not hasattr(message, "parts") or not message.parts:
+                logger.warning("Missing or invalid message in format_message_for_api")
+                return {"role": "system", "content": "Error: Missing message data"}
+            
+            # Determine role based on message parts
+            role = "assistant"  # default role
+            
+            if any(isinstance(p, SystemPromptPart) for p in message.parts):
+                role = "system"
+            elif any(isinstance(p, UserPromptPart) for p in message.parts):
+                role = "user"
+            
+            # Extract content from message parts, handling TextPart specially
+            content = ""
+            for part in message.parts:
+                if isinstance(part, TextPart):
+                    content = part.content
+                    break
+            
+            # Initialize with basic properties
+            message_data = {
+                "role": role,
+                "content": content
+            }
+            
+            # If it's an assistant message, add assistant_name if available
+            if role == "assistant":
+                for part in message.parts:
+                    if isinstance(part, TextPart) and hasattr(part, "assistant_name") and part.assistant_name:
+                        message_data["assistant_name"] = part.assistant_name
+                        break
+            
+            # Add tool calls if any and not hidden
             if not hide_tools:
-                # Add non-empty tool calls
-                tool_calls = [
-                    {k: v for k, v in {
-                        "tool_name": part.tool_call.tool_name,
-                        "args": part.tool_call.args,
-                        "tool_call_id": part.tool_call.tool_call_id
-                    }.items() if v is not None}
-                    for part in msg.parts 
-                    if isinstance(part, ToolCallPart) and part.tool_call.tool_name
-                ]
+                tool_calls = []
+                for part in message.parts:
+                    if isinstance(part, ToolCallPart):
+                        try:
+                            tool_calls.append({
+                                "tool_name": part.tool_call.tool_name,
+                                "args": part.tool_call.args,
+                                "tool_call_id": part.tool_call.tool_call_id
+                            })
+                        except Exception as e:
+                            logger.error(f"Error processing tool call in format_message_for_api: {str(e)}")
+                
                 if tool_calls:
                     message_data["tool_calls"] = tool_calls
-
-                # Add non-empty tool outputs
-                tool_outputs = [
-                    {k: v for k, v in {
-                        "tool_name": part.tool_output.tool_name,
-                        "tool_call_id": part.tool_output.tool_call_id,
-                        "content": part.tool_output.content
-                    }.items() if v is not None}
-                    for part in msg.parts 
-                    if isinstance(part, ToolOutputPart) and part.tool_output.content
-                ]
+                
+                # Add tool outputs if any
+                tool_outputs = []
+                for part in message.parts:
+                    if isinstance(part, ToolOutputPart):
+                        try:
+                            tool_outputs.append({
+                                "tool_name": part.tool_output.tool_name,
+                                "tool_call_id": part.tool_output.tool_call_id,
+                                "content": part.tool_output.content
+                            })
+                        except Exception as e:
+                            logger.error(f"Error processing tool output in format_message_for_api: {str(e)}")
+                
                 if tool_outputs:
                     message_data["tool_outputs"] = tool_outputs
-
-        return {k: v for k, v in message_data.items() if v is not None}
+            
+            # Remove any None or empty list values
+            return {k: v for k, v in message_data.items() if v is not None and v != []}
+        except Exception as e:
+            logger.error(f"Error in format_message_for_api: {str(e)}")
+            return {"role": "system", "content": "Error formatting message"}

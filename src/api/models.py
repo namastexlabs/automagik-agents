@@ -15,6 +15,7 @@ class AgentRunRequest(BaseResponseModel):
     message_input: str
     context: dict = {}
     session_id: Optional[str] = None
+    user_id: Optional[str] = "default_user"  # Default user ID if none provided
     message_limit: Optional[int] = 10  # Default to last 10 messages
 
 class AgentInfo(BaseResponseModel):
@@ -73,4 +74,21 @@ class SessionResponse(BaseResponseModel):
     exists: bool
     total_messages: int
     current_page: int
-    total_pages: int 
+    total_pages: int
+
+class SessionInfo(BaseResponseModel):
+    """Information about a session."""
+    session_id: str
+    user_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    last_updated: Optional[datetime] = None
+    message_count: Optional[int] = None
+    agent_name: Optional[str] = None
+
+class SessionListResponse(BaseResponseModel):
+    """Response model for listing all sessions."""
+    sessions: List[SessionInfo]
+    total_count: int
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 1 

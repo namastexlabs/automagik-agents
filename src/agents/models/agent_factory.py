@@ -1,9 +1,11 @@
 import importlib
 import logging
+import json
 from pathlib import Path
-from typing import Dict, Type, List, Tuple
+from typing import Dict, Type, List, Tuple, Optional, Any
 
 from src.agents.models.base_agent import BaseAgent
+from src.agents.models.agent_db import register_agent, get_agent_by_name, link_session_to_agent
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +14,7 @@ class AgentFactory:
     
     _agents: Dict[str, Tuple[Type[BaseAgent], str]] = {}  # Maps agent_name -> (agent_class, agent_type)
     _initialized_agents: Dict[str, BaseAgent] = {}
+    _agent_db_ids: Dict[str, str] = {}  # Maps agent_name -> database_id
     
     @classmethod
     def discover_agents(cls) -> None:
@@ -21,6 +24,7 @@ class AgentFactory:
         # Clear existing agents
         cls._agents.clear()
         cls._initialized_agents.clear()
+        cls._agent_db_ids.clear()
         
         # First, check if we have the new type-based structure
         type_dirs = []
@@ -67,8 +71,48 @@ class AgentFactory:
                 
                 if agent_instance is not None:  # Some agents might be conditionally initialized
                     cls._initialized_agents[agent_name] = agent_instance
-                    cls._agents[agent_name] = (type(agent_instance), agent_type or "generic")
-                    logger.info(f"Discovered agent: {agent_name} ({type(agent_instance).__name__}) [Type: {agent_type or 'generic'}]")
+                    agent_class = type(agent_instance)
+                    cls._agents[agent_name] = (agent_class, agent_type or "generic")
+                    
+                    # Get the model from the agent instance if available
+                    model = getattr(agent_instance, "model", None)
+                    if not model and hasattr(agent_instance, "config"):
+                        # Check if config is a dictionary with get method or an object
+                        if isinstance(agent_instance.config, dict):
+                            model = agent_instance.config.get("model")
+                        elif hasattr(agent_instance.config, "model"):
+                            model = agent_instance.config.model
+                    if not model:
+                        model = "unknown"
+                    
+                    # Get description from the agent class docstring
+                    description = agent_class.__doc__ or f"{agent_class.__name__} agent"
+                    
+                    # Get config from the agent instance if available
+                    config = getattr(agent_instance, "config", {})
+                    
+                    # Convert config to a dictionary if it's a Pydantic model
+                    if hasattr(config, "model_dump"):
+                        config_dict = config.model_dump()
+                    elif hasattr(config, "dict"):
+                        config_dict = config.dict()
+                    else:
+                        config_dict = config
+                    
+                    # Register in database - use agent_type from directory, not class name
+                    try:
+                        db_id = register_agent(
+                            name=agent_name,
+                            agent_type=agent_type or "generic",  # Use directory type, not class name
+                            model=model,
+                            description=description,
+                            config=config_dict
+                        )
+                        cls._agent_db_ids[agent_name] = db_id
+                    except Exception as e:
+                        logger.error(f"Failed to register agent {agent_name} in database: {str(e)}")
+                    
+                    logger.info(f"Discovered agent: {agent_name} ({agent_class.__name__}) [Type: {agent_type or 'generic'}]")
                     return True
             
             return False
@@ -101,7 +145,21 @@ class AgentFactory:
                 
                 module = importlib.import_module(module_path)
                 create_func = getattr(module, f"create_{agent_name.replace('_agent', '')}_agent")
-                cls._initialized_agents[agent_name] = create_func()
+                
+                # Create the agent
+                agent = create_func()
+                
+                # Store the database ID with the agent instance
+                if agent_name in cls._agent_db_ids:
+                    agent.db_id = cls._agent_db_ids[agent_name]
+                else:
+                    # Try to get the agent ID from the database
+                    db_agent = get_agent_by_name(agent_name)
+                    if db_agent:
+                        agent.db_id = db_agent["id"]
+                        cls._agent_db_ids[agent_name] = db_agent["id"]
+                
+                cls._initialized_agents[agent_name] = agent
             except ImportError as e:
                 raise ValueError(f"Failed to import agent module {agent_name}: {str(e)}")
             except AttributeError as e:
@@ -130,4 +188,43 @@ class AgentFactory:
                 available_agents = cls.list_available_agents()
                 raise ValueError(f"Agent {agent_name} not found. Available agents: {', '.join(available_agents)}")
         
-        return cls._agents[agent_name][1] 
+        return cls._agents[agent_name][1]
+    
+    @classmethod
+    def link_agent_to_session(cls, agent_name: str, session_id: str) -> bool:
+        """Link an agent to a session in the database.
+        
+        Args:
+            agent_name: The name of the agent
+            session_id: The session ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Add _agent suffix if not present
+            if not agent_name.endswith('_agent'):
+                agent_name = f"{agent_name}_agent"
+                
+            # Get agent ID
+            if agent_name in cls._agent_db_ids:
+                agent_id = cls._agent_db_ids[agent_name]
+            else:
+                # Try to get the agent ID from the database
+                db_agent = get_agent_by_name(agent_name)
+                if not db_agent:
+                    # Discover agents to make sure it's registered
+                    cls.discover_agents()
+                    db_agent = get_agent_by_name(agent_name)
+                    if not db_agent:
+                        logger.error(f"Agent {agent_name} not found in database")
+                        return False
+                
+                agent_id = db_agent["id"]
+                cls._agent_db_ids[agent_name] = agent_id
+            
+            # Link the session to the agent
+            return link_session_to_agent(session_id, agent_id)
+        except Exception as e:
+            logger.error(f"Error linking agent {agent_name} to session {session_id}: {str(e)}")
+            return False 
