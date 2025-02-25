@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-from src.agents.simple_agent.agent import SimpleAgent
+from src.agents.simple.simple_agent.agent import SimpleAgent
 from src.agents.models import initialize_agent
 from src.config import settings
 
@@ -13,7 +13,7 @@ def create_simple_agent(config: Optional[Dict[str, str]] = None) -> SimpleAgent:
         Initialized SimpleAgent instance
     """
     default_config = {
-        "model": settings.OPENAI_MODEL,
+        "model": "openai:gpt-4o-mini",  # Specific model for SimpleAgent
         "retries": 3
     }
     

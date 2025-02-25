@@ -2,7 +2,7 @@ from typing import Dict
 from pydantic_ai import Agent
 
 from src.agents.models.base_agent import BaseAgent
-from src.agents.simple_agent.prompts import SIMPLE_AGENT_PROMPT
+from src.agents.simple.simple_agent.prompts import SIMPLE_AGENT_PROMPT
 
 class SimpleAgent(BaseAgent):
     """Simple agent implementation for basic chat functionality."""

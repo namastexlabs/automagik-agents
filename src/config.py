@@ -28,7 +28,6 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = Field(..., description="OpenAI API key for agent operations")
-    OPENAI_MODEL: str = Field("openai:gpt-4o-mini", description="Default OpenAI model to use")
 
     # Notion (Optional)
     NOTION_TOKEN: Optional[str] = Field(None, description="Notion integration token")

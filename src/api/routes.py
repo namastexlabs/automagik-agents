@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def list_agents():
     """List all available agents."""
     return [
-        AgentInfo(name=name, type=AgentFactory._agents[name].__name__)
+        AgentInfo(name=name, type=AgentFactory._agents[name][0].__name__)
         for name in AgentFactory.list_available_agents()
     ]
 
