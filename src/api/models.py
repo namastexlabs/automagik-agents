@@ -83,7 +83,7 @@ class SessionResponse(BaseResponseModel):
 class SessionInfo(BaseResponseModel):
     """Information about a session."""
     session_id: str
-    user_id: Optional[str] = None
+    user_id: Optional[int] = None
     created_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     message_count: Optional[int] = None

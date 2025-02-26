@@ -37,7 +37,7 @@ class BaseAgent:
         """Post-initialization tasks. Can be overridden by subclasses."""
         self.register_tools()
 
-    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: Union[str, int] = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: int = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
         """Process a user message and return a response.
         
         Args:

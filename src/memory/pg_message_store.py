@@ -106,8 +106,8 @@ class PostgresMessageStore(MessageStore):
             session_id: The unique session identifier.
             message: The message to add.
         """
-        # Default to user_id="1" to match our database schema
-        user_id = "1"  # Default user ID
+        # Default to user_id=1 to match our database schema
+        user_id = 1  # Default user ID
         
         try:
             logger.info(f"🔍 Adding message for session {session_id} and user {user_id}")
@@ -232,7 +232,7 @@ class PostgresMessageStore(MessageStore):
             system_prompt: The system prompt content.
         """
         # Default values
-        user_id = "1"  # Default user ID
+        user_id = 1  # Default user ID as integer
         agent_id = None  # Default agent ID
         
         try:
@@ -350,14 +350,14 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking session {session_id}: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: str) -> str:
+    def _ensure_session_exists(self, session_id: str, user_id: int) -> str:
         """
         Ensures a session exists, creating it if necessary.
         Also ensures the user exists, creating it if necessary.
         
         Args:
             session_id: The ID of the session
-            user_id: The ID of the user associated with the session
+            user_id: The ID of the user associated with the session (as integer)
             
         Returns:
             str: The session ID (which may be auto-generated if not provided)
@@ -446,25 +446,19 @@ class PostgresMessageStore(MessageStore):
             # Return the session_id even if there was an error
             return session_id or str(uuid.uuid4())
     
-    def _ensure_user_exists(self, user_id: str) -> None:
+    def _ensure_user_exists(self, user_id: int) -> None:
         """
         Ensures a user exists in the database, creating it if necessary.
         
         Args:
-            user_id: The ID of the user to check/create
+            user_id: The ID of the user to check/create (as integer)
             
         Returns:
             None
         """
         try:
-            # Convert string user_id to integer for database compatibility
-            numeric_user_id = 1  # Default user ID
-            
-            # Convert user_id to integer if possible
-            try:
-                numeric_user_id = int(user_id)
-            except ValueError:
-                logger.warning(f"⚠️ Non-numeric user_id '{user_id}' provided, using default ID 1 instead")
+            # Use user_id directly as integer
+            numeric_user_id = user_id if user_id is not None else 1
             
             # Check if user exists
             logger.info(f"▶️ Checking if user {numeric_user_id} exists in database")

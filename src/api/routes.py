@@ -88,7 +88,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 logger.error(f"Error updating channel_payload for user {request.user_id}: {str(e)}")
         
         # Get message history with user_id
-        message_history = MessageHistory(request.session_id, user_id=str(request.user_id))
+        message_history = MessageHistory(request.session_id, user_id=request.user_id)
         
         # Link the agent to the session in the database
         AgentFactory.link_agent_to_session(agent_name, request.session_id)

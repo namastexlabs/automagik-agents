@@ -81,17 +81,16 @@ class MessageHistory:
         """
         cls._store = store
     
-    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: Union[str, int] = 1):
+    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: int = 1):
         """Initialize a new message history for a session.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: Optional system prompt to set at initialization.
             user_id: The user identifier to associate with this session (defaults to 1).
-                     Can be string or int, will be converted to string internally.
         """
         self.session_id = session_id
-        self.user_id = str(user_id)  # Convert to string for compatibility
+        self.user_id = user_id  # Store as integer
         
         # Add system prompt if provided
         if system_prompt:
