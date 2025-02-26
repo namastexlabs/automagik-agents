@@ -43,13 +43,32 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
     try:
         agent = AgentFactory.get_agent(agent_name)
         
+        # Get the agent database ID if available
+        agent_id = getattr(agent, "db_id", None)
+        
+        # If agent_id is not set, try to get it from the database
+        if agent_id is None:
+            from src.agents.models.agent_db import get_agent_by_name
+            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
+            if db_agent:
+                agent_id = db_agent["id"]
+                # Save it back to the agent instance for future use
+                agent.db_id = agent_id
+                logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
+            else:
+                logging.warning(f"Could not find agent ID for agent {agent_name}")
+        
+        # Ensure user_id is not None, default to 1 if it is
+        user_id = request.user_id if request.user_id is not None else 1
+        logger.info(f"Using user_id: {user_id}")
+        
         # Check if session_id is provided
         if not request.session_id:
             # If no session_id is provided, generate a new one
             from src.memory.pg_message_store import PostgresMessageStore
             store = PostgresMessageStore()
             # Generate a new session with an empty string (this will create a new session in the database)
-            new_session_id = store._ensure_session_exists("", request.user_id)
+            new_session_id = store._ensure_session_exists("", user_id, agent_id)
             request.session_id = new_session_id
             logger.info(f"Created new session with ID: {new_session_id}")
         else:
@@ -58,16 +77,18 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             store = PostgresMessageStore()
             if not store.session_exists(request.session_id):
                 # Create the session with the provided ID
-                store._ensure_session_exists(request.session_id, request.user_id)
+                store._ensure_session_exists(request.session_id, user_id, agent_id)
                 logger.info(f"Created session with provided ID: {request.session_id}")
             else:
                 logger.info(f"Using existing session: {request.session_id}")
+                # Update the session with the user_id and agent_id
+                store._ensure_session_exists(request.session_id, user_id, agent_id)
         
         # Store channel_payload in the users table if provided
         if request.channel_payload:
             try:
                 # Use the user_id directly as an integer
-                numeric_user_id = request.user_id if request.user_id is not None else 1
+                numeric_user_id = user_id
                 
                 # Update the user record with the channel_payload
                 execute_query(
@@ -85,13 +106,13 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 )
                 logger.info(f"Updated channel_payload for user {numeric_user_id}")
             except Exception as e:
-                logger.error(f"Error updating channel_payload for user {request.user_id}: {str(e)}")
+                logger.error(f"Error updating channel_payload for user {user_id}: {str(e)}")
         
-        # Get message history with user_id
-        message_history = MessageHistory(request.session_id, user_id=request.user_id)
-        
-        # Link the agent to the session in the database
+        # Link the agent to the session in the database BEFORE creating MessageHistory
         AgentFactory.link_agent_to_session(agent_name, request.session_id)
+        
+        # Get message history with user_id AFTER linking agent to session
+        message_history = MessageHistory(request.session_id, user_id=user_id)
         
         if message_history and message_history.messages:
             # Get filtered messages up to the limit
@@ -100,21 +121,6 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 sort_desc=False  # Sort chronologically for agent processing
             )
             message_history.update_messages(filtered_messages)
-
-        # Get the agent database ID if available
-        agent_id = getattr(agent, "db_id", None)
-        
-        # If agent_id is not set, try to get it from the database
-        if agent_id is None:
-            from src.agents.models.agent_db import get_agent_by_name
-            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
-            if db_agent:
-                agent_id = db_agent["id"]
-                # Save it back to the agent instance for future use
-                agent.db_id = agent_id
-                logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
-            else:
-                logging.warning(f"Could not find agent ID for agent {agent_name}")
         
         # Process the message with additional metadata if available
         message_metadata = {
@@ -122,6 +128,13 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             "media_url": request.mediaUrl, 
             "mime_type": request.mime_type
         }
+        
+        # Create a combined context with all available information
+        combined_context = {**request.context, **message_metadata}
+        
+        # Add channel_payload to context if available
+        if request.channel_payload:
+            combined_context["channel_payload"] = request.channel_payload
         
         # Log incoming message details
         logger.info(f"Processing message from user {request.user_id} with type: {request.message_type}")
@@ -133,7 +146,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             session_id=request.session_id,
             agent_id=agent_id,  # Pass the agent ID to be stored with the messages
             user_id=request.user_id,  # Pass the user ID
-            context={**request.context, **message_metadata}  # Include message metadata in context
+            context=combined_context  # Include all context information
         )
         
         # Log the tool call and output counts more safely

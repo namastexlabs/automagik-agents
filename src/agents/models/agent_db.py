@@ -211,8 +211,46 @@ def link_session_to_agent(session_id: str, agent_id: Union[int, str]) -> bool:
             logger.error(f"Cannot link session to non-existent agent {agent_id}")
             return False
         
-        # Log the association in memory only
-        logger.debug(f"Session {session_id} associated with agent {agent_id} in memory")
+        # Update all messages in the session that don't have an agent_id
+        execute_query(
+            """
+            UPDATE chat_messages
+            SET agent_id = %s
+            WHERE session_id = %s AND agent_id IS NULL
+            """,
+            (agent_id, session_id),
+            fetch=False
+        )
+        
+        # Also store the agent_id in the sessions table if it has an agent_id column
+        try:
+            # Check if the agent_id column exists in the sessions table
+            column_exists = execute_query(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns 
+                    WHERE table_name = 'sessions' AND column_name = 'agent_id'
+                ) as exists
+                """
+            )
+            
+            if column_exists and column_exists[0]["exists"]:
+                # Update the sessions table with the agent_id
+                execute_query(
+                    """
+                    UPDATE sessions
+                    SET agent_id = %s
+                    WHERE id = %s
+                    """,
+                    (agent_id, session_id),
+                    fetch=False
+                )
+                logger.debug(f"Updated sessions table with agent_id {agent_id} for session {session_id}")
+        except Exception as inner_e:
+            # Log but continue - this is not critical
+            logger.warning(f"Could not update sessions table with agent_id: {str(inner_e)}")
+        
+        logger.debug(f"Session {session_id} associated with agent {agent_id} in database")
         return True
     except Exception as e:
         logger.error(f"Error linking session {session_id} to agent {agent_id}: {str(e)}")

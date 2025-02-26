@@ -84,10 +84,9 @@ class BaseAgent(ABC):
             logging.info(f"Additional message context: {context}")
             
         message_history = MessageHistory(session_id, user_id=user_id)
-        message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
-        
-        # Add agent_id to the user message metadata
-        user_message_obj = message_history.add(user_message, agent_id=agent_id)
+
+
+        user_message_obj = message_history.add(user_message, agent_id=agent_id, context=context)
         
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 
@@ -140,7 +139,8 @@ class BaseAgent(ABC):
             assistant_name=self.__class__.__name__,
             tool_calls=tool_calls,
             tool_outputs=tool_outputs,
-            agent_id=agent_id
+            agent_id=agent_id,
+            system_prompt=self.system_prompt 
         )
         
         # Use the potentially updated session_id from message_history

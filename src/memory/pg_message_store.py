@@ -64,7 +64,8 @@ class PostgresMessageStore(MessageStore):
                 """
                 SELECT 
                     id, role, text_content, raw_payload, 
-                    message_timestamp, agent_id
+                    message_timestamp, agent_id, tool_calls, tool_outputs,
+                    channel_payload, system_prompt
                 FROM 
                     chat_messages 
                 WHERE 
@@ -106,37 +107,38 @@ class PostgresMessageStore(MessageStore):
             session_id: The unique session identifier.
             message: The message to add.
         """
-        # Ensure this default is consistent with our int type
-        user_id = 1
-        
-        # Get agent_id if it exists
-        agent_id = getattr(message, "agent_id", None)
+        # Get user_id from message if available, otherwise default to 1
+        user_id = getattr(message, "user_id", 1)
         
         try:
-            logger.info(f"🔍 Adding message for session {session_id} and user {user_id}")
-            
             # Make sure the session exists
-            logger.info(f"▶️ Ensuring session {session_id} exists before adding message")
             session_id = self._ensure_session_exists(session_id, user_id)
-            logger.info(f"✅ Session {session_id} confirmed for message insertion")
             
-            # Extract message data
+            # Determine message role
             role = self._determine_message_role(message)
-            text_content = message.parts[0].content if message.parts else ""
             
-            # Log the message being added
-            logger.info(f"🔍 Adding {role} message to session {session_id}: {text_content[:50]}...")
-            
-            # Extract assistant name if present
+            # Extract text content from message parts
+            text_content = ""
             assistant_name = None
-            if role == "assistant" and isinstance(message.parts[0], TextPart) and hasattr(message.parts[0], "assistant_name"):
-                assistant_name = message.parts[0].assistant_name
+            agent_id = getattr(message, "agent_id", None)
+            
+            # Extract context from user messages
+            context = getattr(message, "context", None)
+            
+            # Extract system_prompt from assistant messages
+            system_prompt = getattr(message, "system_prompt", None)
             
             # Extract tool calls and outputs
             tool_calls = []
             tool_outputs = []
             
+            # Extract text content and other data from message parts
             for part in message.parts:
+                if hasattr(part, "content"):
+                    text_content = part.content
+                    if hasattr(part, "assistant_name") and part.assistant_name:
+                        assistant_name = part.assistant_name
+                
                 if hasattr(part, "part_kind"):
                     if part.part_kind == "tool-call" and hasattr(part, "tool_call"):
                         tool_calls.append({
@@ -161,6 +163,14 @@ class PostgresMessageStore(MessageStore):
                 "tool_outputs": tool_outputs
             }
             
+            # Add context to payload for user messages
+            if context and role == "user":
+                message_payload["channel_payload"] = context
+                
+            # Add system_prompt to payload for assistant messages
+            if system_prompt and role == "assistant":
+                message_payload["system_prompt"] = system_prompt
+            
             # Handle JSON serialization
             try:
                 message_payload_json = json.dumps(message_payload, ensure_ascii=False)
@@ -172,67 +182,76 @@ class PostgresMessageStore(MessageStore):
             # Generate a unique message ID
             message_id = f"m_{uuid.uuid4()}"
             
-            try:
-                execute_query(
-                    """
-                    INSERT INTO chat_messages (
-                        id, session_id, role, text_content, raw_payload, 
-                        message_timestamp, message_type, user_id, agent_id,
-                        tool_calls, tool_outputs
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, 
-                        %s, %s, %s, %s,
-                        %s, %s
-                    )
-                    """,
-                    (
-                        message_id,
-                        session_id,
-                        role,
-                        text_content,
-                        message_payload_json,
-                        datetime.utcnow(),
-                        "text",
-                        user_id,
-                        agent_id,
-                        json.dumps(tool_calls) if tool_calls else None,
-                        json.dumps(tool_outputs) if tool_outputs else None
-                    ),
-                    fetch=False
+            # Serialize tool calls and outputs for dedicated columns
+            tool_calls_json = None
+            if tool_calls:
+                try:
+                    tool_calls_json = json.dumps(tool_calls, ensure_ascii=False)
+                except Exception as e:
+                    logger.error(f"Error serializing tool calls: {str(e)}")
+            
+            tool_outputs_json = None
+            if tool_outputs:
+                try:
+                    tool_outputs_json = json.dumps(tool_outputs, ensure_ascii=False)
+                except Exception as e:
+                    logger.error(f"Error serializing tool outputs: {str(e)}")
+            
+            # Prepare channel_payload column data
+            channel_payload_json = None
+            if context and role == "user":
+                try:
+                    channel_payload_json = json.dumps(context, ensure_ascii=False)
+                except Exception as e:
+                    logger.error(f"Error serializing channel_payload: {str(e)}")
+            
+            # Insert the message into the database
+            execute_query(
+                """
+                INSERT INTO chat_messages (
+                    id, session_id, role, text_content, raw_payload, 
+                    message_timestamp, message_type, user_id, agent_id,
+                    tool_calls, tool_outputs, channel_payload, system_prompt
+                ) VALUES (
+                    %s, %s, %s, %s, %s, 
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s
                 )
-                logger.info(f"✅ Successfully added {role} message to session {session_id}")
-                
-                # Now verify the message was actually inserted
-                verification = execute_query(
-                    "SELECT COUNT(*) as count FROM chat_messages WHERE id = %s",
-                    (message_id,)
-                )
-                if verification and verification[0]["count"] > 0:
-                    logger.info(f"✅ Verified message {message_id} exists in database")
-                else:
-                    logger.warning(f"⚠️ Message {message_id} not found in database after insertion")
-                
-            except Exception as db_error:
-                logger.error(f"❌ Database error adding message: {str(db_error)}")
-                import traceback
-                logger.error(f"Detailed error: {traceback.format_exc()}")
-                
+                """,
+                (
+                    message_id, 
+                    session_id, 
+                    role, 
+                    text_content, 
+                    message_payload_json,
+                    datetime.utcnow(),
+                    "text",
+                    user_id,
+                    agent_id,
+                    tool_calls_json,
+                    tool_outputs_json,
+                    channel_payload_json,
+                    system_prompt
+                ),
+                fetch=False
+            )
+            
+            logger.debug(f"Added message {message_id} to session {session_id} with role {role}")
+            
         except Exception as e:
             logger.error(f"❌ Error adding message to session {session_id}: {str(e)}")
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None, user_id: int = 1) -> None:
         """Update the system prompt for a session in PostgreSQL.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: The system prompt content.
             agent_id: Optional agent ID associated with the message.
+            user_id: User ID associated with the message (defaults to 1).
         """
-        # Set default values
-        user_id = 1
-        
         try:
             # Make sure the session exists
             session_id = self._ensure_session_exists(session_id, user_id)
@@ -257,7 +276,7 @@ class PostgresMessageStore(MessageStore):
                 execute_query(
                     """
                     UPDATE chat_messages 
-                    SET text_content = %s, raw_payload = %s, updated_at = %s, agent_id = %s
+                    SET text_content = %s, raw_payload = %s, updated_at = %s, agent_id = %s, user_id = %s
                     WHERE id = %s
                     """,
                     (
@@ -265,11 +284,12 @@ class PostgresMessageStore(MessageStore):
                         system_payload_json,
                         datetime.utcnow(),
                         agent_id,
+                        user_id,
                         existing[0]["id"]
                     ),
                     fetch=False
                 )
-                logger.debug(f"Updated system prompt for session {session_id} with agent_id {agent_id}")
+                logger.debug(f"Updated system prompt for session {session_id} with agent_id {agent_id} and user_id {user_id}")
             else:
                 # Add new system prompt with NULL id to trigger auto-generation
                 result = execute_query(
@@ -348,7 +368,7 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking session {session_id}: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: int) -> str:
+    def _ensure_session_exists(self, session_id: str, user_id: int, agent_id: Optional = None) -> str:
         """
         Ensures a session exists, creating it if necessary.
         Also ensures the user exists, creating it if necessary.
@@ -356,6 +376,7 @@ class PostgresMessageStore(MessageStore):
         Args:
             session_id: The ID of the session
             user_id: The ID of the user associated with the session (as integer)
+            agent_id: Optional agent ID to associate with the session
             
         Returns:
             str: The session ID (which may be auto-generated if not provided)
@@ -368,6 +389,24 @@ class PostgresMessageStore(MessageStore):
             # Then check if session already exists
             if session_id and self.session_exists(session_id):
                 logger.info(f"✅ Session {session_id} already exists")
+                
+                # Update the user_id for the session if it's NULL
+                execute_query(
+                    """
+                    UPDATE sessions
+                    SET user_id = %s
+                    WHERE id = %s AND (user_id IS NULL OR user_id = 0)
+                    """,
+                    (user_id, session_id),
+                    fetch=False
+                )
+                logger.info(f"Updated user_id to {user_id} for existing session {session_id}")
+                
+                # If agent_id is provided, link it to the existing session
+                if agent_id:
+                    from src.agents.models.agent_db import link_session_to_agent
+                    link_session_to_agent(session_id, agent_id)
+                    
                 return session_id
             
             # Log session creation
@@ -375,20 +414,43 @@ class PostgresMessageStore(MessageStore):
                 logger.info(f"▶️ Creating new session with ID: {session_id}")
             else:
                 logger.info(f"▶️ Creating new session with auto-generated ID")
-                
+            
             # If session_id is empty, generate a new one
             if not session_id:
                 # Generate a new session using the database default
                 try:
                     logger.info("▶️ Executing INSERT INTO sessions with auto-generated ID")
-                    result = execute_query(
+                    
+                    # Check if agent_id column exists in sessions table
+                    column_exists = execute_query(
                         """
-                        INSERT INTO sessions (user_id, platform, created_at, updated_at) 
-                        VALUES (%s, %s, %s, %s)
-                        RETURNING id
-                        """,
-                        (user_id, "web", datetime.utcnow(), datetime.utcnow())
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.columns 
+                            WHERE table_name = 'sessions' AND column_name = 'agent_id'
+                        ) as exists
+                        """
                     )
+                    
+                    if agent_id and column_exists and column_exists[0]["exists"]:
+                        # Include agent_id in the INSERT
+                        result = execute_query(
+                            """
+                            INSERT INTO sessions (user_id, platform, created_at, updated_at, agent_id) 
+                            VALUES (%s, %s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (user_id, "web", datetime.utcnow(), datetime.utcnow(), agent_id)
+                        )
+                    else:
+                        # Original INSERT without agent_id
+                        result = execute_query(
+                            """
+                            INSERT INTO sessions (user_id, platform, created_at, updated_at) 
+                            VALUES (%s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (user_id, "web", datetime.utcnow(), datetime.utcnow())
+                        )
                     
                     if result and len(result) > 0:
                         new_session_id = result[0]["id"]
@@ -409,19 +471,56 @@ class PostgresMessageStore(MessageStore):
                 # Use the provided session ID as-is without any validation or transformation
                 try:
                     logger.info(f"▶️ Executing INSERT INTO sessions with provided ID: {session_id}")
-                    execute_query(
+                    
+                    # Check if agent_id column exists in sessions table
+                    column_exists = execute_query(
                         """
-                        INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (session_id, user_id, "web", datetime.utcnow(), datetime.utcnow()),
-                        fetch=False
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.columns 
+                            WHERE table_name = 'sessions' AND column_name = 'agent_id'
+                        ) as exists
+                        """
                     )
+                    
+                    if agent_id and column_exists and column_exists[0]["exists"]:
+                        # Include agent_id in the INSERT
+                        execute_query(
+                            """
+                            INSERT INTO sessions (id, user_id, platform, created_at, updated_at, agent_id) 
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (session_id, user_id, "web", datetime.utcnow(), datetime.utcnow(), agent_id),
+                            fetch=False
+                        )
+                    else:
+                        # Original INSERT without agent_id
+                        execute_query(
+                            """
+                            INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (session_id, user_id, "web", datetime.utcnow(), datetime.utcnow()),
+                            fetch=False
+                        )
+                    
                     logger.info(f"✅ Created new session {session_id} for user {user_id}")
                 except Exception as e:
                     # If we get an error (like a duplicate key), check if it's because the session already exists
                     if "duplicate key" in str(e):
                         logger.debug(f"⚠️ Session {session_id} already exists (caught duplicate key)")
+                        
+                        # Update the user_id for the session if it's NULL
+                        execute_query(
+                            """
+                            UPDATE sessions
+                            SET user_id = %s
+                            WHERE id = %s AND (user_id IS NULL OR user_id = 0)
+                            """,
+                            (user_id, session_id),
+                            fetch=False
+                        )
+                        logger.info(f"Updated user_id to {user_id} for existing session {session_id}")
+                        
                         return session_id
                     # Otherwise log the error but return the session_id anyway
                     logger.error(f"❌ Error creating session with ID {session_id}: {str(e)}")
@@ -645,6 +744,14 @@ class PostgresMessageStore(MessageStore):
                 # Add agent ID if available
                 if db_message.get("agent_id"):
                     message.agent_id = db_message["agent_id"]
+                
+                # Add system_prompt if available
+                # First check the dedicated column
+                if db_message.get("system_prompt"):
+                    message.system_prompt = db_message["system_prompt"]
+                # If not in the column, check if it's in the raw_payload
+                elif raw_payload.get("system_prompt"):
+                    message.system_prompt = raw_payload["system_prompt"]
                 
                 return message
         except Exception as e:

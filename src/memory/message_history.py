@@ -112,21 +112,25 @@ class MessageHistory:
         if agent_id:
             message.agent_id = agent_id
         
+        # Add user_id to the message
+        message.user_id = self.user_id
+        
         # Don't try to create a session if it doesn't exist - the API should handle this
         if not self.session_id:
             logger.warning("Empty session_id provided to add_system_prompt, this may cause issues")
         
         # Store the user_id and agent_id attributes in the pg_message_store implementation directly
         # This is a workaround to avoid modifying the MessageStore interface
-        self._store.update_system_prompt(self.session_id, content, agent_id)
+        self._store.update_system_prompt(self.session_id, content, agent_id, self.user_id)
         return message
     
-    def add(self, content: str, agent_id: Optional[Union[int, str]] = None) -> ModelMessage:
+    def add(self, content: str, agent_id: Optional[Union[int, str]] = None, context: Optional[Dict] = None) -> ModelMessage:
         """Add a user message to the history.
         
         Args:
             content: The message content.
             agent_id: Optional agent ID associated with the message.
+            context: Optional context data (like channel_payload) to include with the message.
             
         Returns:
             The created user message.
@@ -136,6 +140,13 @@ class MessageHistory:
         # Add agent ID if provided
         if agent_id:
             message.agent_id = agent_id
+            
+        # Add user_id to the message
+        message.user_id = self.user_id
+        
+        # Add context if provided
+        if context:
+            message.context = context
         
         # Don't try to create a session if it doesn't exist - the API should handle this
         if not self.session_id:
@@ -143,83 +154,80 @@ class MessageHistory:
             
         # Pass only the required parameters to match the interface
         self._store.add_message(self.session_id, message)
+        
         return message
     
     def add_response(
         self, 
         content: str, 
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        tool_outputs: Optional[List[Dict[str, Any]]] = None,
-        assistant_name: Optional[str] = None,
-        agent_id: Optional[Union[int, str]] = None
-    ) -> None:
-        """Add a response to the message history.
+        assistant_name: Optional[str] = None, 
+        tool_calls: List[Dict] = None, 
+        tool_outputs: List[Dict] = None,
+        agent_id: Optional[Union[int, str]] = None,
+        system_prompt: Optional[str] = None
+    ) -> ModelMessage:
+        """Add an assistant response to the history.
         
         Args:
-            content: The text content of the response.
-            tool_calls: Optional list of tool calls to include in the response.
-            tool_outputs: Optional list of tool outputs to include in the response.
+            content: The response content.
             assistant_name: Optional name of the assistant.
+            tool_calls: Optional list of tool calls made during processing.
+            tool_outputs: Optional list of outputs from tool calls.
             agent_id: Optional agent ID associated with the message.
+            system_prompt: Optional system prompt to include with the response.
             
         Returns:
-            None: This method doesn't return anything, it just adds the message to history.
+            The created assistant response message.
         """
-        # Don't try to create a session if it doesn't exist - the API should handle this
-        if not self.session_id:
-            logger.warning("Empty session_id provided to add_response, this may cause issues")
-            
-        # Create text part with response content
-        text_part = TextPart(content=content)
-        
-        # Add assistant name if provided
-        if assistant_name:
-            text_part.assistant_name = assistant_name
+        # Create a text part with the assistant name
+        text_part = TextPart(content=content, assistant_name=assistant_name)
         
         # Start with the text part
         parts = [text_part]
         
-        # Add any tool calls
+        # Add tool call parts if any
         if tool_calls:
             for tc in tool_calls:
-                if isinstance(tc, dict) and "tool_name" in tc:
+                if tc and isinstance(tc, dict) and tc.get("tool_name"):
                     try:
-                        # Create a ToolCall object
                         tool_call = ToolCall(
-                            tool_name=tc["tool_name"],
+                            tool_name=tc.get("tool_name"),
                             args=tc.get("args", {}),
                             tool_call_id=tc.get("tool_call_id", "")
                         )
-                        # Add it as a part
                         parts.append(ToolCallPart(tool_call=tool_call))
                     except Exception as e:
-                        logger.error(f"Error adding tool call: {str(e)}")
+                        logger.error(f"Error creating ToolCallPart: {str(e)}")
         
-        # Add any tool outputs
+        # Add tool output parts if any
         if tool_outputs:
             for to in tool_outputs:
-                if isinstance(to, dict) and "tool_name" in to and "content" in to:
+                if to and isinstance(to, dict) and to.get("tool_name"):
                     try:
-                        # Create a ToolOutput object
                         tool_output = ToolOutput(
-                            tool_name=to["tool_name"],
-                            content=to["content"],
-                            tool_call_id=to.get("tool_call_id", "")
+                            tool_name=to.get("tool_name"),
+                            tool_call_id=to.get("tool_call_id", ""),
+                            content=to.get("content", "")
                         )
-                        # Add it as a part
                         parts.append(ToolOutputPart(tool_output=tool_output))
                     except Exception as e:
-                        logger.error(f"Error adding tool output: {str(e)}")
+                        logger.error(f"Error creating ToolOutputPart: {str(e)}")
         
-        # Create the response message with all parts
-        response = ModelResponse(parts=parts)
+        # Create the response message
+        message = ModelResponse(parts=parts)
         
         # Add agent ID if provided
         if agent_id:
-            response.agent_id = agent_id
+            message.agent_id = agent_id
+            
+        # Add system prompt if provided
+        if system_prompt:
+            message.system_prompt = system_prompt
         
-        # Add the message to history
-        self._store.add_message(self.session_id, response)
+        # Add the message to the store
+        self._store.add_message(self.session_id, message)
+        
+        return message
 
     def clear(self) -> None:
         """Clear all messages in the current session."""
