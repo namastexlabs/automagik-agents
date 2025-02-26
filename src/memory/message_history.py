@@ -96,7 +96,7 @@ class MessageHistory:
         if system_prompt:
             self.add_system_prompt(system_prompt)
     
-    def add_system_prompt(self, content: str, agent_id: Optional[str] = None) -> ModelMessage:
+    def add_system_prompt(self, content: str, agent_id: Optional[Union[int, str]] = None) -> ModelMessage:
         """Add or update the system prompt for this conversation.
         
         Args:
@@ -121,7 +121,7 @@ class MessageHistory:
         self._store.update_system_prompt(self.session_id, content)
         return message
     
-    def add(self, content: str, agent_id: Optional[str] = None) -> ModelMessage:
+    def add(self, content: str, agent_id: Optional[Union[int, str]] = None) -> ModelMessage:
         """Add a user message to the history.
         
         Args:
@@ -151,7 +151,7 @@ class MessageHistory:
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         tool_outputs: Optional[List[Dict[str, Any]]] = None,
         assistant_name: Optional[str] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[Union[int, str]] = None
     ) -> None:
         """Add a response to the message history.
         

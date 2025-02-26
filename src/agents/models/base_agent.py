@@ -5,13 +5,14 @@ from pydantic_ai import Agent
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
 import time
+from abc import ABC, abstractmethod
 
 class AgentConfig(BaseModel):
     """Configuration for agents."""
     model: str
     retries: Optional[int] = None
 
-class BaseAgent:
+class BaseAgent(ABC):
     """Base agent class with common functionality."""
     
     def __init__(self, config: Dict[str, str], system_prompt: str):
@@ -37,18 +38,31 @@ class BaseAgent:
         """Post-initialization tasks. Can be overridden by subclasses."""
         self.register_tools()
 
-    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: int = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
-        """Process a user message and return a response.
+    @abstractmethod
+    async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse:
+        """Run the agent with the given message and message history.
         
         Args:
-            user_message: The message from the user
-            session_id: Optional session ID for message history
-            agent_id: Optional agent ID for database tracking
-            user_id: User ID for database association, defaults to 1 
-            context: Optional dictionary of additional context/metadata for the message
+            user_message: User message (already in message_history)
+            message_history: Message history for this session
             
         Returns:
-            AgentBaseResponse containing the response and metadata
+            Agent response
+        """
+        pass
+    
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[Union[int, str]] = None, user_id: int = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
+        """Process a user message with this agent.
+        
+        Args:
+            user_message: User message to process
+            session_id: Optional session ID
+            agent_id: Optional agent ID for database tracking (integer or string for backwards compatibility)
+            user_id: User ID (integer)
+            context: Optional additional context that will be logged but not passed to the agent due to API limitations
+            
+        Returns:
+            Agent response
         """
         if not session_id:
             # Using empty string is no longer allowed - we need a valid session ID
@@ -78,11 +92,11 @@ class BaseAgent:
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 
         try:
-            # Pass context to the agent run method if it needs additional metadata
+            # The agent.run() method doesn't accept extra_context parameter
+            # Just pass the required parameters
             result = await self.agent.run(
                 user_message,
-                message_history=message_history.messages,
-                extra_context=context  # Pass additional context to the agent
+                message_history=message_history.messages
             )
             logging.info(f"Agent run completed. Result type: {type(result)}")
         except Exception as e:

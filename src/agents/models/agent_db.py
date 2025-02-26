@@ -3,7 +3,7 @@
 import json
 import logging
 import uuid
-from typing import Dict, List, Optional, Any, Type
+from typing import Dict, List, Optional, Any, Type, Union
 from datetime import datetime
 
 from src.utils.db import execute_query
@@ -12,7 +12,7 @@ from src.version import SERVICE_INFO
 # Configure logger
 logger = logging.getLogger(__name__)
 
-def register_agent(name: str, agent_type: str, model: str, description: Optional[str] = None, config: Optional[Dict] = None) -> str:
+def register_agent(name: str, agent_type: str, model: str, description: Optional[str] = None, config: Optional[Dict] = None) -> Union[int, str]:
     """Register an agent in the database.
     
     Args:
@@ -23,7 +23,7 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
         config: Optional configuration
         
     Returns:
-        The agent ID
+        The agent ID (integer)
     """
     try:
         # Check if agent with this name already exists
@@ -99,19 +99,18 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
             )
         else:
             # Fallback to the old method of generating sequential agent IDs
-            result = execute_query("SELECT MAX(id) as max_id FROM agents WHERE id LIKE 'a_%'")
+            # Instead of using LIKE on integer column, check for IDs larger than 0
+            result = execute_query("SELECT MAX(id) as max_id FROM agents WHERE id > 0")
             
-            if result and result[0]["max_id"]:
-                # Extract number from last ID and increment
-                try:
-                    last_num = int(result[0]["max_id"].split('_')[1])
-                    agent_id = f"a_{last_num + 1}"
-                except (ValueError, IndexError):
-                    # Fallback if parsing fails
-                    agent_id = "a_1"
+            if result and result[0]["max_id"] is not None:
+                # Parse the existing ID to get the next one
+                next_id = int(result[0]["max_id"]) + 1
+                # Changed to use integer IDs directly rather than string with prefix
+                agent_id = next_id
             else:
-                # No existing a_X IDs, start with a_1
-                agent_id = "a_1"
+                # No existing agents with ID pattern - start at 1
+                # Changed to use integer IDs directly
+                agent_id = 1
             
             # Insert with the generated ID
             execute_query(
@@ -145,14 +144,14 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
         logger.error(f"Error registering agent {name}: {str(e)}")
         raise
 
-def get_agent(agent_id: str) -> Optional[Dict[str, Any]]:
+def get_agent(agent_id: Union[int, str]) -> Optional[Dict[str, Any]]:
     """Get agent details by ID.
     
     Args:
-        agent_id: The agent ID
+        agent_id: The agent ID (integer or string for backwards compatibility)
         
     Returns:
-        The agent details as a dictionary, or None if not found
+        Agent details as a dictionary, or None if not found
     """
     try:
         agents = execute_query(
@@ -195,15 +194,15 @@ def list_agents() -> List[Dict[str, Any]]:
         logger.error(f"Error listing agents: {str(e)}")
         return []
 
-def link_session_to_agent(session_id: str, agent_id: str) -> bool:
-    """Associate a session with an agent in memory (not in database).
+def link_session_to_agent(session_id: str, agent_id: Union[int, str]) -> bool:
+    """Link a session to an agent in the database.
     
     Args:
         session_id: The session ID
-        agent_id: The agent ID
+        agent_id: The agent ID (integer or string for backwards compatibility)
         
     Returns:
-        True if successful, False otherwise
+        True on success, False on failure
     """
     try:
         # Check if agent exists
@@ -219,14 +218,14 @@ def link_session_to_agent(session_id: str, agent_id: str) -> bool:
         logger.error(f"Error linking session {session_id} to agent {agent_id}: {str(e)}")
         return False
 
-def deactivate_agent(agent_id: str) -> bool:
-    """Deactivate an agent (mark as inactive).
+def deactivate_agent(agent_id: Union[int, str]) -> bool:
+    """Deactivate an agent.
     
     Args:
-        agent_id: The agent ID
+        agent_id: The agent ID (integer or string for backwards compatibility)
         
     Returns:
-        True if successful, False otherwise
+        True on success, False on failure
     """
     try:
         execute_query(

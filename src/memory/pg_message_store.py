@@ -106,8 +106,11 @@ class PostgresMessageStore(MessageStore):
             session_id: The unique session identifier.
             message: The message to add.
         """
-        # Default to user_id=1 to match our database schema
-        user_id = 1  # Default user ID
+        # Ensure this default is consistent with our int type
+        user_id = 1
+        
+        # Get agent_id if it exists
+        agent_id = getattr(message, "agent_id", None)
         
         try:
             logger.info(f"🔍 Adding message for session {session_id} and user {user_id}")
@@ -128,9 +131,6 @@ class PostgresMessageStore(MessageStore):
             assistant_name = None
             if role == "assistant" and isinstance(message.parts[0], TextPart) and hasattr(message.parts[0], "assistant_name"):
                 assistant_name = message.parts[0].assistant_name
-            
-            # Extract agent ID if present
-            agent_id = getattr(message, "agent_id", None)
             
             # Extract tool calls and outputs
             tool_calls = []
@@ -231,8 +231,8 @@ class PostgresMessageStore(MessageStore):
             session_id: The unique session identifier.
             system_prompt: The system prompt content.
         """
-        # Default values
-        user_id = 1  # Default user ID as integer
+        # Set default values
+        user_id = 1
         agent_id = None  # Default agent ID
         
         try:
