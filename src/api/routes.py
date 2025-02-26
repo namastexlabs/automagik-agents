@@ -24,7 +24,9 @@ router = APIRouter()
 # Get our module's logger
 logger = logging.getLogger(__name__)
 
-@router.get("/agent/list", response_model=List[AgentInfo])
+@router.get("/agent/list", response_model=List[AgentInfo], tags=["Agents"], 
+           summary="List Available Agents",
+           description="Returns a list of all available agent templates that can be used.")
 async def list_agents():
     """List all available agents."""
     return [
@@ -32,7 +34,9 @@ async def list_agents():
         for name in AgentFactory.list_available_agents()
     ]
 
-@router.post("/agent/{agent_name}/run")
+@router.post("/agent/{agent_name}/run", tags=["Agents"],
+            summary="Run Agent",
+            description="Execute an agent with the specified name. Optionally provide a session ID to maintain conversation context.")
 async def run_agent(agent_name: str, request: AgentRunRequest):
     """Run an agent with the given name."""
     try:
@@ -111,7 +115,9 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         logger.exception(f"Error running agent {agent_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/session/{session_id}")
+@router.delete("/session/{session_id}", tags=["Sessions"],
+              summary="Delete Session",
+              description="Delete a session's message history by its ID.")
 async def delete_session(session_id: str):
     """Delete a session's message history.
     
@@ -158,7 +164,10 @@ async def delete_session(session_id: str):
             detail=f"Failed to delete session: {str(e)}"
         )
 
-@router.get("/session/{session_id}", response_model=SessionResponse, response_model_exclude_none=True)
+@router.get("/session/{session_id}", response_model=SessionResponse, response_model_exclude_none=True, 
+           tags=["Sessions"],
+           summary="Get Session History",
+           description="Retrieve a session's message history with pagination options.")
 async def get_session(
     session_id: str,
     page: int = 1,

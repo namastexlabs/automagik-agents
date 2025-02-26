@@ -28,7 +28,24 @@ def create_app() -> FastAPI:
         version=SERVICE_INFO["version"],
         docs_url=None,  # Disable default docs url
         redoc_url=None,  # Disable default redoc url
-        openapi_url=None  # Disable default openapi url
+        openapi_url=None,  # Disable default openapi url
+        openapi_tags=[
+            {
+                "name": "System",
+                "description": "System endpoints for status and health checking",
+                "order": 1,
+            },
+            {
+                "name": "Agents",
+                "description": "Endpoints for listing available agents and running agent tasks",
+                "order": 2,
+            },
+            {
+                "name": "Sessions",
+                "description": "Endpoints to manage and retrieve agent conversation sessions",
+                "order": 3,
+            },
+        ]
     )
 
     # Add CORS middleware
@@ -195,14 +212,14 @@ def create_app() -> FastAPI:
         logger.warning("⚠️ Using in-memory CacheMessageStore as fallback - MESSAGES WILL NOT BE PERSISTED!")
 
     # Root and health endpoints (no auth required)
-    @app.get("/")
+    @app.get("/", tags=["System"], summary="Root Endpoint", description="Returns service information and status")
     async def root():
         return {
             "status": "online",
             **SERVICE_INFO
         }
 
-    @app.get("/health")
+    @app.get("/health", tags=["System"], summary="Health Check", description="Returns health status of the service")
     async def health_check() -> HealthResponse:
         return HealthResponse(
             status="healthy",

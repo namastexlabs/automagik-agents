@@ -28,7 +28,9 @@ async def custom_docs():
                     SwaggerUIBundle.SwaggerUIStandalonePreset
                 ],
                 layout: "BaseLayout",
-                deepLinking: true
+                deepLinking: true,
+                displayRequestDuration: true,
+                filter: true
             });
         </script>
     </body>
@@ -72,13 +74,50 @@ async def get_openapi_json(request: Request):
         routes=app.routes,
     )
     
+    # Add API Key security scheme
+    openapi_schema["components"] = openapi_schema.get("components", {})
+    openapi_schema["components"]["securitySchemes"] = {
+        "APIKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "x-api-key",
+            "description": "API key authentication"
+        },
+        "APIKeyQuery": {
+            "type": "apiKey",
+            "in": "query",
+            "name": "x-api-key",
+            "description": "API key authentication via query parameter"
+        }
+    }
+    
+    # Apply security to all endpoints except those that don't need auth
+    security_requirement = [{"APIKeyHeader": []}, {"APIKeyQuery": []}]
+    no_auth_paths = ["/", "/health", "/api/v1/docs", "/api/v1/redoc", "/api/v1/openapi.json"]
+    
     # Update the schema to use /api/v1 prefix in the OpenAPI docs
     paths = {}
     for path, path_item in openapi_schema["paths"].items():
         if not path.startswith("/api/v1") and path not in ["/", "/health"]:
             continue
+        
+        # Add security requirement to protected endpoints
+        if path not in no_auth_paths:
+            for operation in path_item.values():
+                operation["security"] = security_requirement
+                
+                # Add authentication description to each endpoint
+                if "description" in operation:
+                    operation["description"] += "\n\n**Requires Authentication**: This endpoint requires an API key."
+                else:
+                    operation["description"] = "**Requires Authentication**: This endpoint requires an API key."
+        
         paths[path] = path_item
         
     openapi_schema["paths"] = paths
+    
+    # Apply global security if needed (alternative approach)
+    # openapi_schema["security"] = security_requirement
+    
     app.openapi_schema = openapi_schema
     return app.openapi_schema 
