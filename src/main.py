@@ -83,7 +83,7 @@ def create_app() -> FastAPI:
         import uuid
         from datetime import datetime
         test_session_id = f"startup-test-{uuid.uuid4()}"
-        test_user_id = "default_user"
+        test_user_id = 1  # Use numeric ID instead of string
         
         # First ensure the default user exists
         default_user_exists = execute_query(
@@ -225,9 +225,42 @@ app.include_router(docs_router)
 
 if __name__ == "__main__":
     import uvicorn
+    import argparse
+    
+    # Create argument parser
+    parser = argparse.ArgumentParser(description="Run the Sofia application server")
+    parser.add_argument(
+        "--reload", 
+        action="store_true", 
+        default=False,
+        help="Enable auto-reload for development (default: False)"
+    )
+    parser.add_argument(
+        "--host", 
+        type=str, 
+        default=settings.AM_HOST,
+        help=f"Host to bind the server to (default: {settings.AM_HOST})"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=int(settings.AM_PORT),
+        help=f"Port to bind the server to (default: {settings.AM_PORT})"
+    )
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Log the configuration
+    logger.info(f"Starting server with configuration:")
+    logger.info(f"├── Host: {args.host}")
+    logger.info(f"├── Port: {args.port}")
+    logger.info(f"└── Auto-reload: {'Enabled' if args.reload else 'Disabled'}")
+    
+    # Run the server
     uvicorn.run(
         "src.main:app",
-        host=settings.AM_HOST,
-        port=int(settings.AM_PORT),
-        reload=True
+        host=args.host,
+        port=args.port,
+        reload=args.reload
     )

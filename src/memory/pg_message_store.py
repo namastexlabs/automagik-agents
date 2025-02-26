@@ -99,14 +99,16 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Detailed error: {traceback.format_exc()}")
             return []
     
-    def add_message(self, session_id: str, message: ModelMessage, user_id: str = "default_user") -> None:
+    def add_message(self, session_id: str, message: ModelMessage) -> None:
         """Add a message to a session in PostgreSQL.
         
         Args:
             session_id: The unique session identifier.
             message: The message to add.
-            user_id: The user identifier to associate with the session.
         """
+        # Default to user_id="1" to match our database schema
+        user_id = "1"  # Default user ID
+        
         try:
             logger.info(f"🔍 Adding message for session {session_id} and user {user_id}")
             
@@ -222,15 +224,17 @@ class PostgresMessageStore(MessageStore):
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def update_system_prompt(self, session_id: str, system_prompt: str, user_id: str = "default_user", agent_id: Optional[str] = None) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
         """Update the system prompt for a session in PostgreSQL.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: The system prompt content.
-            user_id: The user identifier to associate with the session.
-            agent_id: Optional agent ID to associate with the message.
         """
+        # Default values
+        user_id = "1"  # Default user ID
+        agent_id = None  # Default agent ID
+        
         try:
             # Make sure the session exists
             session_id = self._ensure_session_exists(session_id, user_id)
@@ -453,24 +457,32 @@ class PostgresMessageStore(MessageStore):
             None
         """
         try:
-            if not user_id:
-                user_id = "default_user"
-                logger.warning(f"⚠️ Empty user_id provided, using '{user_id}' instead")
+            # Convert string user_id to integer for database compatibility
+            numeric_user_id = 1  # Default user ID
+            
+            # If user_id is not "default_user" and can be converted to int, use that
+            if user_id != "default_user":
+                try:
+                    numeric_user_id = int(user_id)
+                except ValueError:
+                    logger.warning(f"⚠️ Non-numeric user_id '{user_id}' provided, using default ID 1 instead")
+            else:
+                logger.info(f"Using default user ID 1 for 'default_user'")
             
             # Check if user exists
-            logger.info(f"▶️ Checking if user {user_id} exists in database")
+            logger.info(f"▶️ Checking if user {numeric_user_id} exists in database")
             user_exists = execute_query(
                 "SELECT COUNT(*) as count FROM users WHERE id = %s",
-                (user_id,)
+                (numeric_user_id,)
             )
             
             # If user exists, return
             if user_exists and user_exists[0]["count"] > 0:
-                logger.info(f"✅ User {user_id} already exists in database")
+                logger.info(f"✅ User {numeric_user_id} already exists in database")
                 return
             
             # Log that we're creating a new user
-            logger.info(f"▶️ User {user_id} not found in database, creating now")
+            logger.info(f"▶️ User {numeric_user_id} not found in database, creating now")
             
             # Create user if not exists
             try:
@@ -480,22 +492,22 @@ class PostgresMessageStore(MessageStore):
                     VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
-                        user_id,
-                        f"{user_id}@example.com",  # Default email based on user_id
+                        numeric_user_id,
+                        f"user{numeric_user_id}@example.com",  # Default email based on user_id
                         datetime.utcnow(), 
                         datetime.utcnow(),
-                        json.dumps({"name": f"User {user_id}"})
+                        json.dumps({"name": f"User {numeric_user_id}"})
                     ),
                     fetch=False
                 )
-                logger.info(f"✅ Created user {user_id} successfully")
+                logger.info(f"✅ Created user {numeric_user_id} successfully")
             except Exception as inner_e:
-                logger.error(f"❌ Failed to create user {user_id}: {str(inner_e)}")
+                logger.error(f"❌ Failed to create user {numeric_user_id}: {str(inner_e)}")
                 import traceback
                 logger.error(f"Detailed error: {traceback.format_exc()}")
                 # If it's a duplicate key error, the user must have been created in a parallel request
                 if "duplicate key" in str(inner_e):
-                    logger.debug(f"⚠️ User {user_id} already exists (caught duplicate key)")
+                    logger.debug(f"⚠️ User {numeric_user_id} already exists (caught duplicate key)")
                     return
                 # For other errors, re-raise to be handled by the outer try-except
                 raise

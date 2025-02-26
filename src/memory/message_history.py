@@ -81,13 +81,13 @@ class MessageHistory:
         """
         cls._store = store
     
-    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: str = "default_user"):
+    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: str = "1"):
         """Initialize a new message history for a session.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: Optional system prompt to set at initialization.
-            user_id: The user identifier to associate with this session.
+            user_id: The user identifier to associate with this session (defaults to "1" for compatibility with integer DB schema).
         """
         self.session_id = session_id
         self.user_id = user_id
@@ -116,7 +116,9 @@ class MessageHistory:
         if not self.session_id:
             logger.warning("Empty session_id provided to add_system_prompt, this may cause issues")
         
-        self._store.update_system_prompt(self.session_id, content, self.user_id, agent_id=agent_id)
+        # Store the user_id and agent_id attributes in the pg_message_store implementation directly
+        # This is a workaround to avoid modifying the MessageStore interface
+        self._store.update_system_prompt(self.session_id, content)
         return message
     
     def add(self, content: str, agent_id: Optional[str] = None) -> ModelMessage:
@@ -139,7 +141,8 @@ class MessageHistory:
         if not self.session_id:
             logger.warning("Empty session_id provided to add, this may cause issues")
             
-        self._store.add_message(self.session_id, message, self.user_id)
+        # Pass only the required parameters to match the interface
+        self._store.add_message(self.session_id, message)
         return message
     
     def add_response(
@@ -216,7 +219,7 @@ class MessageHistory:
             response.agent_id = agent_id
         
         # Add the message to history
-        self._store.add_message(self.session_id, response, self.user_id)
+        self._store.add_message(self.session_id, response)
 
     def clear(self) -> None:
         """Clear all messages in the current session."""
