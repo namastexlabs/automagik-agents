@@ -460,14 +460,11 @@ class PostgresMessageStore(MessageStore):
             # Convert string user_id to integer for database compatibility
             numeric_user_id = 1  # Default user ID
             
-            # If user_id is not "default_user" and can be converted to int, use that
-            if user_id != "default_user":
-                try:
-                    numeric_user_id = int(user_id)
-                except ValueError:
-                    logger.warning(f"⚠️ Non-numeric user_id '{user_id}' provided, using default ID 1 instead")
-            else:
-                logger.info(f"Using default user ID 1 for 'default_user'")
+            # Convert user_id to integer if possible
+            try:
+                numeric_user_id = int(user_id)
+            except ValueError:
+                logger.warning(f"⚠️ Non-numeric user_id '{user_id}' provided, using default ID 1 instead")
             
             # Check if user exists
             logger.info(f"▶️ Checking if user {numeric_user_id} exists in database")

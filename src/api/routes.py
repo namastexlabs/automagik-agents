@@ -66,13 +66,8 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Store channel_payload in the users table if provided
         if request.channel_payload:
             try:
-                # Convert user_id to numeric if possible
-                numeric_user_id = 1  # Default
-                if request.user_id != "default_user":
-                    try:
-                        numeric_user_id = int(request.user_id)
-                    except ValueError:
-                        logger.warning(f"Non-numeric user_id provided: {request.user_id}, using default ID 1")
+                # Use the user_id directly as an integer
+                numeric_user_id = request.user_id if request.user_id is not None else 1
                 
                 # Update the user record with the channel_payload
                 execute_query(
@@ -93,7 +88,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 logger.error(f"Error updating channel_payload for user {request.user_id}: {str(e)}")
         
         # Get message history with user_id
-        message_history = MessageHistory(request.session_id, user_id=request.user_id)
+        message_history = MessageHistory(request.session_id, user_id=str(request.user_id))
         
         # Link the agent to the session in the database
         AgentFactory.link_agent_to_session(agent_name, request.session_id)

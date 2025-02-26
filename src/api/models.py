@@ -19,7 +19,7 @@ class AgentRunRequest(BaseResponseModel):
     channel_payload: Optional[Dict[str, Any]] = None
     context: dict = {}
     session_id: Optional[str] = None
-    user_id: Optional[str] = "default_user"  # Default user ID if none provided
+    user_id: Optional[int] = 1  # User ID is now an integer with default value 1
     message_limit: Optional[int] = 10  # Default to last 10 messages
 
 class AgentInfo(BaseResponseModel):

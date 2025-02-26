@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from src.agents.models.agent import AgentBaseResponse
@@ -37,14 +37,14 @@ class BaseAgent:
         """Post-initialization tasks. Can be overridden by subclasses."""
         self.register_tools()
 
-    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: str = "default_user", context: Optional[Dict] = None) -> AgentBaseResponse:
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: Union[str, int] = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
         """Process a user message and return a response.
         
         Args:
             user_message: The message from the user
             session_id: Optional session ID for message history
             agent_id: Optional agent ID for database tracking
-            user_id: User ID for database association, defaults to "default_user" 
+            user_id: User ID for database association, defaults to 1 
             context: Optional dictionary of additional context/metadata for the message
             
         Returns:
