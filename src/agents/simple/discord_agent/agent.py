@@ -3,6 +3,8 @@ import logging
 from pydantic_ai import Agent
 
 from src.agents.models.base_agent import BaseAgent
+from src.agents.models.agent import AgentBaseResponse
+from src.memory.message_history import MessageHistory
 from src.agents.simple.discord_agent.prompts import DISCORD_AGENT_PROMPT
 from src.tools.discord_tools import DiscordTools
 
@@ -50,3 +52,40 @@ class DiscordAgent(BaseAgent):
     @discord_bot_token.setter
     def discord_bot_token(self, value):
         self._discord_bot_token = value
+        
+    async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse:
+        """Run the agent with the given message and message history.
+        
+        Args:
+            user_message: User message (already in message_history)
+            message_history: Message history for this session
+            
+        Returns:
+            Agent response
+        """
+        try:
+            # Run the agent with the user message and message history
+            result = await self.agent.run(
+                user_message,
+                message_history=message_history.messages
+            )
+            
+            # Extract the response text
+            response_text = result.data
+            
+            # Create and return the agent response
+            return AgentBaseResponse.from_agent_response(
+                message=response_text,
+                history=message_history,
+                error=None,
+                session_id=message_history.session_id
+            )
+        except Exception as e:
+            error_msg = f"Error running DiscordAgent: {str(e)}"
+            logger.error(error_msg)
+            return AgentBaseResponse.from_agent_response(
+                message="An error occurred while processing your Discord request.",
+                history=message_history,
+                error=error_msg,
+                session_id=message_history.session_id
+            )

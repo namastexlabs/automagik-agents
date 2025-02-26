@@ -2,6 +2,8 @@ from typing import Dict
 from pydantic_ai import Agent
 
 from src.agents.models.base_agent import BaseAgent
+from src.agents.models.agent import AgentBaseResponse
+from src.memory.message_history import MessageHistory
 from src.agents.simple.simple_agent.prompts import SIMPLE_AGENT_PROMPT
 
 class SimpleAgent(BaseAgent):
@@ -24,3 +26,39 @@ class SimpleAgent(BaseAgent):
         from src.tools.datetime_tools import get_current_date, get_current_time
         self.agent.tool(get_current_date)
         self.agent.tool(get_current_time)
+        
+    async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse:
+        """Run the agent with the given message and message history.
+        
+        Args:
+            user_message: User message (already in message_history)
+            message_history: Message history for this session
+            
+        Returns:
+            Agent response
+        """
+        try:
+            # Run the agent with the user message and message history
+            result = await self.agent.run(
+                user_message,
+                message_history=message_history.messages
+            )
+            
+            # Extract the response text
+            response_text = result.data
+            
+            # Create and return the agent response
+            return AgentBaseResponse.from_agent_response(
+                message=response_text,
+                history=message_history,
+                error=None,
+                session_id=message_history.session_id
+            )
+        except Exception as e:
+            error_msg = f"Error running SimpleAgent: {str(e)}"
+            return AgentBaseResponse.from_agent_response(
+                message="An error occurred while processing your request.",
+                history=message_history,
+                error=error_msg,
+                session_id=message_history.session_id
+            )

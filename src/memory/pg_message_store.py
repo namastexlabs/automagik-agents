@@ -172,8 +172,6 @@ class PostgresMessageStore(MessageStore):
             # Generate a unique message ID
             message_id = f"m_{uuid.uuid4()}"
             
-            # Insert the message
-            logger.info(f"▶️ Inserting message {message_id} into database for session {session_id}")
             try:
                 execute_query(
                     """
@@ -224,16 +222,16 @@ class PostgresMessageStore(MessageStore):
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None) -> None:
         """Update the system prompt for a session in PostgreSQL.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: The system prompt content.
+            agent_id: Optional agent ID associated with the message.
         """
         # Set default values
         user_id = 1
-        agent_id = None  # Default agent ID
         
         try:
             # Make sure the session exists

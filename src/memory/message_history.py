@@ -118,7 +118,7 @@ class MessageHistory:
         
         # Store the user_id and agent_id attributes in the pg_message_store implementation directly
         # This is a workaround to avoid modifying the MessageStore interface
-        self._store.update_system_prompt(self.session_id, content)
+        self._store.update_system_prompt(self.session_id, content, agent_id)
         return message
     
     def add(self, content: str, agent_id: Optional[Union[int, str]] = None) -> ModelMessage:

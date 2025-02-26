@@ -34,12 +34,13 @@ class MessageStore(ABC):
         pass
     
     @abstractmethod
-    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None) -> None:
         """Update or add the system prompt for a session.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: The new system prompt content.
+            agent_id: Optional agent ID associated with the message.
         """
         pass
     
@@ -81,7 +82,7 @@ class CacheMessageStore(MessageStore):
             self._sessions[session_id] = []
         self._sessions[session_id].append(message)
     
-    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None) -> None:
         """Update the system prompt for a session in cache."""
         messages = self._sessions.get(session_id, [])
         
@@ -92,6 +93,11 @@ class CacheMessageStore(MessageStore):
         
         # Add new system prompt at the beginning
         system_message = ModelRequest(parts=[SystemPromptPart(content=system_prompt)])
+        
+        # Add agent ID if provided
+        if agent_id:
+            system_message.agent_id = agent_id
+            
         messages.insert(0, system_message)
         
         self._sessions[session_id] = messages
