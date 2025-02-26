@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import List
+import json
 
 from fastapi import APIRouter, HTTPException
 from src.agents.models.agent_factory import AgentFactory
@@ -62,6 +63,35 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             else:
                 logger.info(f"Using existing session: {request.session_id}")
         
+        # Store channel_payload in the users table if provided
+        if request.channel_payload:
+            try:
+                # Convert user_id to numeric if possible
+                numeric_user_id = 1  # Default
+                if request.user_id != "default_user":
+                    try:
+                        numeric_user_id = int(request.user_id)
+                    except ValueError:
+                        logger.warning(f"Non-numeric user_id provided: {request.user_id}, using default ID 1")
+                
+                # Update the user record with the channel_payload
+                execute_query(
+                    """
+                    UPDATE users 
+                    SET channel_payload = %s, updated_at = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(request.channel_payload),
+                        datetime.utcnow(),
+                        numeric_user_id
+                    ),
+                    fetch=False
+                )
+                logger.info(f"Updated channel_payload for user {numeric_user_id}")
+            except Exception as e:
+                logger.error(f"Error updating channel_payload for user {request.user_id}: {str(e)}")
+        
         # Get message history with user_id
         message_history = MessageHistory(request.session_id, user_id=request.user_id)
         
@@ -91,11 +121,24 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             else:
                 logging.warning(f"Could not find agent ID for agent {agent_name}")
         
+        # Process the message with additional metadata if available
+        message_metadata = {
+            "message_type": request.message_type,
+            "media_url": request.mediaUrl, 
+            "mime_type": request.mime_type
+        }
+        
+        # Log incoming message details
+        logger.info(f"Processing message from user {request.user_id} with type: {request.message_type}")
+        if request.mediaUrl:
+            logger.info(f"Media URL: {request.mediaUrl}, MIME type: {request.mime_type}")
+        
         response = await agent.process_message(
-            request.message_input,
+            request.message_content,  # Use message_content instead of message_input
             session_id=request.session_id,
             agent_id=agent_id,  # Pass the agent ID to be stored with the messages
-            user_id=request.user_id  # Pass the user ID
+            user_id=request.user_id,  # Pass the user ID
+            context={**request.context, **message_metadata}  # Include message metadata in context
         )
         
         # Log the tool call and output counts more safely

@@ -37,14 +37,15 @@ class BaseAgent:
         """Post-initialization tasks. Can be overridden by subclasses."""
         self.register_tools()
 
-    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: str = "default_user") -> AgentBaseResponse:
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[str] = None, user_id: str = "default_user", context: Optional[Dict] = None) -> AgentBaseResponse:
         """Process a user message and return a response.
         
         Args:
             user_message: The message from the user
             session_id: Optional session ID for message history
             agent_id: Optional agent ID for database tracking
-            user_id: User ID for database association, defaults to "default_user"
+            user_id: User ID for database association, defaults to "default_user" 
+            context: Optional dictionary of additional context/metadata for the message
             
         Returns:
             AgentBaseResponse containing the response and metadata
@@ -58,8 +59,15 @@ class BaseAgent:
                 error="No valid session ID provided",
                 session_id=""
             )
+        
+        # Set default context if None is provided
+        context = context or {}
             
         logging.info(f"Using existing session ID: {session_id}")
+        
+        # Log any additional context provided
+        if context:
+            logging.info(f"Additional message context: {context}")
             
         message_history = MessageHistory(session_id, user_id=user_id)
         message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
@@ -70,9 +78,11 @@ class BaseAgent:
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 
         try:
+            # Pass context to the agent run method if it needs additional metadata
             result = await self.agent.run(
                 user_message,
-                message_history=message_history.messages
+                message_history=message_history.messages,
+                extra_context=context  # Pass additional context to the agent
             )
             logging.info(f"Agent run completed. Result type: {type(result)}")
         except Exception as e:

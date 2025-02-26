@@ -12,7 +12,11 @@ class BaseResponseModel(BaseModel):
 
 class AgentRunRequest(BaseResponseModel):
     """Request model for running an agent."""
-    message_input: str
+    message_content: str
+    message_type: Optional[str] = None
+    mediaUrl: Optional[str] = None
+    mime_type: Optional[str] = None
+    channel_payload: Optional[Dict[str, Any]] = None
     context: dict = {}
     session_id: Optional[str] = None
     user_id: Optional[str] = "default_user"  # Default user ID if none provided
