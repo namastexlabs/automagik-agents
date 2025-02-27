@@ -21,6 +21,7 @@ class AgentRunRequest(BaseResponseModel):
     session_id: Optional[str] = None
     user_id: Optional[int] = 1  # User ID is now an integer with default value 1
     message_limit: Optional[int] = 10  # Default to last 10 messages
+    session_origin: Optional[str] = "automagik-agent"  
 
 class AgentInfo(BaseResponseModel):
     """Information about an available agent."""
@@ -88,6 +89,7 @@ class SessionInfo(BaseResponseModel):
     last_updated: Optional[datetime] = None
     message_count: Optional[int] = None
     agent_name: Optional[str] = None
+    session_origin: Optional[str] = None  # Origin of the session (e.g., "web", "api", "discord")
 
 class SessionListResponse(BaseResponseModel):
     """Response model for listing all sessions."""

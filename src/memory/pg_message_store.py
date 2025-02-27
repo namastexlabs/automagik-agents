@@ -368,7 +368,7 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking session {session_id}: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: int, agent_id: Optional = None) -> str:
+    def _ensure_session_exists(self, session_id: str, user_id: int, agent_id: Optional = None, session_origin: str = "web") -> str:
         """
         Ensures a session exists, creating it if necessary.
         Also ensures the user exists, creating it if necessary.
@@ -377,6 +377,7 @@ class PostgresMessageStore(MessageStore):
             session_id: The ID of the session
             user_id: The ID of the user associated with the session (as integer)
             agent_id: Optional agent ID to associate with the session
+            session_origin: Origin of the session (e.g., "web", "api", "discord")
             
         Returns:
             str: The session ID (which may be auto-generated if not provided)
@@ -390,17 +391,26 @@ class PostgresMessageStore(MessageStore):
             if session_id and self.session_exists(session_id):
                 logger.info(f"✅ Session {session_id} already exists")
                 
-                # Update the user_id for the session if it's NULL
+                # Update the user_id and platform for the session if needed
                 execute_query(
                     """
                     UPDATE sessions
-                    SET user_id = %s
-                    WHERE id = %s AND (user_id IS NULL OR user_id = 0)
+                    SET user_id = CASE 
+                            WHEN (user_id IS NULL OR user_id = 0) 
+                            THEN %s 
+                            ELSE user_id 
+                        END,
+                        platform = CASE 
+                            WHEN (platform IS NULL OR platform = '' OR platform <> %s) 
+                            THEN %s 
+                            ELSE platform 
+                        END
+                    WHERE id = %s
                     """,
-                    (user_id, session_id),
+                    (user_id, session_origin, session_origin, session_id),
                     fetch=False
                 )
-                logger.info(f"Updated user_id to {user_id} for existing session {session_id}")
+                logger.info(f"Updated user_id to {user_id} and platform to {session_origin} for existing session {session_id}")
                 
                 # If agent_id is provided, link it to the existing session
                 if agent_id:
@@ -422,7 +432,7 @@ class PostgresMessageStore(MessageStore):
                     logger.info("▶️ Executing INSERT INTO sessions with auto-generated ID")
                     
                     # Check if agent_id column exists in sessions table
-                    column_exists = execute_query(
+                    agent_id_exists = execute_query(
                         """
                         SELECT EXISTS (
                             SELECT FROM information_schema.columns 
@@ -431,26 +441,25 @@ class PostgresMessageStore(MessageStore):
                         """
                     )
                     
-                    if agent_id and column_exists and column_exists[0]["exists"]:
-                        # Include agent_id in the INSERT
-                        result = execute_query(
-                            """
-                            INSERT INTO sessions (user_id, platform, created_at, updated_at, agent_id) 
-                            VALUES (%s, %s, %s, %s, %s)
-                            RETURNING id
-                            """,
-                            (user_id, "web", datetime.utcnow(), datetime.utcnow(), agent_id)
-                        )
-                    else:
-                        # Original INSERT without agent_id
-                        result = execute_query(
-                            """
-                            INSERT INTO sessions (user_id, platform, created_at, updated_at) 
-                            VALUES (%s, %s, %s, %s)
-                            RETURNING id
-                            """,
-                            (user_id, "web", datetime.utcnow(), datetime.utcnow())
-                        )
+                    agent_id_exists = agent_id_exists and agent_id_exists[0]["exists"]
+                    
+                    # Build the SQL dynamically based on the columns that exist
+                    columns = ["user_id", "platform", "created_at", "updated_at"]
+                    values = [user_id, session_origin, datetime.utcnow(), datetime.utcnow()]
+                    
+                    if agent_id and agent_id_exists:
+                        columns.append("agent_id")
+                        values.append(agent_id)
+                    
+                    # Construct the SQL query with the correct number of placeholders
+                    placeholders = ', '.join(['%s' for _ in values])
+                    sql = f"""
+                        INSERT INTO sessions ({', '.join(columns)}) 
+                        VALUES ({placeholders})
+                        RETURNING id
+                    """
+                    
+                    result = execute_query(sql, values)
                     
                     if result and len(result) > 0:
                         new_session_id = result[0]["id"]
@@ -473,7 +482,7 @@ class PostgresMessageStore(MessageStore):
                     logger.info(f"▶️ Executing INSERT INTO sessions with provided ID: {session_id}")
                     
                     # Check if agent_id column exists in sessions table
-                    column_exists = execute_query(
+                    agent_id_exists = execute_query(
                         """
                         SELECT EXISTS (
                             SELECT FROM information_schema.columns 
@@ -482,26 +491,24 @@ class PostgresMessageStore(MessageStore):
                         """
                     )
                     
-                    if agent_id and column_exists and column_exists[0]["exists"]:
-                        # Include agent_id in the INSERT
-                        execute_query(
-                            """
-                            INSERT INTO sessions (id, user_id, platform, created_at, updated_at, agent_id) 
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            """,
-                            (session_id, user_id, "web", datetime.utcnow(), datetime.utcnow(), agent_id),
-                            fetch=False
-                        )
-                    else:
-                        # Original INSERT without agent_id
-                        execute_query(
-                            """
-                            INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
-                            VALUES (%s, %s, %s, %s, %s)
-                            """,
-                            (session_id, user_id, "web", datetime.utcnow(), datetime.utcnow()),
-                            fetch=False
-                        )
+                    agent_id_exists = agent_id_exists and agent_id_exists[0]["exists"]
+                    
+                    # Build the SQL dynamically based on the columns that exist
+                    columns = ["id", "user_id", "platform", "created_at", "updated_at"]
+                    values = [session_id, user_id, session_origin, datetime.utcnow(), datetime.utcnow()]
+                    
+                    if agent_id and agent_id_exists:
+                        columns.append("agent_id")
+                        values.append(agent_id)
+                    
+                    # Construct the SQL query with the correct number of placeholders
+                    placeholders = ', '.join(['%s' for _ in values])
+                    sql = f"""
+                        INSERT INTO sessions ({', '.join(columns)}) 
+                        VALUES ({placeholders})
+                    """
+                    
+                    execute_query(sql, values, fetch=False)
                     
                     logger.info(f"✅ Created new session {session_id} for user {user_id}")
                 except Exception as e:
@@ -509,17 +516,26 @@ class PostgresMessageStore(MessageStore):
                     if "duplicate key" in str(e):
                         logger.debug(f"⚠️ Session {session_id} already exists (caught duplicate key)")
                         
-                        # Update the user_id for the session if it's NULL
+                        # Update the user_id for the session if it's NULL and update platform if different
                         execute_query(
                             """
                             UPDATE sessions
-                            SET user_id = %s
-                            WHERE id = %s AND (user_id IS NULL OR user_id = 0)
+                            SET user_id = CASE 
+                                    WHEN (user_id IS NULL OR user_id = 0) 
+                                    THEN %s 
+                                    ELSE user_id 
+                                END,
+                                platform = CASE 
+                                    WHEN (platform IS NULL OR platform = '' OR platform <> %s) 
+                                    THEN %s 
+                                    ELSE platform 
+                                END
+                            WHERE id = %s
                             """,
-                            (user_id, session_id),
+                            (user_id, session_origin, session_origin, session_id),
                             fetch=False
                         )
-                        logger.info(f"Updated user_id to {user_id} for existing session {session_id}")
+                        logger.info(f"Updated user_id to {user_id} and platform for existing session {session_id}")
                         
                         return session_id
                     # Otherwise log the error but return the session_id anyway
@@ -823,8 +839,10 @@ class PostgresMessageStore(MessageStore):
                     "created_at": session['created_at'],
                     "last_updated": session['last_updated'],
                     "message_count": int(session['message_count']) if session['message_count'] is not None else 0,
-                    "agent_name": session['agent_name']
+                    "agent_name": session['agent_name'],
+                    "session_origin": session['platform']  # Map platform to session_origin for API compatibility
                 }
+                
                 sessions.append(session_info)
             
             logger.info(f"✅ Retrieved {len(sessions)} sessions (page {page}/{total_pages})")

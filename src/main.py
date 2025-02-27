@@ -12,12 +12,46 @@ from src.api.models import HealthResponse
 from src.api.routes import router as api_router
 from src.memory.message_history import MessageHistory
 from src.memory.pg_message_store import PostgresMessageStore
+from src.agents.models.agent_factory import AgentFactory
 
 # Configure logging
 configure_logging()
 
 # Get our module's logger
 logger = logging.getLogger(__name__)
+
+def initialize_all_agents():
+    """Initialize all available agents at startup.
+    
+    This ensures that agents are created and registered in the database
+    before any API requests are made, rather than waiting for the first
+    run request.
+    """
+    try:
+        logger.info("🔧 Initializing all available agents...")
+        
+        # Discover all available agents
+        AgentFactory.discover_agents()
+        
+        # Get the list of available agents
+        available_agents = AgentFactory.list_available_agents()
+        logger.info(f"Found {len(available_agents)} available agents: {', '.join(available_agents)}")
+        
+        # Initialize each agent
+        for agent_name in available_agents:
+            try:
+                logger.info(f"Initializing agent: {agent_name}")
+                # This will create and register the agent
+                AgentFactory.get_agent(agent_name)
+                logger.info(f"✅ Agent {agent_name} initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize agent {agent_name}: {str(e)}")
+        
+        logger.info("✅ All agents initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize agents: {str(e)}")
+        import traceback
+        logger.error(f"Detailed error: {traceback.format_exc()}")
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -59,6 +93,12 @@ def create_app() -> FastAPI:
 
     # Add authentication middleware
     app.add_middleware(APIKeyMiddleware)
+    
+    # Register startup event to initialize agents
+    @app.on_event("startup")
+    async def startup_event():
+        # Initialize all agents at startup
+        initialize_all_agents()
     
     # Set up database message store regardless of environment
     try:
@@ -210,6 +250,9 @@ def create_app() -> FastAPI:
         from src.memory.message_store import CacheMessageStore
         MessageHistory.set_message_store(CacheMessageStore())
         logger.warning("⚠️ Using in-memory CacheMessageStore as fallback - MESSAGES WILL NOT BE PERSISTED!")
+    
+    # Remove direct call since we're using the startup event
+    # initialize_all_agents()
 
     # Root and health endpoints (no auth required)
     @app.get("/", tags=["System"], summary="Root Endpoint", description="Returns service information and status")
