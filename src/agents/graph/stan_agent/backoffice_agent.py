@@ -1,5 +1,6 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import logging
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from src.agents.models.base_agent import BaseAgent
@@ -12,23 +13,40 @@ logger = logging.getLogger(__name__)
 
 # Backoffice agent system prompt
 BACKOFFICE_PROMPT = (
-    "You are the Backoffice agent for Solid, responsible for validating client information "
+    "You are the Backoffice specialist agent for Solid, responsible for validating client information "
     "and managing client data in our systems.\n\n"
     
     "Your primary responsibilities are:\n"
     "1. Validating CNPJ numbers\n"
     "2. Searching for existing clients in our systems\n"
-    "3. Updating client contact information\n\n"
+    "3. Updating client contact information\n"
+    "4. Creating new client records\n\n"
     
     "Important guidelines:\n"
     "- Be thorough and accurate in your validation\n"
-    "- Never mention internal tools like Omie or BlackPearl - refer to them generically as 'our system'\n"
-    "- Always provide clear feedback about validation results\n"
-    "- When a CNPJ is invalid, explain why it's invalid\n"
-    "- When a client is found, provide all relevant information\n\n"
+    "- Return detailed, structured information that the host agent can process\n"
+    "- When a CNPJ is invalid, explain exactly why it's invalid\n"
+    "- When a client is found, provide all relevant information\n"
+    "- Summarize your findings and recommendations clearly\n\n"
     
-    "When responding, focus on providing factual information without unnecessary commentary."
+    "Remember: You are being called by the main host agent. Provide factual information without "
+    "unnecessary conversation. Be comprehensive but concise in your responses.\n\n"
+    
+    "Always organize your response in this format:\n"
+    "1. Summary of findings\n"
+    "2. Detailed information (as relevant)\n"
+    "3. Clear recommendation for next steps"
 )
+
+class BackofficeAgentResponse(BaseModel):
+    """Structured response for Backoffice Agent."""
+    message: str
+    cnpj_valid: Optional[bool] = None
+    client_exists: Optional[bool] = None
+    client_data: Optional[Dict[str, Any]] = None
+    registration_status: Optional[str] = None
+    action_taken: Optional[str] = None
+    recommendation: Optional[str] = None
 
 class BackofficeAgent(BaseAgent):
     """Backoffice agent implementation for client validation and management."""
@@ -69,6 +87,39 @@ class BackofficeAgent(BaseAgent):
         # Register Omie tools for backoffice
         for tool in omie_tools.get_backoffice_tools():
             self.agent.tool(tool)
+    
+    async def create_client(self, cnpj: str, name: str, email: str, phone: str) -> Dict[str, Any]:
+        """Create a new client in the system.
+        
+        Args:
+            cnpj: The CNPJ number
+            name: The client name
+            email: The client email
+            phone: The client phone number
+            
+        Returns:
+            Dictionary with client creation result
+        """
+        try:
+            # Initialize BlackPearl tools
+            blackpearl_tools = BlackPearlTools(self.blackpearl_token)
+            
+            # Create client
+            client_data = {
+                "cnpj": cnpj,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "status": "PENDING"
+            }
+            
+            # Call the create client API
+            result = await blackpearl_tools.create_client(client_data)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error creating client: {str(e)}")
+            return {"error": str(e), "success": False}
             
     async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse:
         """Run the agent with the given message and message history.

@@ -1,92 +1,67 @@
-"""Chroma DB tools for Stan agent."""
+"""Mock implementation of Chroma vector database tools."""
 
-from typing import List, Optional, Dict, Any
-from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class ChromaTools:
-    def __init__(self):
-        """Initialize Chroma DB tools."""
-        self.__tools__ = []
+    """Tools for interacting with Chroma vector database."""
+    
+    def __init__(self, collection_name: str = "products"):
+        """Initialize with collection name."""
+        self.collection_name = collection_name
+        logger.info(f"Initialized ChromaTools with collection: {collection_name}")
         
-        # Initialize tools
-        self.__tools__.extend([
-            self.search_products,
-            self.get_product_families,
-            self.get_product_brands,
-        ])
-    
-    def get_tools(self) -> List:
-        """Get all Chroma DB tools."""
-        return self.__tools__
-    
-    async def search_products(self, ctx: RunContext[Dict], query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search for products in Chroma DB.
+    def get_tools(self) -> List[Any]:
+        """Get tools for the agent."""
+        logger.info("Returning empty list of tools")
+        return []
+        
+    async def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search for documents in the vector database.
         
         Args:
-            ctx: The run context
             query: The search query
             limit: Maximum number of results to return
             
         Returns:
-            List of matching products
+            List of document dictionaries
         """
-        # Mock implementation - replace with actual Chroma DB query
-        if "chair" in query.lower():
-            return [
-                {
-                    "product_id": "P12345",
-                    "name": "Ergonomic Office Chair",
-                    "description": "Comfortable ergonomic office chair with adjustable height and lumbar support.",
-                    "brand": "ComfortPlus",
-                    "family": "Office Furniture",
-                    "image_id": "IMG12345"
-                },
-                {
-                    "product_id": "P12346",
-                    "name": "Executive Leather Chair",
-                    "description": "Premium leather executive chair with padded armrests and swivel base.",
-                    "brand": "LuxuryLine",
-                    "family": "Office Furniture",
-                    "image_id": "IMG12346"
-                }
-            ]
+        logger.info(f"Mock searching for documents with query: {query}, limit: {limit}")
+        # Return mock data
+        return [
+            {
+                "id": "prod1",
+                "name": "Premium Widget X1",
+                "description": "High-quality widget with advanced features",
+                "price": 199.99,
+                "category": "Widgets",
+                "brand": "WidgetCo",
+                "in_stock": True,
+                "image_url": "https://example.com/images/widget-x1.jpg"
+            },
+            {
+                "id": "prod2",
+                "name": "Standard Widget S2",
+                "description": "Reliable widget for everyday use",
+                "price": 99.99,
+                "category": "Widgets",
+                "brand": "WidgetCo",
+                "in_stock": True,
+                "image_url": "https://example.com/images/widget-s2.jpg"
+            }
+        ][:limit]
         
-        # Mock empty response
-        return []
-    
-    async def get_product_families(self, ctx: RunContext[Dict]) -> List[str]:
-        """Get all product families in Chroma DB.
+    async def add_document(self, document: Dict[str, Any]) -> str:
+        """Add a document to the vector database.
         
         Args:
-            ctx: The run context
+            document: The document to add
             
         Returns:
-            List of product families
+            Document ID
         """
-        # Mock implementation - replace with actual Chroma DB query
-        return [
-            "Office Furniture",
-            "Office Supplies",
-            "Technology",
-            "Storage Solutions",
-            "Breakroom Supplies"
-        ]
-    
-    async def get_product_brands(self, ctx: RunContext[Dict]) -> List[str]:
-        """Get all product brands in Chroma DB.
-        
-        Args:
-            ctx: The run context
-            
-        Returns:
-            List of product brands
-        """
-        # Mock implementation - replace with actual Chroma DB query
-        return [
-            "ComfortPlus",
-            "LuxuryLine",
-            "TechPro",
-            "OfficeMate",
-            "StorageMaster"
-        ] 
+        logger.info(f"Mock adding document: {document}")
+        # Return mock data
+        return "doc-" + str(hash(str(document)) % 10000) 

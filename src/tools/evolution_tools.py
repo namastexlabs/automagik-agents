@@ -1,62 +1,66 @@
-"""Evolution messaging tools for Stan agent."""
+"""Mock implementation of Evolution API tools."""
 
-from typing import List, Optional, Dict, Any
-from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class EvolutionTools:
+    """Tools for interacting with Evolution API."""
+    
     def __init__(self, token: str):
-        """Initialize Evolution tools with API token."""
+        """Initialize with API token."""
         self.token = token
-        self.__tools__ = []
+        logger.info("Initialized EvolutionTools with token")
         
-        # Initialize tools
-        self.__tools__.extend([
-            self.send_text_message,
-            self.send_image_url,
-        ])
-    
-    def get_tools(self) -> List:
-        """Get all Evolution tools."""
-        return self.__tools__
-    
-    async def send_text_message(self, ctx: RunContext[Dict], session_id: str, message: str) -> Dict[str, Any]:
-        """Send a text message to a chat session.
+    def get_tools(self) -> List[Any]:
+        """Get tools for the agent."""
+        logger.info("Returning empty list of tools")
+        return []
+        
+    async def send_message(self, phone: str, message: str) -> Dict[str, Any]:
+        """Send a message to a phone number.
         
         Args:
-            ctx: The run context
-            session_id: The chat session ID
-            message: The text message to send
+            phone: The phone number to send the message to
+            message: The message content
             
         Returns:
-            Dictionary with send result
+            Response data from the API
         """
-        # Mock implementation - replace with actual Evolution API call
+        logger.info(f"Mock sending message to {phone}: {message}")
+        # Return mock data
         return {
             "success": True,
-            "session_id": session_id,
-            "message_id": "MSG12345",
-            "timestamp": "2023-05-15T14:30:00Z"
+            "message_id": "mock-message-id-12345",
+            "timestamp": "2023-06-01T12:00:00.000Z"
         }
-    
-    async def send_image_url(self, ctx: RunContext[Dict], session_id: str, image_url: str, caption: Optional[str] = None) -> Dict[str, Any]:
-        """Send an image URL to a chat session.
+        
+    async def get_chat_history(self, phone: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get chat history for a phone number.
         
         Args:
-            ctx: The run context
-            session_id: The chat session ID
-            image_url: The URL of the image to send
-            caption: Optional caption for the image
+            phone: The phone number to get history for
+            limit: Maximum number of messages to return
             
         Returns:
-            Dictionary with send result
+            List of message objects
         """
-        # Mock implementation - replace with actual Evolution API call
-        return {
-            "success": True,
-            "session_id": session_id,
-            "message_id": "MSG12346",
-            "image_url": image_url,
-            "caption": caption,
-            "timestamp": "2023-05-15T14:31:00Z"
-        } 
+        logger.info(f"Mock getting chat history for {phone}, limit: {limit}")
+        # Return mock data
+        return [
+            {
+                "id": "msg1",
+                "from": phone,
+                "content": "Hello, I need information about your products",
+                "timestamp": "2023-06-01T11:50:00.000Z",
+                "type": "incoming"
+            },
+            {
+                "id": "msg2",
+                "from": "system",
+                "content": "Hi there! I'd be happy to help with information about our products. What specific products are you interested in?",
+                "timestamp": "2023-06-01T11:51:00.000Z",
+                "type": "outgoing"
+            }
+        ][:limit] 

@@ -1,99 +1,74 @@
-"""Omie tools for Stan agent."""
+"""Mock implementation of Omie API tools."""
 
-from typing import List, Optional, Dict, Any
-from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class OmieTools:
+    """Tools for interacting with Omie API."""
+    
     def __init__(self, token: str):
-        """Initialize Omie tools with API token."""
+        """Initialize with API token."""
         self.token = token
-        self.__host_tools__ = []
-        self.__backoffice_tools__ = []
+        logger.info("Initialized OmieTools with token")
         
-        # Initialize host tools
-        self.__host_tools__.extend([
-            self.search_clients,
-            self.get_client_status,
-        ])
-        
-        # Initialize backoffice tools
-        self.__backoffice_tools__.extend([
-            self.search_clients,
-            self.get_client_status,
-            self.update_client,
-        ])
-    
-    def get_host_tools(self) -> List:
-        """Get tools for the Host agent."""
-        return self.__host_tools__
-    
-    def get_backoffice_tools(self) -> List:
-        """Get tools for the Backoffice agent."""
-        return self.__backoffice_tools__
-    
-    async def search_clients(self, ctx: RunContext[Dict], search_term: str) -> List[Dict[str, Any]]:
-        """Search for clients in Omie by name, CNPJ, or email.
-        
-        Args:
-            ctx: The run context
-            search_term: The search term (name, CNPJ, or email)
-            
-        Returns:
-            List of matching clients
-        """
-        # Mock implementation - replace with actual API call
-        if "example" in search_term.lower():
-            return [{
-                "client_id": "OMI12345",
-                "name": "Example Company Ltd",
-                "cnpj": "12.345.678/0001-90",
-                "email": "contact@example.com",
-                "status": "APPROVED"
-            }]
-        
-        # Mock empty response
+    def get_host_tools(self) -> List[Any]:
+        """Get tools for the host agent."""
+        logger.info("Returning empty list of host tools")
         return []
-    
-    async def get_client_status(self, ctx: RunContext[Dict], client_id: str) -> Dict[str, Any]:
-        """Get a client's status in Omie.
+        
+    def get_backoffice_tools(self) -> List[Any]:
+        """Get tools for the backoffice agent."""
+        logger.info("Returning empty list of backoffice tools")
+        return []
+        
+    async def search_client(self, cnpj: str) -> Dict[str, Any]:
+        """Search for a client by CNPJ.
         
         Args:
-            ctx: The run context
-            client_id: The client's ID
+            cnpj: The CNPJ to search for
             
         Returns:
-            Dictionary with client status information
+            Dictionary with client information
         """
-        # Mock implementation - replace with actual API call
-        if client_id == "OMI12345":
-            return {
-                "client_id": client_id,
-                "status": "APPROVED",
-                "registration_date": "2023-01-15",
-                "approval_date": "2023-01-20"
-            }
-        
-        # Mock not found response
+        logger.info(f"Mock searching for client with CNPJ: {cnpj}")
+        # Return mock data
         return {
-            "error": "Client not found",
-            "client_id": client_id
+            "client_id": "12345",
+            "name": "MOCK COMPANY LTDA",
+            "cnpj": cnpj,
+            "email": "contact@mockcompany.com",
+            "phone": "1234567890",
+            "address": {
+                "street": "Avenida Principal",
+                "number": "123",
+                "complement": "Sala 456",
+                "district": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+                "zip": "01234567"
+            },
+            "status": "active"
         }
-    
-    async def update_client(self, ctx: RunContext[Dict], client_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update client information in Omie.
+        
+    async def create_client(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new client.
         
         Args:
-            ctx: The run context
-            client_id: The client's ID
-            data: Dictionary with fields to update
+            client_data: The client data to create
             
         Returns:
-            Dictionary with update result
+            Dictionary with created client information
         """
-        # Mock implementation - replace with actual API call
+        logger.info(f"Mock creating client: {client_data}")
+        # Return mock data
         return {
-            "success": True,
-            "client_id": client_id,
-            "message": "Client information updated successfully"
+            "client_id": "12345",
+            "name": client_data.get("name", "MOCK COMPANY LTDA"),
+            "cnpj": client_data.get("cnpj", "00000000000000"),
+            "email": client_data.get("email", "contact@mockcompany.com"),
+            "phone": client_data.get("phone", "1234567890"),
+            "status": "active",
+            "created": True
         } 

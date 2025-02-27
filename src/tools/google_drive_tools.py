@@ -1,81 +1,61 @@
-"""Google Drive tools for Stan agent."""
+"""Mock implementation of Google Drive API tools."""
 
-from typing import List, Optional, Dict, Any
-from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class GoogleDriveTools:
+    """Tools for interacting with Google Drive API."""
+    
     def __init__(self, token: str):
-        """Initialize Google Drive tools with API token."""
+        """Initialize with API token."""
         self.token = token
-        self.__tools__ = []
+        logger.info("Initialized GoogleDriveTools with token")
         
-        # Initialize tools
-        self.__tools__.extend([
-            self.list_images,
-            self.get_image_url,
-        ])
-    
-    def get_tools(self) -> List:
-        """Get all Google Drive tools."""
-        return self.__tools__
-    
-    async def list_images(self, ctx: RunContext[Dict], folder_id: str) -> List[Dict[str, Any]]:
-        """List images in a Google Drive folder.
-        
-        Args:
-            ctx: The run context
-            folder_id: The Google Drive folder ID
-            
-        Returns:
-            List of images in the folder
-        """
-        # Mock implementation - replace with actual Google Drive API call
-        if folder_id == "product_images":
-            return [
-                {
-                    "image_id": "IMG12345",
-                    "name": "ergonomic_chair.jpg",
-                    "description": "Ergonomic Office Chair",
-                    "created_at": "2023-05-15"
-                },
-                {
-                    "image_id": "IMG12346",
-                    "name": "executive_chair.jpg",
-                    "description": "Executive Leather Chair",
-                    "created_at": "2023-05-16"
-                }
-            ]
-        
-        # Mock empty response
+    def get_tools(self) -> List[Any]:
+        """Get tools for the agent."""
+        logger.info("Returning empty list of tools")
         return []
-    
-    async def get_image_url(self, ctx: RunContext[Dict], image_id: str) -> Dict[str, Any]:
-        """Get a public URL for a Google Drive image.
+        
+    async def search_files(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search for files in Google Drive.
         
         Args:
-            ctx: The run context
-            image_id: The Google Drive image ID
+            query: The search query
+            limit: Maximum number of results to return
             
         Returns:
-            Dictionary with image URL information
+            List of file information dictionaries
         """
-        # Mock implementation - replace with actual Google Drive API call
-        if image_id == "IMG12345":
-            return {
-                "image_id": image_id,
-                "url": "https://example.com/images/ergonomic_chair.jpg",
-                "expires_at": "2023-06-15"
+        logger.info(f"Mock searching for files with query: {query}, limit: {limit}")
+        # Return mock data
+        return [
+            {
+                "id": "file1",
+                "name": "Product Catalog.pdf",
+                "mimeType": "application/pdf",
+                "webViewLink": "https://drive.google.com/file/d/mock1/view",
+                "createdTime": "2023-01-01T12:00:00.000Z"
+            },
+            {
+                "id": "file2",
+                "name": "Price List.xlsx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "webViewLink": "https://drive.google.com/file/d/mock2/view",
+                "createdTime": "2023-02-01T12:00:00.000Z"
             }
-        elif image_id == "IMG12346":
-            return {
-                "image_id": image_id,
-                "url": "https://example.com/images/executive_chair.jpg",
-                "expires_at": "2023-06-16"
-            }
+        ][:limit]
         
-        # Mock not found response
-        return {
-            "error": "Image not found",
-            "image_id": image_id
-        } 
+    async def get_file_content(self, file_id: str) -> str:
+        """Get the content of a file.
+        
+        Args:
+            file_id: The ID of the file to get
+            
+        Returns:
+            The file content as a string
+        """
+        logger.info(f"Mock getting file content for file_id: {file_id}")
+        # Return mock data
+        return "This is mock file content for file ID: " + file_id 

@@ -1,99 +1,107 @@
-"""BlackPearl tools for Stan agent."""
+"""Mock implementation of BlackPearl API tools."""
 
-from typing import List, Optional, Dict, Any
-from pydantic_ai.tools import Tool
-from pydantic_ai import RunContext
+import logging
+from typing import Dict, List, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 class BlackPearlTools:
+    """Tools for interacting with BlackPearl API."""
+    
     def __init__(self, token: str):
-        """Initialize BlackPearl tools with API token."""
+        """Initialize with API token."""
         self.token = token
-        self.__host_tools__ = []
-        self.__backoffice_tools__ = []
+        logger.info("Initialized BlackPearlTools with token")
         
-        # Initialize host tools
-        self.__host_tools__.extend([
-            self.validate_cnpj,
-            self.create_client,
-            self.update_contact,
-        ])
+    def get_host_tools(self) -> List[Any]:
+        """Get tools for the host agent."""
+        logger.info("Returning empty list of host tools")
+        return []
         
-        # Initialize backoffice tools
-        self.__backoffice_tools__.extend([
-            self.validate_cnpj,
-            self.update_contact,
-        ])
-    
-    def get_host_tools(self) -> List:
-        """Get tools for the Host agent."""
-        return self.__host_tools__
-    
-    def get_backoffice_tools(self) -> List:
-        """Get tools for the Backoffice agent."""
-        return self.__backoffice_tools__
-    
-    async def validate_cnpj(self, ctx: RunContext[Dict], cnpj: str) -> Dict[str, Any]:
-        """Validate a CNPJ and retrieve company information.
+    def get_backoffice_tools(self) -> List[Any]:
+        """Get tools for the backoffice agent."""
+        logger.info("Returning empty list of backoffice tools")
+        return []
+        
+    async def search_contacts(self, user_id: str) -> Dict[str, Any]:
+        """Search for contacts by user ID.
         
         Args:
-            ctx: The run context
-            cnpj: The CNPJ to validate (format: XX.XXX.XXX/XXXX-XX)
+            user_id: The user ID to search for
             
         Returns:
-            Dictionary with validation result and company information if valid
+            Dictionary with search results
         """
-        # Mock implementation - replace with actual API call
-        if len(cnpj.replace(".", "").replace("/", "").replace("-", "")) != 14:
-            return {
-                "valid": False,
-                "error": "CNPJ must have 14 digits"
+        logger.info(f"Mock searching for contacts with user_id: {user_id}")
+        # Return mock data
+        return {
+            "count": 1,
+            "next": None,
+            "previous": None,
+            "results": [
+                {
+                    "id": 8,
+                    "nome": "Test User",
+                    "telefone": "5551234567890",
+                    "wpp_session_id": user_id,
+                    "ativo": True,
+                    "data_registro": "2025-02-24T15:51:39.135341-03:00",
+                    "status_aprovacao": "NOT_REGISTERED",
+                    "data_aprovacao": None,
+                    "detalhes_aprovacao": "",
+                    "ultima_atualizacao": "2025-02-24T15:57:06.041086-03:00"
+                }
+            ]
+        }
+        
+    async def verify_cnpj(self, cnpj: str) -> Dict[str, Any]:
+        """Verify a CNPJ number.
+        
+        Args:
+            cnpj: The CNPJ to verify
+            
+        Returns:
+            Dictionary with CNPJ information
+        """
+        logger.info(f"Mock verifying CNPJ: {cnpj}")
+        # Return mock data
+        return {
+            "updated": "2025-02-18T21:35:47.000Z",
+            "taxId": cnpj.replace(".", "").replace("/", "").replace("-", ""),
+            "company": {
+                "id": 12345678,
+                "name": "MOCK COMPANY LTDA",
+                "equity": 1000000,
+                "nature": {
+                    "id": 2062,
+                    "text": "Sociedade Empresária Limitada"
+                },
+                "size": {
+                    "id": 5,
+                    "acronym": "DEMAIS",
+                    "text": "Demais"
+                }
+            },
+            "alias": "Mock Internacional",
+            "founded": "2013-06-26",
+            "head": True,
+            "statusDate": "2013-06-26",
+            "status": {
+                "id": 2,
+                "text": "Ativa"
+            },
+            "address": {
+                "municipality": 4208203,
+                "street": "Avenida Principal",
+                "number": "123",
+                "details": "Sala 456",
+                "district": "Centro",
+                "city": "São Paulo",
+                "state": "SP",
+                "zip": "01234567",
+                "country": {
+                    "id": 76,
+                    "name": "Brasil"
+                }
             }
-        
-        # Mock successful response
-        return {
-            "valid": True,
-            "company_name": "Example Company Ltd",
-            "trading_name": "Example",
-            "address": "123 Example St, Example City",
-            "status": "ACTIVE"
-        }
-    
-    async def create_client(self, ctx: RunContext[Dict], cnpj: str, name: str, email: str, phone: str) -> Dict[str, Any]:
-        """Create a new client in BlackPearl.
-        
-        Args:
-            ctx: The run context
-            cnpj: The client's CNPJ
-            name: The client's name
-            email: The client's email
-            phone: The client's phone number
-            
-        Returns:
-            Dictionary with creation result
-        """
-        # Mock implementation - replace with actual API call
-        return {
-            "success": True,
-            "client_id": "BP12345",
-            "status": "PENDING",
-            "message": "Client created successfully and pending approval"
-        }
-    
-    async def update_contact(self, ctx: RunContext[Dict], client_id: str, email: Optional[str] = None, phone: Optional[str] = None) -> Dict[str, Any]:
-        """Update client contact information in BlackPearl.
-        
-        Args:
-            ctx: The run context
-            client_id: The client's ID
-            email: The client's new email (optional)
-            phone: The client's new phone number (optional)
-            
-        Returns:
-            Dictionary with update result
-        """
-        # Mock implementation - replace with actual API call
-        return {
-            "success": True,
-            "client_id": client_id,
-            "message": "Contact information updated successfully"
         } 

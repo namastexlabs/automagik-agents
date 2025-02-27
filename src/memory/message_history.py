@@ -81,6 +81,25 @@ class MessageHistory:
         """
         cls._store = store
     
+    @classmethod
+    def from_model_messages(cls, messages: List[ModelMessage]) -> 'MessageHistory':
+        """Create a new MessageHistory from a list of model messages.
+        
+        Args:
+            messages: List of ModelMessage objects to populate the history with
+            
+        Returns:
+            A new MessageHistory instance with the provided messages
+        """
+        # Create a new instance with a unique session ID
+        history = cls(session_id=f"clone-{uuid.uuid4()}", user_id=1)
+        
+        # Add all messages to the new history
+        for message in messages:
+            history._store.add_message(history.session_id, message)
+            
+        return history
+    
     def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: int = 1):
         """Initialize a new message history for a session.
         
@@ -124,7 +143,8 @@ class MessageHistory:
         from src.memory.pg_message_store import PostgresMessageStore
         if isinstance(self._store, PostgresMessageStore):
             # PostgresMessageStore implementation accepts user_id
-            self._store.update_system_prompt(self.session_id, content, agent_id, self.user_id)
+            # We need to access the method directly to avoid the interface check
+            PostgresMessageStore.update_system_prompt(self._store, self.session_id, content, agent_id, self.user_id)
         else:
             # For other implementations that follow the base interface
             self._store.update_system_prompt(self.session_id, content, agent_id)
@@ -263,6 +283,23 @@ class MessageHistory:
 
     def __getitem__(self, index: int) -> ModelMessage:
         return self.messages[index]
+
+    def remove_part_kind(self, part_kind: str) -> None:
+        """Remove messages with parts of a specific kind from the history.
+        
+        Args:
+            part_kind: The part kind to remove (e.g., "system-prompt")
+        """
+        messages = self.messages
+        filtered_messages = []
+        
+        for message in messages:
+            # Keep messages that don't have the specified part kind
+            if not any(getattr(part, 'part_kind', None) == part_kind for part in message.parts):
+                filtered_messages.append(message)
+        
+        # Update the message store with the filtered messages
+        self.update_messages(filtered_messages)
 
     def to_dict(self) -> Dict[str, List[Dict[str, Any]]]:
         """Convert the message history to a dictionary.

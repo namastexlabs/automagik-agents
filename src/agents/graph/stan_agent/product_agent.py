@@ -1,11 +1,11 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import logging
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from src.agents.models.base_agent import BaseAgent
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
-from src.tools.chroma_tools import ChromaTools
 from src.tools.google_drive_tools import GoogleDriveTools
 from src.tools.evolution_tools import EvolutionTools
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Product agent system prompt
 PRODUCT_PROMPT = (
-    "You are the Product agent for Solid, responsible for providing accurate information "
+    "You are the Product specialist agent for Solid, responsible for providing accurate information "
     "about products to approved clients.\n\n"
     
     "Your primary responsibilities are:\n"
@@ -23,14 +23,24 @@ PRODUCT_PROMPT = (
     "4. Answering product-related questions\n\n"
     
     "Important guidelines:\n"
-    "- Only provide product information to approved users\n"
     "- Be accurate and comprehensive in your product descriptions\n"
-    "- Always include product images when available\n"
+    "- Include essential product specifications (model, brand, manufacturer, etc.)\n"
+    "- Include product images when available\n"
     "- Compare user requests with available product families and brands to avoid hallucinations\n"
     "- If a product is not found, clearly state that it's not available\n\n"
     
-    "When responding, focus on providing factual product information in a helpful manner."
+    "Remember: You are being called by the main host agent. Provide factual product information in a helpful but concise manner. "
+    "Focus on delivering accurate product details and specifications, organized clearly."
 )
+
+class ProductAgentResponse(BaseModel):
+    """Structured response for Product Agent."""
+    message: str
+    product_found: bool = False
+    product_data: Optional[Dict[str, Any]] = None
+    image_urls: Optional[List[str]] = None
+    related_products: Optional[List[Dict[str, Any]]] = None
+    recommendation: Optional[str] = None
 
 class ProductAgent(BaseAgent):
     """Product agent implementation for product information retrieval."""
@@ -61,14 +71,9 @@ class ProductAgent(BaseAgent):
     def register_tools(self):
         """Register Product-specific tools with the agent."""
         # Initialize the tools
-        chroma_tools = ChromaTools()
         google_drive_tools = GoogleDriveTools(self.google_drive_token)
         evolution_tools = EvolutionTools(self.evolution_token)
         
-        # Register Chroma tools
-        for tool in chroma_tools.get_tools():
-            self.agent.tool(tool)
-            
         # Register Google Drive tools
         for tool in google_drive_tools.get_tools():
             self.agent.tool(tool)
@@ -76,6 +81,25 @@ class ProductAgent(BaseAgent):
         # Register Evolution tools
         for tool in evolution_tools.get_tools():
             self.agent.tool(tool)
+    
+    async def search_products(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search for products matching the query.
+        
+        Args:
+            query: The search query
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of matching products
+        """
+        try:
+            # Search for products
+            results = await self.agent.run(query, limit)
+            
+            return results
+        except Exception as e:
+            logger.error(f"Error searching products: {str(e)}")
+            return []
             
     async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse:
         """Run the agent with the given message and message history.

@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # Notion (Optional)
     NOTION_TOKEN: Optional[str] = Field(None, description="Notion integration token")
 
+    # BlackPearl, Omie, Google Drive, Evolution (Optional)
+    BLACKPEARL_TOKEN: Optional[str] = Field(None, description="BlackPearl API token")
+    OMIE_TOKEN: Optional[str] = Field(None, description="Omie API token")
+    GOOGLE_DRIVE_TOKEN: Optional[str] = Field(None, description="Google Drive API token")
+    EVOLUTION_TOKEN: Optional[str] = Field(None, description="Evolution API token")
+
+    # BlackPearl API URL and DB URI
+    BLACKPEARL_API_URL: Optional[str] = Field(None, description="BlackPearl API URL")
+    BLACKPEARL_DB_URI: Optional[str] = Field(None, description="BlackPearl database URI")
+
     # Discord
     DISCORD_BOT_TOKEN: str = Field(..., description="Discord bot token for authentication")
 
@@ -61,6 +71,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Allow extra fields in environment variables
 
 def load_settings() -> Settings:
     """Load and validate settings from environment variables and .env file."""

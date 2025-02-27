@@ -1,5 +1,5 @@
 from typing import Dict, Optional
-from src.agents.simple.stan_agent.agent import StanAgent
+from .agent import StanAgent
 from src.agents.models import initialize_agent
 from src.config import settings
 
@@ -13,17 +13,22 @@ def create_stan_agent(config: Optional[Dict[str, str]] = None) -> Optional[StanA
     Returns:
         Initialized StanAgent instance or None if tokens not available
     """
-    # Check if we have required tokens available
-    if not settings.BLACKPEARL_TOKEN or not settings.OMIE_TOKEN or not settings.GOOGLE_DRIVE_TOKEN or not settings.EVOLUTION_TOKEN:
-        return None
-        
+    # Check if we have required tokens available - use getattr to safely check for attributes
+    blackpearl_token = getattr(settings, 'BLACKPEARL_TOKEN', None)
+    omie_token = getattr(settings, 'OMIE_TOKEN', None)
+    google_drive_token = getattr(settings, 'GOOGLE_DRIVE_TOKEN', None)
+    evolution_token = getattr(settings, 'EVOLUTION_TOKEN', None)
+    
+    # For development, allow initialization even if tokens are missing
+    # In production, you might want to require these tokens
+    
     default_config = {
         "model": "openai:gpt-4o-mini",  # Specific model for StanAgent (more capable model)
         "retries": 3,
-        "blackpearl_token": settings.BLACKPEARL_TOKEN,
-        "omie_token": settings.OMIE_TOKEN,
-        "google_drive_token": settings.GOOGLE_DRIVE_TOKEN,
-        "evolution_token": settings.EVOLUTION_TOKEN
+        "blackpearl_token": blackpearl_token or "mock_token",
+        "omie_token": omie_token or "mock_token",
+        "google_drive_token": google_drive_token or "mock_token",
+        "evolution_token": evolution_token or "mock_token"
     }
     
     if config:
