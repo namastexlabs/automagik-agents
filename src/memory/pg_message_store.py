@@ -170,12 +170,49 @@ class PostgresMessageStore(MessageStore):
             tool_outputs = []
             
             # Extract text content and other data from message parts
-            for part in message.parts:
-                if hasattr(part, "content"):
-                    text_content = part.content
-                    if hasattr(part, "assistant_name") and part.assistant_name:
-                        assistant_name = part.assistant_name
+            # First, look for the main text part which contains the response text
+            text_part = None
+            
+            # Try to determine message type by role first
+            message_role = self._determine_message_role(message)
+            
+            # Handle user messages - we need to extract content from UserPromptPart
+            if message_role == "user":
+                # For user messages, find the UserPromptPart
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart) or (hasattr(part, "part_kind") and part.part_kind == "user"):
+                        if hasattr(part, "content"):
+                            text_content = part.content
+                            break
+            else:
+                # For assistant/system messages, find the text part
+                for part in message.parts:
+                    # Find the first text part (the main response content)
+                    if hasattr(part, "part_kind") and part.part_kind == "text":
+                        text_part = part
+                        break
                 
+                # If we found a text part, use it for the main content
+                if text_part and hasattr(text_part, "content"):
+                    text_content = text_part.content
+                    if hasattr(text_part, "assistant_name") and text_part.assistant_name:
+                        assistant_name = text_part.assistant_name
+            
+            # Process all parts to collect tool calls, outputs, and assistant name if not already set
+            for part in message.parts:
+                # Skip the text part we already processed
+                if part is text_part:
+                    continue
+                    
+                # If we still don't have content, try to get it from any part
+                if not text_content and hasattr(part, "content"):
+                    text_content = part.content
+                    
+                # Get assistant name if not already set
+                if not assistant_name and hasattr(part, "assistant_name") and part.assistant_name:
+                    assistant_name = part.assistant_name
+                
+                # Process tool-related parts
                 if hasattr(part, "part_kind"):
                     if part.part_kind == "tool-call" and hasattr(part, "tool_call"):
                         tool_calls.append({
@@ -199,6 +236,22 @@ class PostgresMessageStore(MessageStore):
                 "tool_calls": tool_calls,
                 "tool_outputs": tool_outputs
             }
+            
+            # Ensure text_content is never empty
+            if not text_content:
+                # Try to extract content from raw message attributes
+                if hasattr(message, "content"):
+                    text_content = message.content
+                elif role == "user" and hasattr(message, "message_input"):
+                    text_content = message.message_input
+                
+                # Last resort - log a warning and set a placeholder
+                if not text_content:
+                    logger.warning(f"No content found for {role} message in session {session_id}. Using placeholder.")
+                    text_content = "[No content available]"
+                    
+                # Update the payload
+                message_payload["content"] = text_content
             
             # Add context to payload for user messages
             if context and role == "user":
@@ -242,24 +295,19 @@ class PostgresMessageStore(MessageStore):
                 except Exception as e:
                     logger.error(f"Error serializing channel_payload: {str(e)}")
             
-            # Set a precise timestamp for this message
-            current_time = datetime.utcnow()
-            
             # Insert the message into the database - use RETURNING to get the inserted record
             result = execute_query(
                 """
                 INSERT INTO messages (
                     id, session_id, role, text_content, raw_payload, 
                     message_type, user_id, agent_id,
-                    tool_calls, tool_outputs, context, system_prompt,
-                    created_at, updated_at
+                    tool_calls, tool_outputs, context, system_prompt
                 ) VALUES (
                     %s, %s::uuid, %s, %s, %s, 
                     %s, %s, %s,
-                    %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s, %s
                 )
-                RETURNING id
+                RETURNING id, created_at, updated_at
                 """,
                 (
                     message_id, 
@@ -273,24 +321,26 @@ class PostgresMessageStore(MessageStore):
                     tool_calls_json,
                     tool_outputs_json,
                     context_json,
-                    system_prompt,
-                    current_time,  # created_at
-                    current_time   # updated_at
+                    system_prompt
                 )
             )
             
             inserted_id = result[0]["id"] if result else None
-            logger.debug(f"Added message {inserted_id} to session {session_id} with role {role}")
+            created_at = result[0]["created_at"] if result and "created_at" in result[0] else None
+            logger.debug(f"Added message {inserted_id} to session {session_id} with role {role} at {created_at}")
             
             # If this is an assistant message (response), update run_finished_at in the session
             if role == "assistant":
+                # Get the current time from the database for consistency
+                current_time = execute_query("SELECT NOW() as current_time")[0]["current_time"]
+                
                 execute_query(
                     """
                     UPDATE sessions 
-                    SET updated_at = %s, run_finished_at = %s
+                    SET run_finished_at = %s
                     WHERE id = %s::uuid
                     """,
-                    (current_time, current_time, session_id),
+                    (current_time, session_id),
                     fetch=False
                 )
                 logger.debug(f"Updated session {session_id} run_finished_at to {current_time}")
@@ -330,13 +380,12 @@ class PostgresMessageStore(MessageStore):
                 execute_query(
                     """
                     UPDATE messages 
-                    SET text_content = %s, raw_payload = %s, updated_at = %s, agent_id = %s, user_id = %s
+                    SET text_content = %s, raw_payload = %s, agent_id = %s, user_id = %s
                     WHERE id = %s
                     """,
                     (
                         system_prompt, 
                         json.dumps({"content": system_prompt, "role": "system"}),
-                        datetime.utcnow(),
                         agent_id,
                         user_id,
                         existing_system[0]["id"]
@@ -418,22 +467,45 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking if session {session_id} exists: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: int = 1, session_origin: str = None, session_name: str = None) -> str:
+    def get_session_by_name(self, session_name: str) -> Optional[str]:
+        """Get a session ID by its name.
+        
+        Args:
+            session_name: The name of the session to lookup.
+            
+        Returns:
+            The session ID if found, or None if not found.
+        """
+        try:
+            result = execute_query(
+                "SELECT id FROM sessions WHERE name = %s LIMIT 1",
+                (session_name,)
+            )
+            
+            if result and len(result) > 0:
+                session_id = result[0].get("id")
+                logger.debug(f"Found session with name '{session_name}': {session_id}")
+                return session_id
+            else:
+                logger.debug(f"No session found with name '{session_name}'")
+                return None
+        except Exception as e:
+            logger.error(f"Error looking up session by name '{session_name}': {str(e)}")
+            return None
+    
+    def _ensure_session_exists(self, session_id: str, user_id: int = 1, session_origin: str = None, session_name: str = None, agent_id: Optional[int] = None) -> str:
         """Ensure a session exists, creating it if necessary.
         
         Args:
-            session_id: The session ID to check or create.
-            user_id: The user ID to associate with a new session.
-            session_origin: Optional origin information for the session.
-            session_name: Optional friendly name for the session.
+            session_id: The session ID to check/create
+            user_id: The user ID to associate with the session
+            session_origin: Optional session origin information
+            session_name: Optional friendly name for the session
+            agent_id: Optional agent ID to associate with the session
             
         Returns:
-            The validated session ID (same as input if valid, or a new ID if created).
+            The session ID (existing or newly created)
         """
-        # If session ID is not provided, create a new one
-        if not session_id:
-            return self.create_session(user_id=user_id, session_origin=session_origin, session_name=session_name)
-            
         # Check if the session exists
         if not self.session_exists(session_id):
             # Check if the session_id is a valid UUID
@@ -448,13 +520,14 @@ class PostgresMessageStore(MessageStore):
                 
                 execute_query(
                     """
-                    INSERT INTO sessions (id, user_id, platform, name, metadata, created_at, updated_at) 
-                    VALUES (%s::uuid, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO sessions (id, user_id, agent_id, platform, name, metadata, created_at, updated_at) 
+                    VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO NOTHING
                     """,
                     (
                         session_id, 
-                        user_id, 
+                        user_id,
+                        agent_id,  # Add agent_id parameter
                         session_origin or 'web',  # Use session_origin as platform or default to 'web'
                         session_name,
                         json.dumps(metadata),
@@ -468,19 +541,18 @@ class PostgresMessageStore(MessageStore):
             except ValueError:
                 # Not a valid UUID, create a new session with a valid UUID
                 logger.warning(f"Provided session ID '{session_id}' is not a valid UUID, creating a new session")
-                return self.create_session(user_id=user_id, session_origin=session_origin, session_name=session_name)
+                return self.create_session(user_id=user_id, agent_id=agent_id, session_origin=session_origin, session_name=session_name)
         else:
             # Session exists, update name if provided
             if session_name:
                 execute_query(
                     """
                     UPDATE sessions 
-                    SET name = %s, updated_at = %s
+                    SET name = %s
                     WHERE id = %s::uuid
                     """,
                     (
                         session_name,
-                        datetime.utcnow(),
                         session_id
                     ),
                     fetch=False
@@ -782,22 +854,23 @@ class PostgresMessageStore(MessageStore):
             # Calculate total pages
             total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
             
-            # Get sessions with pagination
+            # Get sessions with pagination - use direct agent_id from sessions table
             sessions_query = execute_query(
                 f"""
                 SELECT 
                     s.id as session_id, 
                     s.user_id, 
+                    s.agent_id,
                     s.created_at,
                     s.platform,
+                    s.name as session_name,
                     (SELECT COUNT(*) FROM messages cm WHERE cm.session_id = s.id) as message_count,
                     (SELECT MAX(updated_at) FROM messages cm WHERE cm.session_id = s.id) as last_updated,
-                    (SELECT a.name FROM agents a 
-                     JOIN messages cm ON a.id = cm.agent_id 
-                     WHERE cm.session_id = s.id 
-                     LIMIT 1) as agent_name
+                    a.name as agent_name
                 FROM 
                     sessions s
+                LEFT JOIN
+                    agents a ON s.agent_id = a.id
                 ORDER BY 
                     {order_by}
                 LIMIT 
@@ -813,6 +886,8 @@ class PostgresMessageStore(MessageStore):
                 session_info = {
                     "session_id": session['session_id'],
                     "user_id": session['user_id'],
+                    "agent_id": session['agent_id'],
+                    "session_name": session['session_name'],
                     "created_at": session['created_at'],
                     "last_updated": session['last_updated'],
                     "message_count": int(session['message_count']) if session['message_count'] is not None else 0,
@@ -869,12 +944,13 @@ class PostgresMessageStore(MessageStore):
             # Insert the session
             execute_query(
                 """
-                INSERT INTO sessions (id, user_id, platform, name, metadata, created_at, updated_at) 
-                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s)
+                INSERT INTO sessions (id, user_id, agent_id, platform, name, metadata, created_at, updated_at) 
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     session_id, 
                     user_id, 
+                    agent_id,  # Add agent_id parameter
                     session_origin or 'web',  # Use session_origin as platform or default to 'web'
                     session_name,
                     json.dumps(metadata),
@@ -1145,10 +1221,10 @@ class PostgresMessageStore(MessageStore):
             execute_query(
                 """
                 UPDATE sessions
-                SET metadata = %s, updated_at = %s
+                SET metadata = %s
                 WHERE id = %s::uuid
                 """,
-                (json.dumps(merged_metadata), datetime.utcnow(), session_id),
+                (json.dumps(merged_metadata), session_id),
                 fetch=False
             )
             

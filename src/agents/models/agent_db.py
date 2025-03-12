@@ -41,7 +41,7 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
                 """
                 UPDATE agents 
                 SET type = %s, model = %s, description = %s, 
-                    config = %s, updated_at = %s, version = %s
+                    config = %s, version = %s
                 WHERE id = %s
                 """,
                 (
@@ -49,7 +49,6 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
                     model,
                     description,
                     json.dumps(config) if config else None,
-                    datetime.utcnow(),
                     SERVICE_INFO.get("version", "0.1.0"),
                     agent_id
                 ),
@@ -211,44 +210,57 @@ def link_session_to_agent(session_id: str, agent_id: Union[int, str]) -> bool:
             logger.error(f"Cannot link session to non-existent agent {agent_id}")
             return False
         
-        # Update all messages associated with the session
-        execute_query(
+        # First, check if this session is already linked to this agent in the session table
+        # This avoids unnecessary updates to messages
+        current_session = execute_query(
             """
-            UPDATE messages
-            SET agent_id = %s
-            WHERE session_id = %s
+            SELECT agent_id FROM sessions WHERE id = %s::uuid
             """,
-            (agent_id, session_id),
-            fetch=False
+            (session_id,)
         )
         
-        # Also store the agent_id in the sessions table if it has an agent_id column
-        try:
-            # Check if the agent_id column exists in the sessions table
-            column_exists = execute_query(
-                """
-                SELECT EXISTS (
-                    SELECT FROM information_schema.columns 
-                    WHERE table_name = 'sessions' AND column_name = 'agent_id'
-                ) as exists
-                """
-            )
+        # If session is already linked to this agent, no need to update anything
+        if current_session and len(current_session) > 0 and current_session[0].get("agent_id") == agent_id:
+            logger.debug(f"Session {session_id} already associated with agent {agent_id}, skipping updates")
+            return True
             
-            if column_exists and column_exists[0]["exists"]:
-                # Update the sessions table with the agent_id
-                execute_query(
-                    """
-                    UPDATE sessions
-                    SET agent_id = %s
-                    WHERE id = %s
-                    """,
-                    (agent_id, session_id),
-                    fetch=False
-                )
-                logger.debug(f"Updated sessions table with agent_id {agent_id} for session {session_id}")
-        except Exception as inner_e:
-            # Log but continue - this is not critical
-            logger.warning(f"Could not update sessions table with agent_id: {str(inner_e)}")
+        # Check if any messages in this session need updating
+        message_count = execute_query(
+            """
+            SELECT COUNT(*) as count FROM messages 
+            WHERE session_id = %s::uuid AND (agent_id IS NULL OR agent_id != %s)
+            """,
+            (session_id, agent_id)
+        )
+        
+        needs_update = message_count and message_count[0]["count"] > 0
+        
+        if needs_update:
+            # Only update messages that don't already have the correct agent_id
+            execute_query(
+                """
+                UPDATE messages
+                SET agent_id = %s
+                WHERE session_id = %s::uuid AND (agent_id IS NULL OR agent_id != %s)
+                """,
+                (agent_id, session_id, agent_id),
+                fetch=False
+            )
+            logger.debug(f"Updated {message_count[0]['count']} messages to associate with agent {agent_id}")
+        else:
+            logger.debug(f"No messages need updating for session {session_id}")
+        
+        # Update the sessions table with the agent_id
+        execute_query(
+            """
+            UPDATE sessions
+            SET agent_id = %s
+            WHERE id = %s::uuid AND (agent_id IS NULL OR agent_id != %s)
+            """,
+            (agent_id, session_id, agent_id),
+            fetch=False
+        )
+        logger.debug(f"Updated sessions table with agent_id {agent_id} for session {session_id}")
         
         logger.debug(f"Session {session_id} associated with agent {agent_id} in database")
         return True
@@ -269,10 +281,10 @@ def deactivate_agent(agent_id: Union[int, str]) -> bool:
         execute_query(
             """
             UPDATE agents 
-            SET active = FALSE, updated_at = %s
+            SET active = FALSE
             WHERE id = %s
             """,
-            (datetime.utcnow(), agent_id),
+            (agent_id,),
             fetch=False
         )
         logger.info(f"Deactivated agent {agent_id}")

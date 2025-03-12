@@ -341,6 +341,7 @@ def create_required_tables_direct(host, port, dbname, user, password):
                 CREATE TABLE IF NOT EXISTS sessions (
                     id UUID PRIMARY KEY,
                     user_id INTEGER REFERENCES users(id),
+                    agent_id INTEGER REFERENCES agents(id),
                     name TEXT,
                     platform TEXT,
                     metadata JSONB DEFAULT '{}',
@@ -353,6 +354,7 @@ def create_required_tables_direct(host, port, dbname, user, password):
             
             "sessions_indexes": """
                 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+                CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);
                 CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
                 CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);
             """,
@@ -447,22 +449,21 @@ def create_required_tables_direct(host, port, dbname, user, password):
         CREATE OR REPLACE FUNCTION update_updated_at_column()
         RETURNS TRIGGER AS $$
         BEGIN
-            -- Always set updated_at to current time for any operation
+            -- Simple update for updated_at timestamp, always preserve created_at
             NEW.updated_at = NOW();
             
-            -- For INSERT operations only
-            IF TG_OP = 'INSERT' THEN
-                -- If created_at is NULL, set it to the current time
-                IF NEW.created_at IS NULL THEN
-                    NEW.created_at = NEW.updated_at;
-                END IF;
+            -- For UPDATE operations, always preserve the original created_at timestamp
+            IF TG_OP = 'UPDATE' THEN
+                NEW.created_at = OLD.created_at;
+            -- For INSERT, set created_at if not provided
+            ELSIF NEW.created_at IS NULL THEN
+                NEW.created_at = NEW.updated_at;
             END IF;
             
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
         """)
-        conn.commit()
         
         # Apply the trigger to the messages table
         cursor.execute("""
@@ -476,7 +477,6 @@ def create_required_tables_direct(host, port, dbname, user, password):
         EXECUTE FUNCTION update_updated_at_column();
         """)
         conn.commit()
-        logger.info("✅ Created improved trigger for automatic updated_at timestamps")
         
         # Create an INSERT trigger to ensure created_at is always set
         cursor.execute("""
@@ -484,7 +484,7 @@ def create_required_tables_direct(host, port, dbname, user, password):
         RETURNS TRIGGER AS $$
         BEGIN
             -- Set created_at and updated_at to the same initial value on insert
-            -- This ensures each message gets its own unique timestamp
+            -- This ensures each record gets its own unique timestamp
             IF NEW.created_at IS NULL THEN
                 NEW.created_at = NOW();
             END IF;
@@ -509,7 +509,6 @@ def create_required_tables_direct(host, port, dbname, user, password):
         EXECUTE FUNCTION set_created_at_column();
         """)
         conn.commit()
-        logger.info("✅ Created trigger to ensure created_at is set on insert")
         
         # Create a similar trigger for the sessions table
         cursor.execute("""
@@ -534,7 +533,6 @@ def create_required_tables_direct(host, port, dbname, user, password):
         EXECUTE FUNCTION set_created_at_column();
         """)
         conn.commit()
-        logger.info("✅ Created triggers for sessions table timestamps")
         
         # Add indexes to improve query performance
         cursor.execute("""

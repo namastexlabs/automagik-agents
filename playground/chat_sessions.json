@@ -1,8 +1,10 @@
 {
   "name_to_id": {
-    "test-session-001": "7b50f422-2711-4104-8d2f-76ac1fa04cca"
+    "test-session-001": "7b50f422-2711-4104-8d2f-76ac1fa04cca",
+    "test-session-002": "eb94a0e6-ad2a-42db-a333-96ed03075849"
   },
   "id_to_name": {
-    "7b50f422-2711-4104-8d2f-76ac1fa04cca": "test-session-001"
+    "7b50f422-2711-4104-8d2f-76ac1fa04cca": "test-session-001",
+    "eb94a0e6-ad2a-42db-a333-96ed03075849": "test-session-002"
   }
 }

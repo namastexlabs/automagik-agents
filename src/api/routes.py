@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 import json
 import math
+import uuid
 
 from fastapi import APIRouter, HTTPException, Query, Path, Depends
 from src.agents.models.agent_factory import AgentFactory
@@ -42,7 +43,7 @@ async def list_agents():
 
 @router.post("/agent/{agent_name}/run", tags=["Agents"],
             summary="Run Agent",
-            description="Execute an agent with the specified name. Optionally provide a session ID to maintain conversation context.")
+            description="Execute an agent with the specified name. Optionally provide a session ID or name to maintain conversation context.")
 async def run_agent(agent_name: str, request: AgentRunRequest):
     """Run an agent with the given name."""
     try:
@@ -55,19 +56,47 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Extract session_name if provided
         session_name = request.session_name
         
+        # Create message store instance
+        from src.memory.pg_message_store import PostgresMessageStore
+        store = PostgresMessageStore()
+        
         # Check if session_id is provided
         if not request.session_id:
             # If no session_id is provided, generate a new one
-            from src.memory.pg_message_store import PostgresMessageStore
-            store = PostgresMessageStore()
             # Generate a new session with an empty string (this will create a new session in the database)
             new_session_id = store._ensure_session_exists("", request.user_id, session_origin, session_name)
             request.session_id = new_session_id
             logger.info(f"Created new session with ID: {new_session_id}, name: {session_name}, and origin: {session_origin}")
         else:
+            # Check if request.session_id is a session name instead of a UUID
+            session_id = request.session_id
+            try:
+                # Validate if it's a UUID
+                uuid.UUID(request.session_id)
+            except ValueError:
+                # Not a UUID, try to look up by name
+                logger.info(f"Looking up session by name: {request.session_id}")
+                
+                # Use the PostgresMessageStore method to get session by name
+                resolved_id = store.get_session_by_name(request.session_id)
+                
+                if resolved_id:
+                    # Found a session with matching name
+                    session_id = resolved_id
+                    logger.info(f"Found session ID {session_id} for name {request.session_id}")
+                else:
+                    # Name doesn't exist yet, create a new session with this name
+                    session_id = store.create_session(
+                        user_id=request.user_id, 
+                        session_origin=session_origin, 
+                        session_name=request.session_id
+                    )
+                    logger.info(f"Created new session with ID: {session_id} and name: {request.session_id}")
+                
+                # Update the request.session_id with the actual UUID
+                request.session_id = session_id
+            
             # Check if the provided session exists, if not create it
-            from src.memory.pg_message_store import PostgresMessageStore
-            store = PostgresMessageStore()
             if not store.session_exists(request.session_id):
                 # Create the session with the provided ID
                 store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name)
@@ -87,12 +116,11 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 execute_query(
                     """
                     UPDATE users 
-                    SET channel_payload = %s, updated_at = %s
+                    SET channel_payload = %s
                     WHERE id = %s
                     """,
                     (
                         json.dumps(request.channel_payload),
-                        datetime.utcnow(),
                         numeric_user_id
                     ),
                     fetch=False
@@ -108,12 +136,12 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         AgentFactory.link_agent_to_session(agent_name, request.session_id)
         
         if message_history and message_history.messages:
-            # Get filtered messages up to the limit
+            # Get filtered messages up to the limit for agent processing
+            # No need to update the database - just filter for memory purposes
             filtered_messages = message_history.get_filtered_messages(
                 message_limit=request.message_limit,
                 sort_desc=False  # Sort chronologically for agent processing
             )
-            message_history.update_messages(filtered_messages)
 
         # Get the agent database ID if available
         agent_id = getattr(agent, "db_id", None)
@@ -174,132 +202,9 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         logger.exception(f"Error running agent {agent_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/session/{session_id}", tags=["Sessions"],
-              summary="Delete Session",
-              description="Delete a session's message history by its ID.")
-async def delete_session(session_id: str):
-    """Delete a session's message history.
-    
-    Args:
-        session_id: The ID of the session to delete.
-        
-    Returns:
-        Status of the deletion operation.
-    """
-    try:
-        # Get the message store from MessageHistory
-        message_store = MessageHistory._store
-        
-        # Check if session exists
-        if not message_store.session_exists(session_id):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session {session_id} not found"
-            )
-        
-        # Clear the session messages
-        message_store.clear_session(session_id)
-        
-        # Also delete the session from the sessions table
-        execute_query(
-            "DELETE FROM sessions WHERE id = %s",
-            (session_id,),
-            fetch=False
-        )
-        
-        logger.info(f"Successfully deleted session: {session_id}")
-        
-        return DeleteSessionResponse(
-            status="success",
-            session_id=session_id,
-            message="Session history deleted successfully"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting session {session_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete session: {str(e)}"
-        )
-
-@router.get("/session/{session_id}", response_model=SessionResponse, response_model_exclude_none=True, 
-           tags=["Sessions"],
-           summary="Get Session History",
-           description="Retrieve a session's message history with pagination options.")
-async def get_session(
-    session_id: str,
-    page: int = 1,
-    page_size: int = 50,
-    sort_desc: bool = True,
-    hide_tools: bool = False
-):
-    """Get a session's message history with pagination.
-    
-    Args:
-        session_id: The ID of the session to retrieve.
-        page: Page number (1-based).
-        page_size: Number of messages per page.
-        sort_desc: Sort by most recent first if True.
-        hide_tools: If True, excludes tool calls and outputs from the response.
-        
-    Returns:
-        The session's message history with pagination info.
-    """
-    try:
-        # Get message history
-        message_history = MessageHistory(session_id)
-        
-        # Check if session exists
-        exists = message_history._store.session_exists(session_id)
-        
-        if not exists:
-            session_response = SessionResponse(
-                session_id=session_id,
-                messages=[],
-                exists=False,
-                total_messages=0,
-                current_page=1,
-                total_pages=0
-            )
-        else:
-            # Get paginated messages
-            paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
-                page=page,
-                page_size=page_size,
-                sort_desc=sort_desc
-            )
-            
-            # Format messages for API response
-            formatted_messages = [
-                message for message in (
-                    message_history.format_message_for_api(msg, hide_tools=hide_tools)
-                    for msg in paginated_messages
-                )
-                if message is not None
-            ]
-            
-            # Wrap each formatted message dict into a MessageModel to ensure Pydantic processing
-            clean_messages = [MessageModel(**msg) for msg in formatted_messages]
-            
-            session_response = SessionResponse(
-                session_id=session_id,
-                messages=clean_messages,
-                exists=True,
-                total_messages=total_messages,
-                current_page=current_page,
-                total_pages=total_pages
-            )
-        
-        return session_response
-    except Exception as e:
-        logger.error(f"Error retrieving session {session_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve session: {str(e)}"
-        )
-
-@router.get("/sessions", response_model=SessionListResponse)
+@router.get("/sessions", response_model=SessionListResponse, tags=["Sessions"],
+            summary="List All Sessions",
+            description="Retrieve a list of all sessions with pagination options.")
 async def list_sessions(
     page: int = 1, 
     page_size: int = 50, 
@@ -344,6 +249,182 @@ async def list_sessions(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to list sessions: {str(e)}"
+        )
+
+@router.get("/sessions/{session_id_or_name}", response_model=SessionResponse, response_model_exclude_none=True, 
+           tags=["Sessions"],
+           summary="Get Session History",
+           description="Retrieve a session's message history with pagination options. You can use either the session ID (UUID) or a session name.")
+async def get_session(
+    session_id_or_name: str,
+    page: int = 1,
+    page_size: int = 50,
+    sort_desc: bool = True,
+    hide_tools: bool = False
+):
+    """Get a session's message history with pagination.
+    
+    Args:
+        session_id_or_name: The ID or name of the session to retrieve.
+        page: Page number (1-based).
+        page_size: Number of messages per page.
+        sort_desc: Sort by most recent first if True.
+        hide_tools: If True, excludes tool calls and outputs from the response.
+        
+    Returns:
+        The session's message history with pagination info.
+    """
+    try:
+        # Get the message store
+        message_store = PostgresMessageStore()
+        
+        # Determine if the input is a UUID or session name
+        session_id = session_id_or_name
+        try:
+            # Validate if it's a UUID
+            uuid.UUID(session_id_or_name)
+        except ValueError:
+            # Not a UUID, try to look up by name
+            logger.info(f"Looking up session by name: {session_id_or_name}")
+            
+            # Use the PostgresMessageStore method to get session by name
+            resolved_id = message_store.get_session_by_name(session_id_or_name)
+            
+            if not resolved_id:
+                return SessionResponse(
+                    session_id=session_id_or_name,
+                    messages=[],
+                    exists=False,
+                    total_messages=0,
+                    current_page=1,
+                    total_pages=0
+                )
+            
+            # Found a session with matching name
+            session_id = resolved_id
+            logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
+
+        # Get message history with the resolved ID
+        message_history = MessageHistory(session_id)
+        
+        # Check if session exists
+        exists = message_history._store.session_exists(session_id)
+        
+        if not exists:
+            session_response = SessionResponse(
+                session_id=session_id_or_name,
+                messages=[],
+                exists=False,
+                total_messages=0,
+                current_page=1,
+                total_pages=0
+            )
+        else:
+            # Get paginated messages
+            paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
+                page=page,
+                page_size=page_size,
+                sort_desc=sort_desc
+            )
+            
+            # Format messages for API response
+            formatted_messages = [
+                message for message in (
+                    message_history.format_message_for_api(msg, hide_tools=hide_tools)
+                    for msg in paginated_messages
+                )
+                if message is not None
+            ]
+            
+            # Wrap each formatted message dict into a MessageModel to ensure Pydantic processing
+            clean_messages = [MessageModel(**msg) for msg in formatted_messages]
+            
+            session_response = SessionResponse(
+                session_id=session_id,
+                messages=clean_messages,
+                exists=True,
+                total_messages=total_messages,
+                current_page=current_page,
+                total_pages=total_pages
+            )
+        
+        return session_response
+    except Exception as e:
+        logger.error(f"Error retrieving session {session_id_or_name}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve session: {str(e)}"
+        )
+
+@router.delete("/sessions/{session_id_or_name}", tags=["Sessions"],
+              summary="Delete Session",
+              description="Delete a session's message history by its ID or name.")
+async def delete_session(session_id_or_name: str):
+    """Delete a session's message history.
+    
+    Args:
+        session_id_or_name: The ID or name of the session to delete.
+        
+    Returns:
+        Status of the deletion operation.
+    """
+    try:
+        # Get the message store
+        message_store = PostgresMessageStore()
+        
+        # Determine if the input is a UUID or session name
+        session_id = session_id_or_name
+        try:
+            # Validate if it's a UUID
+            uuid.UUID(session_id_or_name)
+        except ValueError:
+            # Not a UUID, try to look up by name
+            logger.info(f"Looking up session by name: {session_id_or_name}")
+            
+            # Use the PostgresMessageStore method to get session by name
+            resolved_id = message_store.get_session_by_name(session_id_or_name)
+            
+            if not resolved_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Session with name '{session_id_or_name}' not found"
+                )
+            
+            # Found a session with matching name
+            session_id = resolved_id
+            logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
+        
+        # Check if session exists
+        if not message_store.session_exists(session_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id_or_name} not found"
+            )
+        
+        # Clear the session messages
+        message_store.clear_session(session_id)
+        
+        # Also delete the session from the sessions table
+        execute_query(
+            "DELETE FROM sessions WHERE id = %s",
+            (session_id,),
+            fetch=False
+        )
+        
+        logger.info(f"Successfully deleted session: {session_id_or_name}")
+        
+        return DeleteSessionResponse(
+            status="success",
+            session_id=session_id,
+            message="Session history deleted successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session {session_id_or_name}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete session: {str(e)}"
         )
 
 # User management endpoints
@@ -571,10 +652,6 @@ async def update_user(user_update: UserUpdate, user_id: int = Path(..., descript
         if updated_user_data != current_user_data:
             update_fields.append("user_data = %s")
             update_values.append(json.dumps(updated_user_data))
-        
-        # Always update updated_at timestamp
-        update_fields.append("updated_at = %s")
-        update_values.append(now)
         
         # Build query
         if not update_fields:

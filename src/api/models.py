@@ -86,6 +86,7 @@ class SessionInfo(BaseResponseModel):
     """Information about a session."""
     session_id: str
     user_id: Optional[int] = None
+    agent_id: Optional[int] = None
     session_name: Optional[str] = None
     created_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
