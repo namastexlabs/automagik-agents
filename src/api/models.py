@@ -28,6 +28,8 @@ class AgentInfo(BaseResponseModel):
     """Information about an available agent."""
     name: str
     type: str
+    model: Optional[str] = None
+    description: Optional[str] = None
 
 class HealthResponse(BaseResponseModel):
     """Response model for health check endpoint."""
@@ -104,24 +106,24 @@ class SessionListResponse(BaseResponseModel):
 
 class UserCreate(BaseResponseModel):
     """Request model for creating a new user."""
-    email: str
-    name: Optional[str] = None
-    channel_payload: Optional[Dict[str, Any]] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    user_data: Optional[Dict[str, Any]] = None
 
 class UserUpdate(BaseResponseModel):
     """Request model for updating an existing user."""
     email: Optional[str] = None
-    name: Optional[str] = None
-    channel_payload: Optional[Dict[str, Any]] = None
+    phone_number: Optional[str] = None
+    user_data: Optional[Dict[str, Any]] = None
 
 class UserInfo(BaseResponseModel):
     """Response model for user information."""
     id: int
-    email: str
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    user_data: Optional[Dict[str, Any]] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    name: Optional[str] = None
-    channel_payload: Optional[Dict[str, Any]] = None
 
 class UserListResponse(BaseResponseModel):
     """Response model for listing users."""

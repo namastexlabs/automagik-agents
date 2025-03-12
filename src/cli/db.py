@@ -10,6 +10,19 @@ import psycopg2
 # Create the database command group
 db_app = typer.Typer()
 
+@db_app.callback()
+def db_callback(
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode", is_flag=True, hidden=True)
+):
+    """
+    Database management commands.
+    
+    Use these commands to initialize, backup, and manage the database.
+    """
+    # If debug flag is set, ensure AM_LOG_LEVEL is set to DEBUG
+    if debug:
+        os.environ["AM_LOG_LEVEL"] = "DEBUG"
+
 @db_app.command("init")
 def db_init(
     force: bool = typer.Option(False, "--force", "-f", help="Force initialization even if database already exists")

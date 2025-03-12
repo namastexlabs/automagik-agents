@@ -36,10 +36,34 @@ logger = logging.getLogger(__name__)
            description="Returns a list of all available agent templates that can be used.")
 async def list_agents():
     """List all available agents."""
-    return [
-        AgentInfo(name=name, type=AgentFactory._agents[name][0].__name__)
-        for name in AgentFactory.list_available_agents()
-    ]
+    agent_list = []
+    for name in AgentFactory.list_available_agents():
+        # Get agent type from factory
+        agent_type = AgentFactory._agents[name][0].__name__
+        
+        # Get model and description from database if available
+        model = "unknown"
+        description = None
+        
+        try:
+            from src.agents.models.agent_db import get_agent_by_name
+            db_agent = get_agent_by_name(name)
+            if db_agent:
+                model = db_agent.get("model", "unknown")
+                description = db_agent.get("description")
+        except Exception as e:
+            logger.warning(f"Error getting agent details from database: {str(e)}")
+        
+        # Create agent info object with all fields
+        agent_info = AgentInfo(
+            name=name,
+            type=agent_type,
+            model=model,
+            description=description
+        )
+        agent_list.append(agent_info)
+    
+    return agent_list
 
 @router.post("/agent/{agent_name}/run", tags=["Agents"],
             summary="Run Agent",
@@ -593,64 +617,52 @@ async def list_users(
 
 @router.post("/users", response_model=UserInfo, tags=["Users"],
             summary="Create User",
-            description="Creates a new user.\n\n**Requires Authentication**: This endpoint requires an API key.")
+            description="Creates a new user with email, phone_number, and/or user_data fields.\n\n**Requires Authentication**: This endpoint requires an API key.")
 async def create_user(user: UserCreate):
     """Create a new user."""
     try:
-        # Check if user with the same email already exists
-        existing = execute_query("SELECT id FROM users WHERE email = %s", (user.email,))
-        if existing:
-            raise HTTPException(status_code=409, detail=f"User with email {user.email} already exists")
+        # Need at least one identifier - email or phone_number
+        if not user.email and not user.phone_number:
+            raise HTTPException(status_code=400, detail="At least one of email or phone_number must be provided")
+
+        # Check if user already exists
+        existing_conditions = []
+        existing_params = []
         
-        # Prepare user_data
-        now = datetime.utcnow()
-        user_data = {
-            "name": user.name or user.email.split("@")[0],
-            "created_via": "api"
-        }
+        if user.email:
+            existing_conditions.append("email = %s")
+            existing_params.append(user.email)
+            
+        if user.phone_number:
+            existing_conditions.append("phone_number = %s")
+            existing_params.append(user.phone_number)
+            
+        query = f"SELECT id FROM users WHERE {' OR '.join(existing_conditions)}"
+        existing = execute_query(query, tuple(existing_params))
         
-        # Add channel_payload if provided
-        if user.channel_payload:
-            user_data["channel_payload"] = user.channel_payload
+        if existing and len(existing) > 0:
+            raise HTTPException(status_code=409, detail=f"User already exists with the provided email or phone number")
         
-        # Insert new user
+        # Construct the insert query
+        now = datetime.now()
         result = execute_query(
             """
-            INSERT INTO users (email, created_at, updated_at, user_data) 
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, email, created_at, updated_at, user_data
+            INSERT INTO users (email, phone_number, user_data, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, email, phone_number, user_data, created_at, updated_at
             """,
-            (
-                user.email,
-                now,
-                now,
-                json.dumps(user_data)
-            )
+            (user.email, user.phone_number, json.dumps(user.user_data) if user.user_data else None, now, now)
         )
         
-        if not result or len(result) == 0:
-            raise HTTPException(status_code=500, detail="Failed to create user")
-        
-        created_user = result[0]
-        
-        # Parse user_data JSON
-        parsed_user_data = {}
-        if created_user.get('user_data'):
-            if isinstance(created_user['user_data'], str):
-                try:
-                    parsed_user_data = json.loads(created_user['user_data'])
-                except:
-                    parsed_user_data = {}
-            else:
-                parsed_user_data = created_user['user_data']
+        new_user = result[0]
         
         return UserInfo(
-            id=created_user['id'],
-            email=created_user['email'],
-            created_at=created_user.get('created_at'),
-            updated_at=created_user.get('updated_at'),
-            name=parsed_user_data.get('name'),
-            channel_payload=parsed_user_data.get('channel_payload')
+            id=new_user["id"],
+            email=new_user.get("email"),
+            phone_number=new_user.get("phone_number"),
+            user_data=new_user.get("user_data"),
+            created_at=new_user.get("created_at"),
+            updated_at=new_user.get("updated_at")
         )
     except HTTPException as e:
         # Re-raise HTTP exceptions
@@ -659,136 +671,112 @@ async def create_user(user: UserCreate):
         logger.error(f"Error creating user: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.get("/users/{user_id}", response_model=UserInfo, tags=["Users"],
+@router.get("/users/{user_identifier}", response_model=UserInfo, tags=["Users"],
             summary="Get User",
-            description="Returns details for a specific user.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def get_user(user_id: int = Path(..., description="The user ID")):
-    """Get a specific user by ID."""
-    try:
-        user_data = execute_query("SELECT id, email, created_at, updated_at, user_data FROM users WHERE id = %s", (user_id,))
-        if not user_data or len(user_data) == 0:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
-        
-        user = user_data[0]
-        
-        # Parse user_data JSON
-        parsed_user_data = {}
-        if user.get('user_data'):
-            if isinstance(user['user_data'], str):
-                try:
-                    parsed_user_data = json.loads(user['user_data'])
-                except:
-                    parsed_user_data = {}
-            else:
-                parsed_user_data = user['user_data']
-        
-        return UserInfo(
-            id=user['id'],
-            email=user['email'],
-            created_at=user.get('created_at'),
-            updated_at=user.get('updated_at'),
-            name=parsed_user_data.get('name'),
-            channel_payload=parsed_user_data.get('channel_payload')
-        )
-    except HTTPException as e:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        logger.error(f"Error getting user: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+            description="Returns details for a specific user by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def get_user(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
+    """Get user details by ID, email, or phone number."""
+    # Check if user_identifier is an integer (ID)
+    if user_identifier.isdigit():
+        # It's an ID, use it directly
+        user_id = int(user_identifier)
+        user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
+    else:
+        # Try email or phone number
+        user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
+    
+    # Check if user exists
+    if not user or len(user) == 0:
+        raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
+    
+    # Convert the first user to a UserInfo model
+    user_data = user[0]
+    return UserInfo(
+        id=user_data["id"],
+        email=user_data.get("email"),
+        phone_number=user_data.get("phone_number"),
+        user_data=user_data.get("user_data"),
+        created_at=user_data.get("created_at"),
+        updated_at=user_data.get("updated_at")
+    )
 
-@router.put("/users/{user_id}", response_model=UserInfo, tags=["Users"],
+@router.put("/users/{user_identifier}", response_model=UserInfo, tags=["Users"],
             summary="Update User",
-            description="Updates an existing user.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def update_user(user_update: UserUpdate, user_id: int = Path(..., description="The user ID")):
+            description="Updates an existing user identified by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Update an existing user."""
     try:
+        # First, find the user
+        if user_identifier.isdigit():
+            # It's an ID, use it directly
+            user_id = int(user_identifier)
+            user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
+        else:
+            # Try email or phone number
+            user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", 
+                              (user_identifier, user_identifier,))
+        
         # Check if user exists
-        existing = execute_query("SELECT id, email, user_data FROM users WHERE id = %s", (user_id,))
-        if not existing or len(existing) == 0:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        if not user or len(user) == 0:
+            raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
         
-        # Get current user data
-        current_user = existing[0]
+        # Get the user ID from the query result
+        user_id = user[0]["id"]
         
-        # Parse existing user_data
-        current_user_data = {}
-        if current_user.get('user_data'):
-            if isinstance(current_user['user_data'], str):
-                try:
-                    current_user_data = json.loads(current_user['user_data'])
-                except:
-                    current_user_data = {}
-            else:
-                current_user_data = current_user['user_data']
+        # Build the update query dynamically based on what fields are provided
+        set_parts = []
+        params = []
         
-        # Prepare updated fields
-        now = datetime.utcnow()
-        update_fields = []
-        update_values = []
+        if user_update.email is not None:
+            set_parts.append("email = %s")
+            params.append(user_update.email)
+            
+        if user_update.phone_number is not None:
+            set_parts.append("phone_number = %s")
+            params.append(user_update.phone_number)
+            
+        if user_update.user_data is not None:
+            set_parts.append("user_data = %s")
+            params.append(json.dumps(user_update.user_data))
         
-        # Handle email update
-        if user_update.email:
-            update_fields.append("email = %s")
-            update_values.append(user_update.email)
+        # Always update the updated_at timestamp
+        set_parts.append("updated_at = %s")
+        now = datetime.now()
+        params.append(now)
         
-        # Handle user_data updates
-        updated_user_data = current_user_data.copy()
+        # Add the user_id as the last parameter
+        params.append(user_id)
         
-        # Update name if provided
-        if user_update.name is not None:
-            updated_user_data["name"] = user_update.name
+        # If there's nothing to update, return the current user data
+        if not set_parts:
+            current_user = user[0]
+            return UserInfo(
+                id=current_user["id"],
+                email=current_user.get("email"),
+                phone_number=current_user.get("phone_number"),
+                user_data=current_user.get("user_data"),
+                created_at=current_user.get("created_at"),
+                updated_at=current_user.get("updated_at")
+            )
         
-        # Update channel_payload if provided
-        if user_update.channel_payload is not None:
-            updated_user_data["channel_payload"] = user_update.channel_payload
-        
-        # Only update user_data if changed
-        if updated_user_data != current_user_data:
-            update_fields.append("user_data = %s")
-            update_values.append(json.dumps(updated_user_data))
-        
-        # Build query
-        if not update_fields:
-            # No changes to make
-            return await get_user(user_id)
-        
+        # Execute the update query
         query = f"""
-            UPDATE users 
-            SET {", ".join(update_fields)} 
+            UPDATE users
+            SET {", ".join(set_parts)}
             WHERE id = %s
-            RETURNING id, email, created_at, updated_at, user_data
+            RETURNING id, email, phone_number, user_data, created_at, updated_at
         """
         
-        # Add user_id to values
-        update_values.append(user_id)
-        
-        # Execute update
-        result = execute_query(query, tuple(update_values))
-        
-        if not result or len(result) == 0:
-            raise HTTPException(status_code=500, detail="Failed to update user")
-        
+        result = execute_query(query, tuple(params))
         updated_user = result[0]
         
-        # Parse user_data JSON
-        parsed_user_data = {}
-        if updated_user.get('user_data'):
-            if isinstance(updated_user['user_data'], str):
-                try:
-                    parsed_user_data = json.loads(updated_user['user_data'])
-                except:
-                    parsed_user_data = {}
-            else:
-                parsed_user_data = updated_user['user_data']
-        
         return UserInfo(
-            id=updated_user['id'],
-            email=updated_user['email'],
-            created_at=updated_user.get('created_at'),
-            updated_at=updated_user.get('updated_at'),
-            name=parsed_user_data.get('name'),
-            channel_payload=parsed_user_data.get('channel_payload')
+            id=updated_user["id"],
+            email=updated_user.get("email"),
+            phone_number=updated_user.get("phone_number"),
+            user_data=updated_user.get("user_data"),
+            created_at=updated_user.get("created_at"),
+            updated_at=updated_user.get("updated_at")
         )
     except HTTPException as e:
         # Re-raise HTTP exceptions
@@ -797,28 +785,33 @@ async def update_user(user_update: UserUpdate, user_id: int = Path(..., descript
         logger.error(f"Error updating user: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.delete("/users/{user_id}", response_model=DeleteSessionResponse, tags=["Users"],
+@router.delete("/users/{user_identifier}", response_model=DeleteSessionResponse, tags=["Users"],
                summary="Delete User",
-               description="Deletes a user account.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def delete_user(user_id: int = Path(..., description="The user ID")):
-    """Delete a user account."""
-    try:
-        # Check if user exists
-        existing = execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
-        if not existing or len(existing) == 0:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
-        
-        # Delete the user
-        execute_query("DELETE FROM users WHERE id = %s", (user_id,), fetch=False)
-        
-        return DeleteSessionResponse(
-            status="success",
-            session_id=str(user_id),  # Reusing DeleteSessionResponse model
-            message=f"User with ID {user_id} was deleted successfully"
-        )
-    except HTTPException as e:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting user: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") 
+               description="Deletes a user account by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def delete_user(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
+    """Delete a user account by ID, email, or phone number."""
+    # Check if user_identifier is an integer (ID)
+    if user_identifier.isdigit():
+        # It's an ID, use it directly
+        user_id = int(user_identifier)
+        user = execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
+    else:
+        # Try email or phone number
+        user = execute_query("SELECT id FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
+    
+    # Check if user exists
+    if not user or len(user) == 0:
+        raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
+    
+    # Get the user ID from the query result
+    user_id = user[0]["id"]
+    
+    # Now delete the user
+    execute_query("DELETE FROM users WHERE id = %s", (user_id,), fetch=False)
+    
+    # Return a successful response
+    return DeleteSessionResponse(
+        status="success",
+        session_id=str(user_id),  # Use the session_id field to return the user_id
+        message=f"User with ID {user_id} deleted successfully"
+    ) 

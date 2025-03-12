@@ -30,12 +30,20 @@ parser.add_argument("--url", help="Base URL for API (overrides .env)", default=N
 args = parser.parse_args()
 
 # Load environment variables
-env_path = Path(__file__).parent.parent / '.env'
+env_path = Path(__file__).parent.parent.parent / '.env'  # Updated path to account for new directory structure
 load_dotenv(env_path)
 
 # Configuration
 BASE_URL = args.url or os.getenv("API_BASE_URL", "http://localhost:8881")
-API_KEY = os.getenv("AM_API_KEY", "namastex-888")  # Use default key if not in .env
+
+# Get API key from environment, removing any comments or whitespace
+raw_api_key = os.getenv("AM_API_KEY", "")
+if raw_api_key:
+    # Extract just the actual key by splitting at the first '#' or whitespace
+    API_KEY = raw_api_key.split('#')[0].split()[0].strip()
+else:
+    API_KEY = "namastex-888"  # Default key if not in .env
+
 VERBOSE = args.verbose
 JSON_OUTPUT = args.json
 
@@ -63,11 +71,20 @@ TEST_RESULTS = {
     "tests": []
 }
 
+# Add a global variable to control whether cleanup happens automatically
+AUTO_CLEANUP = True
+
 def log(message, level="INFO", always=False):
     """Log a message to stdout if in verbose mode or if always=True"""
     if VERBOSE or always or level in ["ERROR", "WARNING"]:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] {level}: {message}")
+
+# Add verbose logging for API key debugging
+if VERBOSE:
+    log(f"Starting API tests against: {BASE_URL}")
+    log(f"API Key: {API_KEY[:3]}...{API_KEY[-3:]}")
+    log(f"Headers: {HEADERS}")
 
 def run_test(test_func, *args, **kwargs):
     """Run a test function and track results"""
@@ -130,6 +147,16 @@ def run_test(test_func, *args, **kwargs):
 def make_request(method, url, expected_status=200, **kwargs):
     """Make an HTTP request and handle error formatting"""
     try:
+        # Ensure headers are included and contain the API key
+        if 'headers' not in kwargs:
+            kwargs['headers'] = HEADERS
+        elif 'x-api-key' not in kwargs['headers']:
+            kwargs['headers']['x-api-key'] = API_KEY
+            
+        # For debugging in verbose mode
+        if VERBOSE:
+            log(f"Request headers: {kwargs.get('headers', {})}")
+            
         response = requests.request(method, url, **kwargs)
         
         # Log request details in verbose mode
@@ -619,6 +646,7 @@ def print_summary():
 
 def main():
     """Run all tests in sequence"""
+    global AUTO_CLEANUP
     log(f"Starting API tests against: {BASE_URL}", always=True)
     log(f"API Key: {API_KEY[:3]}...{API_KEY[-3:]}")
     
@@ -670,15 +698,18 @@ def main():
         else:
             log(f"{TEST_RESULTS['failed']} tests failed!", level="ERROR", always=True)
     finally:
-        # Always clean up resources
-        cleanup_resources()
+        # Always clean up resources if auto cleanup is enabled
+        if AUTO_CLEANUP:
+            cleanup_resources()
         
         # Print summary
         print_summary()
-        
-        # Set exit code based on test results
-        if TEST_RESULTS["failed"] > 0:
-            sys.exit(1)
+    
+    # Return success/failure code for use by external callers
+    return 0 if TEST_RESULTS["failed"] == 0 else 1
+
+# Make sure the main function is defined at the module level
+__all__ = ['main']
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 

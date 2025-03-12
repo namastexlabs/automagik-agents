@@ -47,7 +47,7 @@ uv run -m pydantic_ai_examples.chat_app
 uv run -m pydantic_ai_examples.chat_app
 ```
 
-Then open the app at localhost:8000.
+Then open the app at localhost:8881.
 
 
 

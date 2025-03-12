@@ -42,7 +42,7 @@ A toolkit for quickly building and deploying AI agents using the Pydantic AI fra
    # Configure required variables
    AM_API_KEY=your_api_key_here
    AM_HOST=0.0.0.0
-   AM_PORT=8000
+   AM_PORT=8881
    OPENAI_API_KEY=your_openai_key_here
    OPENAI_MODEL=openai:gpt-4o-mini  # or your preferred model
    
@@ -70,13 +70,13 @@ A toolkit for quickly building and deploying AI agents using the Pydantic AI fra
 
 1. **Health Check**
    ```bash
-   curl http://localhost:8000/health
+   curl http://localhost:8881/health
    ```
 
 2. **Run an Agent**
    ```bash
    # Simple agent
-   curl -X POST http://localhost:8000/agent/simple_agent/run \
+   curl -X POST http://localhost:8881/agent/simple_agent/run \
      -H "X-API-Key: your_api_key" \
      -H "Content-Type: application/json" \
      -d '{
@@ -85,7 +85,7 @@ A toolkit for quickly building and deploying AI agents using the Pydantic AI fra
      }'
 
    # Notion agent
-   curl -X POST http://localhost:8000/agent/notion_agent/run \
+   curl -X POST http://localhost:8881/agent/notion_agent/run \
      -H "X-API-Key: your_api_key" \
      -H "Content-Type: application/json" \
      -d '{
@@ -97,11 +97,11 @@ A toolkit for quickly building and deploying AI agents using the Pydantic AI fra
 3. **Session Management**
    ```bash
    # Get session history
-   curl http://localhost:8000/session/your_session_id \
+   curl http://localhost:8881/session/your_session_id \
      -H "X-API-Key: your_api_key"
 
    # Delete session
-   curl -X DELETE http://localhost:8000/session/your_session_id \
+   curl -X DELETE http://localhost:8881/session/your_session_id \
      -H "X-API-Key: your_api_key"
    ```
 

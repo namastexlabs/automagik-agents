@@ -45,14 +45,14 @@ def get_env_var(name, default=None, secret=False):
 
 # Global variables
 AM_HOST = get_env_var("AM_HOST", "localhost")
-AM_PORT = get_env_var("AM_PORT", "8000")
+AM_PORT = get_env_var("AM_PORT", "8881")
 AM_ENV = get_env_var("AM_ENV", "development")
 
 # Construct API_BASE_URL from AM_* variables if they exist
 if AM_HOST and AM_PORT:
     API_BASE_URL = f"http://{AM_HOST}:{AM_PORT}"
 else:
-    API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8000")
+    API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8881")
 
 # Ensure API_BASE_URL doesn't end with a slash
 if API_BASE_URL.endswith("/"):

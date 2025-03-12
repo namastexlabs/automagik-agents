@@ -54,14 +54,14 @@ def get_env_var(name, default=None, secret=False):
 
 # Global variables
 AM_HOST = get_env_var("AM_HOST", "localhost")
-AM_PORT = get_env_var("AM_PORT", "8000")
+AM_PORT = get_env_var("AM_PORT", "8881")
 AM_ENV = get_env_var("AM_ENV", "development")
 
 # Construct API_BASE_URL from AM_* variables if they exist
 if AM_HOST and AM_PORT:
     API_BASE_URL = f"http://{AM_HOST}:{AM_PORT}"
 else:
-    API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8000")
+    API_BASE_URL = get_env_var("API_BASE_URL", "http://localhost:8881")
 
 # Ensure API_BASE_URL doesn't end with a slash
 if API_BASE_URL.endswith("/"):
@@ -254,10 +254,72 @@ async def create_session(user_id: int, agent_name: str, session_name: str = None
     """Create a new session or retrieve an existing one by name."""
     # If a session_name is provided, check if it already exists
     if session_name:
-        # Load existing mappings
-        load_session_mappings()
+        # First check directly with the API if session exists with this name
+        try:
+            endpoint = get_api_endpoint(f"sessions/{session_name}")
+            headers = {}
+            if API_KEY:
+                headers["x-api-key"] = API_KEY
+            
+            response = requests.get(endpoint, headers=headers, timeout=10)
+            if response.status_code == 200:
+                session_data = response.json()
+                if session_data.get("exists", False):
+                    existing_id = session_data.get("session_id")
+                    
+                    # Check if the session has messages and if we can determine the agent
+                    if session_data.get("messages"):
+                        for msg in session_data["messages"]:
+                            if msg.get("agent_id") is not None:
+                                # Get current agent ID from API
+                                agent_endpoint = get_api_endpoint("agent/list")
+                                agent_response = requests.get(agent_endpoint, headers=headers, timeout=10)
+                                if agent_response.status_code == 200:
+                                    agents = agent_response.json()
+                                    agent_found = False
+                                    
+                                    # Normalize agent name for comparison
+                                    normalized_agent_name = agent_name
+                                    if not normalized_agent_name.endswith("_agent"):
+                                        normalized_agent_name = f"{normalized_agent_name}_agent"
+                                    
+                                    for agent in agents:
+                                        agent_api_name = agent["name"]
+                                        if not agent_api_name.endswith("_agent"):
+                                            agent_api_name = f"{agent_api_name}_agent"
+                                            
+                                        if agent_api_name == normalized_agent_name:
+                                            # Found our agent
+                                            agent_found = True
+                                            agent_id = agent.get("id")
+                                            session_agent_id = msg.get("agent_id")
+                                            
+                                            if agent_id is not None and session_agent_id is not None and agent_id != session_agent_id:
+                                                console.print(f"[bold red]Warning: Session '{session_name}' is already associated with a different agent.[/bold red]")
+                                                console.print(f"[yellow]Using a session with a different agent may cause unexpected behavior.[/yellow]")
+                                                if not Confirm.ask("Continue anyway?", default=False):
+                                                    console.print("[yellow]Please use a different session name.[/yellow]")
+                                                    return None
+                                    
+                                    if not agent_found and DEBUG_MODE:
+                                        console.print(f"[dim]Could not find current agent '{agent_name}' in available agents list[/dim]")
+                                break
+                    
+                    # Load and update our local mappings
+                    load_session_mappings()
+                    SESSION_NAME_TO_ID[session_name] = existing_id
+                    SESSION_ID_TO_NAME[existing_id] = session_name
+                    save_session_mappings()
+                    
+                    console.print(f"[yellow]Session name '{session_name}' already exists (ID: {existing_id})[/yellow]")
+                    console.print(f"[yellow]Using the existing session instead of creating a new one.[/yellow]")
+                    return existing_id
+        except Exception as e:
+            if DEBUG_MODE:
+                console.print(f"[dim]Error checking session with API: {str(e)}[/dim]")
         
-        # Check if this name already exists
+        # Fallback to local mappings if API check fails
+        load_session_mappings()
         if session_name in SESSION_NAME_TO_ID:
             existing_id = SESSION_NAME_TO_ID[session_name]
             console.print(f"[yellow]Session name '{session_name}' already exists (ID: {existing_id})[/yellow]")
@@ -270,6 +332,7 @@ async def create_session(user_id: int, agent_name: str, session_name: str = None
     # If a session_name is provided, associate it with this session ID
     if session_name:
         # Store the mapping
+        load_session_mappings()  # Ensure mappings are loaded
         SESSION_NAME_TO_ID[session_name] = session_id
         SESSION_ID_TO_NAME[session_id] = session_name
         
@@ -333,6 +396,8 @@ async def run_agent(agent_name: str, input_message: str, session_id: str = None,
             result = response.json()
             if DEBUG_MODE:
                 console.print(f"[dim]API Response: {json.dumps(result, indent=2)}[/dim]")
+                if "session_id" in result:
+                    console.print(f"[dim]Session ID from response: {result['session_id']}[/dim]")
             return result
         else:
             error_msg = f"API Error: Status {response.status_code}"
@@ -340,6 +405,22 @@ async def run_agent(agent_name: str, input_message: str, session_id: str = None,
                 error_data = response.json()
                 if "detail" in error_data:
                     error_msg = f"API Error: {error_data['detail']}"
+                    
+                    # Detect specific errors related to session name uniqueness
+                    if "duplicate key value violates unique constraint" in error_data.get("detail", "") and "sessions_name_key" in error_data.get("detail", ""):
+                        error_msg = f"Session name '{session_name}' is already in use. Please use a different session name."
+                    
+                    # Check for session name uniqueness errors
+                    if "already exists" in error_data.get("detail", ""):
+                        console.print(f"[bold red]{error_data['detail']}[/bold red]")
+                    
+                    # Check for session agent mismatch errors
+                    if "already associated with a different agent" in error_data.get("detail", ""):
+                        console.print(f"[bold red]{error_data['detail']}[/bold red]")
+                        console.print("[yellow]To see existing sessions, run:[/yellow]")
+                        console.print(f"[dim]curl {API_BASE_URL}/api/v1/sessions -H 'x-api-key: {API_KEY}'[/dim]")
+                        console.print("[yellow]Or use a different session name:[/yellow]")
+                        console.print(f"[dim]python {sys.argv[0]} --agent {agent_name} --session new-session-name[/dim]")
             except Exception:
                 error_msg = f"API Error: {response.text}"
             
@@ -480,7 +561,28 @@ async def chat_loop(user: Dict[str, Any], agent: Dict[str, Any], session_id: str
                     continue
                 
                 if "error" in response and response["error"]:
-                    display_message(f"Error: {response['error']}", "system")
+                    error_message = response["error"]
+                    
+                    # Check for specific error conditions
+                    if "already associated with a different agent" in error_message:
+                        console.print(f"[bold red]Error: {error_message}[/bold red]")
+                        console.print("[yellow]This session is linked to another agent and cannot be used with the current agent.[/yellow]")
+                        console.print("[yellow]Options:[/yellow]")
+                        console.print("1. Exit and start a new session with a different name")
+                        console.print("2. Exit and use the correct agent for this session")
+                        console.print("\n[dim]Chat session cannot continue with this agent-session mismatch.[/dim]")
+                        break
+                    elif "already in use" in error_message:
+                        console.print(f"[bold red]Error: {error_message}[/bold red]")
+                        console.print("[yellow]To see existing sessions, run:[/yellow]")
+                        console.print(f"[dim]curl {API_BASE_URL}/api/v1/sessions -H 'x-api-key: {API_KEY}'[/dim]")
+                        console.print("[yellow]Or use a different session name:[/yellow]")
+                        console.print(f"[dim]python {sys.argv[0]} --agent {agent_name} --session new-session-name[/dim]")
+                        break
+                    else:
+                        # Generic error display
+                        display_message(f"Error: {error_message}", "system")
+                    
                     is_processing = False
                     continue
                 
@@ -723,6 +825,12 @@ async def main():
                 console.print("[yellow]No messages found in the session history[/yellow]")
         except Exception as e:
             console.print(f"[bold red]Error retrieving session history: {str(e)}[/bold red]")
+    
+    # Display session info for reference if not already shown
+    if session_name and not DEBUG_MODE:
+        console.print(f"[green]Session '{session_name}' updated successfully[/green]")
+    elif DEBUG_MODE:
+        console.print(f"[dim]Session ID: {session_id}[/dim]")
     
     # Ask if user wants to delete the session
     delete_sess = Confirm.ask("\nWould you like to delete this chat session?", default=False)
