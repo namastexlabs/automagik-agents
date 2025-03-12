@@ -1,129 +1,134 @@
-# Automagik Agents
+<p align="center">
+  <img src=".github/images/automagik_logo.png" alt="AutoMagik Logo" width="600"/>
+</p>
 
-A toolkit for quickly building and deploying AI agents using the Pydantic AI framework. Create custom agents from templates, expose them through a RESTful API, and manage conversations with built-in memory and tool support. Perfect for teams looking to rapidly prototype and deploy AI agents with standardized patterns and best practices.
+# AutoMagik
 
-## 🌟 Features
+> **Because magic shouldn't be complicated.**
 
-- **Extensible Agent System**
-  - Template-based agent creation
-  - Built-in templates: Simple Agent and Notion Agent
-  - Easy-to-use CLI for creating new agents
-  - Automatic tool registration and management
+AutoMagik is an agent-first automation engine that seamlessly integrates with multiple [LangFlow](https://github.com/langflow-ai/langflow) instances. Deploy AI-driven flows, schedule one-time or recurring tasks, and monitor everything with minimal fuss—no coding required.
 
-- **Powerful API Integration**
-  - FastAPI-based RESTful endpoints
-  - Session management with conversation history
-  - Structured request/response models
-  - Built-in authentication and CORS support
-  - Health monitoring and version tracking
+## 🔗 Ecosystem
 
-- **Advanced Memory System**
-  - Persistent conversation history
-  - Session-based memory management
-  - Tool call and output tracking
-  - Structured message storage
+- **[AutoMagik Agents](https://github.com/namastexlabs/automagik-agents)**: Develop production-level AI agents
+- **[AutoMagik UI](https://github.com/namastexlabs/automagik-ui)**: Create agents using natural language with our dedicated UI
 
-- **Built-in Templates**
-  - **Simple Agent**: Basic chat functionality with datetime tools
-  - **Notion Agent**: Full Notion integration with database management
+## 🚀 Installation
 
-## 🚀 Quick Start
+AutoMagik provides two setup options:
 
-1. **Installation**
-   ```bash
-   pip install automagik-agents
-   ```
+### Prerequisites
 
-2. **Environment Setup**
-   ```bash
-   # Copy example environment file
-   cp .env-example .env
+- Linux-based system (Ubuntu/Debian recommended)
+- Docker and Docker Compose (automatically installed on Ubuntu/Debian if not present)
 
-   # Configure required variables
-   AM_API_KEY=your_api_key_here
-   AM_HOST=0.0.0.0
-   AM_PORT=8000
-   OPENAI_API_KEY=your_openai_key_here
-   OPENAI_MODEL=openai:gpt-4o-mini  # or your preferred model
-   
-   # For Notion agent (optional)
-   NOTION_TOKEN=your_notion_token
-   ```
+### Local Production Setup
 
-3. **Create a Custom Agent**
-   ```bash
-   # Create from simple template
-   automagik-agents create-agent -n my_agent -t simple_agent
+For a production-ready local environment:
 
-   # Create from Notion template
-   automagik-agents create-agent -n my_notion_agent -t notion_agent
-   ```
+```bash
+./scripts/setup_local.sh
+```
 
-4. **Start the API Server**
-   ```bash
-   automagik-agents api start --reload
-   ```
+### Development Setup
 
-## 💡 Usage Examples
+For development with PostgreSQL and Redis Docker containers:
 
-### API Endpoints
+```bash
+./scripts/setup_dev.sh
+```
 
-1. **Health Check**
-   ```bash
-   curl http://localhost:8000/health
-   ```
+### What Happens During Setup
 
-2. **Run an Agent**
-   ```bash
-   # Simple agent
-   curl -X POST http://localhost:8000/agent/simple_agent/run \
-     -H "X-API-Key: your_api_key" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "message_input": "What time is it?",
-       "session_id": "optional_session_id"
-     }'
+Both setup scripts will:
+- Create necessary environment files
+- Install Docker if needed (on Ubuntu/Debian)
+- Set up all required services
+- Install the CLI tool (optional)
+- Guide you through the entire process
 
-   # Notion agent
-   curl -X POST http://localhost:8000/agent/notion_agent/run \
-     -H "X-API-Key: your_api_key" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "message_input": "List my databases",
-       "session_id": "optional_session_id"
-     }'
-   ```
+### After Installation
 
-3. **Session Management**
-   ```bash
-   # Get session history
-   curl http://localhost:8000/session/your_session_id \
-     -H "X-API-Key: your_api_key"
+You'll have access to:
+- **AutoMagik API**: Running at [http://localhost:8888](http://localhost:8888)
+- **PostgreSQL Database**: Available at `localhost:15432`
+- **Worker Service**: Running and ready to process tasks
+- **CLI Tool**: Installed (if chosen during setup)
 
-   # Delete session
-   curl -X DELETE http://localhost:8000/session/your_session_id \
-     -H "X-API-Key: your_api_key"
-   ```
+### Verifying Your Installation
 
-### Creating Custom Agents
+The setup automatically verifies all services, but you can also check manually:
 
-1. **Create Agent Template**
-   ```bash
-   automagik-agents create-agent -n custom -t simple_agent
-   ```
+```bash
+# Access API documentation
+open http://localhost:8888/api/v1/docs  # Interactive Swagger UI
+open http://localhost:8888/api/v1/redoc # ReDoc documentation
 
-2. **Customize Agent Files**
-   - Edit `src/agents/custom_agent/prompts.py` for system prompts
-   - Modify `src/agents/custom_agent/agent.py` for behavior
-   - Update `src/agents/custom_agent/__init__.py` for configuration
+# List flows (requires CLI installation)
+source .venv/bin/activate
+automagik flow list
+```
 
-3. **Register Tools**
-   ```python
-   def register_tools(self):
-       """Register custom tools with the agent."""
-       self.agent.tool(your_custom_tool)
-   ```
+## 🧩 System Components
 
-## 📄 License
+- **API Server**: Handles all HTTP requests and core logic
+- **Worker**: Processes tasks and schedules
+- **Database**: PostgreSQL with all required tables automatically created
+- **LangFlow** (optional): Visual flow editor for creating AI workflows
+- **CLI Tool** (optional): Command-line interface for managing flows and tasks
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 🏗️ System Architecture
+
+```mermaid
+flowchart LR
+    subgraph Services
+      DB[PostgreSQL]
+      LF1[LangFlow Instance 1]
+      LF2[LangFlow Instance 2]
+    end
+    subgraph AutoMagik
+      CLI[CLI]
+      API[API Server]
+      CW[Celery Worker]
+      W[Worker]
+    end
+    API -- uses --> DB
+    API -- triggers --> CW
+    W -- processes --> API
+    API -- integrates with --> LF1
+    API -- integrates with --> LF2
+    CLI -- controls --> API
+    API -- has UI --> UI[Automagik UI]
+```
+
+### Core Components Explained
+
+- **API**: Core service handling requests and business logic
+- **Worker**: Processes tasks and schedules
+- **CLI**: Command-line tool for managing flows and tasks
+- **PostgreSQL**: Stores flows, tasks, schedules, and other data
+- **LangFlow**: Optional service for creating and editing flows
+
+## 📚 API Documentation
+
+For complete API documentation, visit:
+- **Swagger UI**: [http://localhost:8888/api/v1/docs](http://localhost:8888/api/v1/docs)
+- **ReDoc**: [http://localhost:8888/api/v1/redoc](http://localhost:8888/api/v1/redoc)
+
+## 🛠️ Next Steps
+
+1. If you installed LangFlow, visit [http://localhost:17860](http://localhost:17860) to create your first flow
+2. Use the API at [http://localhost:8888/api/v1/docs](http://localhost:8888/api/v1/docs) to manage your flows and tasks
+3. Try out the CLI commands with `automagik --help`
+4. Monitor task execution through logs and API endpoints
+
+## 🗺️ Roadmap
+
+AutoMagik's future development focuses on:
+- TBA
+
+---
+
+<p align="center">
+  <b>AutoMagik: Bringing AI Automation to Life</b>
+</p>
