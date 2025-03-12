@@ -60,13 +60,66 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         from src.memory.pg_message_store import PostgresMessageStore
         store = PostgresMessageStore()
         
+        # Get the agent database ID if available
+        agent_id = getattr(agent, "db_id", None)
+        
+        # If agent_id is not set, try to get it from the database
+        if agent_id is None:
+            from src.agents.models.agent_db import get_agent_by_name
+            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
+            if db_agent:
+                agent_id = db_agent["id"]
+                # Save it back to the agent instance for future use
+                agent.db_id = agent_id
+                logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
+            else:
+                logging.warning(f"Could not find agent ID for agent {agent_name}")
+        
+        # Check if session name is provided, use it to lookup existing sessions
+        if session_name:
+            # Look up the session by name
+            existing_session = store.get_session_by_name(session_name)
+            if existing_session:
+                # Found an existing session with this name
+                session_id = existing_session["id"]
+                existing_agent_id = existing_session["agent_id"]
+                
+                # Check if the session is already associated with a different agent
+                if existing_agent_id is not None and existing_agent_id != agent_id:
+                    logger.error(f"Session name '{session_name}' is already associated with agent ID {existing_agent_id}, cannot use with agent ID {agent_id}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Session name '{session_name}' is already associated with a different agent. Please use a different session name."
+                    )
+                
+                # Found an existing session with this name, use it
+                request.session_id = session_id
+                logger.info(f"Found existing session with name '{session_name}', using ID: {session_id}")
+        
         # Check if session_id is provided
         if not request.session_id:
-            # If no session_id is provided, generate a new one
-            # Generate a new session with an empty string (this will create a new session in the database)
-            new_session_id = store._ensure_session_exists("", request.user_id, session_origin, session_name)
-            request.session_id = new_session_id
-            logger.info(f"Created new session with ID: {new_session_id}, name: {session_name}, and origin: {session_origin}")
+            # If no session_id is provided or no session found with the provided name
+            # Create a new session with the session_name if provided
+            try:
+                new_session_id = store.create_session(
+                    user_id=request.user_id,
+                    session_origin=session_origin,
+                    session_name=session_name,
+                    agent_id=agent_id
+                )
+                request.session_id = new_session_id
+                logger.info(f"Created new session with ID: {new_session_id}, name: {session_name}, and origin: {session_origin}")
+            except Exception as e:
+                # Check for unique constraint violation
+                if "duplicate key value violates unique constraint" in str(e) and "sessions_name_key" in str(e):
+                    logger.error(f"Session name '{session_name}' already exists")
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Session name '{session_name}' already exists. Please use a different session name."
+                    )
+                # Re-raise other exceptions
+                logger.error(f"Error creating session: {str(e)}")
+                raise
         else:
             # Check if request.session_id is a session name instead of a UUID
             session_id = request.session_id
@@ -78,20 +131,43 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 logger.info(f"Looking up session by name: {request.session_id}")
                 
                 # Use the PostgresMessageStore method to get session by name
-                resolved_id = store.get_session_by_name(request.session_id)
+                resolved_session = store.get_session_by_name(request.session_id)
                 
-                if resolved_id:
+                if resolved_session:
                     # Found a session with matching name
-                    session_id = resolved_id
+                    session_id = resolved_session["id"]
+                    existing_agent_id = resolved_session["agent_id"]
+                    
+                    # Check if the session is already associated with a different agent
+                    if existing_agent_id is not None and existing_agent_id != agent_id:
+                        logger.error(f"Session name '{request.session_id}' is already associated with agent ID {existing_agent_id}, cannot use with agent ID {agent_id}")
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Session name '{request.session_id}' is already associated with a different agent. Please use a different session name."
+                        )
+                    
                     logger.info(f"Found session ID {session_id} for name {request.session_id}")
                 else:
                     # Name doesn't exist yet, create a new session with this name
-                    session_id = store.create_session(
-                        user_id=request.user_id, 
-                        session_origin=session_origin, 
-                        session_name=request.session_id
-                    )
-                    logger.info(f"Created new session with ID: {session_id} and name: {request.session_id}")
+                    try:
+                        session_id = store.create_session(
+                            user_id=request.user_id, 
+                            session_origin=session_origin, 
+                            session_name=request.session_id,
+                            agent_id=agent_id
+                        )
+                        logger.info(f"Created new session with ID: {session_id} and name: {request.session_id}")
+                    except Exception as e:
+                        # Check for unique constraint violation
+                        if "duplicate key value violates unique constraint" in str(e) and "sessions_name_key" in str(e):
+                            logger.error(f"Session name '{request.session_id}' already exists")
+                            raise HTTPException(
+                                status_code=409,
+                                detail=f"Session name '{request.session_id}' already exists. Please use a different session name."
+                            )
+                        # Re-raise other exceptions
+                        logger.error(f"Error creating session: {str(e)}")
+                        raise
                 
                 # Update the request.session_id with the actual UUID
                 request.session_id = session_id
@@ -99,12 +175,46 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             # Check if the provided session exists, if not create it
             if not store.session_exists(request.session_id):
                 # Create the session with the provided ID
-                store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name)
-                logger.info(f"Created session with provided ID: {request.session_id}, name: {session_name}, and origin: {session_origin}")
+                try:
+                    store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name, agent_id)
+                    logger.info(f"Created session with provided ID: {request.session_id}, name: {session_name}, and origin: {session_origin}")
+                except ValueError as e:
+                    # Handle agent ID mismatch error
+                    logger.error(f"Session agent mismatch error: {str(e)}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
+                    )
             else:
-                # Update the session with the current session_origin if needed
-                store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name)
-                logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
+                # Session exists - update the session with the current session_origin and session_name if provided
+                try:
+                    store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name, agent_id)
+                    
+                    # If a session name is provided but the session has no name, update it
+                    if session_name:
+                        # Get the current session details to check if it has a name
+                        session_details = execute_query(
+                            "SELECT name FROM sessions WHERE id = %s::uuid", 
+                            (request.session_id,)
+                        )
+                        
+                        if session_details and (session_details[0].get('name') is None or session_details[0].get('name') == ''):
+                            # Session has no name, update it
+                            execute_query(
+                                "UPDATE sessions SET name = %s WHERE id = %s::uuid",
+                                (session_name, request.session_id),
+                                fetch=False
+                            )
+                            logger.info(f"Updated existing session {request.session_id} with name: {session_name}")
+                    
+                    logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
+                except ValueError as e:
+                    # Handle agent ID mismatch error
+                    logger.error(f"Session agent mismatch error: {str(e)}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
+                    )
         
         # Store channel_payload in the users table if provided
         if request.channel_payload:
@@ -143,21 +253,6 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 sort_desc=False  # Sort chronologically for agent processing
             )
 
-        # Get the agent database ID if available
-        agent_id = getattr(agent, "db_id", None)
-        
-        # If agent_id is not set, try to get it from the database
-        if agent_id is None:
-            from src.agents.models.agent_db import get_agent_by_name
-            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
-            if db_agent:
-                agent_id = db_agent["id"]
-                # Save it back to the agent instance for future use
-                agent.db_id = agent_id
-                logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
-            else:
-                logging.warning(f"Could not find agent ID for agent {agent_name}")
-        
         # Process the message with additional metadata if available
         message_metadata = {
             "message_type": request.message_type,
@@ -288,9 +383,9 @@ async def get_session(
             logger.info(f"Looking up session by name: {session_id_or_name}")
             
             # Use the PostgresMessageStore method to get session by name
-            resolved_id = message_store.get_session_by_name(session_id_or_name)
+            session_info = message_store.get_session_by_name(session_id_or_name)
             
-            if not resolved_id:
+            if not session_info:
                 return SessionResponse(
                     session_id=session_id_or_name,
                     messages=[],
@@ -301,7 +396,7 @@ async def get_session(
                 )
             
             # Found a session with matching name
-            session_id = resolved_id
+            session_id = session_info["id"]
             logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
 
         # Get message history with the resolved ID
@@ -382,16 +477,16 @@ async def delete_session(session_id_or_name: str):
             logger.info(f"Looking up session by name: {session_id_or_name}")
             
             # Use the PostgresMessageStore method to get session by name
-            resolved_id = message_store.get_session_by_name(session_id_or_name)
+            session_info = message_store.get_session_by_name(session_id_or_name)
             
-            if not resolved_id:
+            if not session_info:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Session with name '{session_id_or_name}' not found"
                 )
             
             # Found a session with matching name
-            session_id = resolved_id
+            session_id = session_info["id"]
             logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
         
         # Check if session exists

@@ -288,7 +288,7 @@ def create_required_tables(host, port, dbname, user, password):
                     id UUID PRIMARY KEY,
                     user_id INTEGER REFERENCES users(id),
                     agent_id INTEGER REFERENCES agents(id),
-                    name TEXT,
+                    name TEXT UNIQUE,
                     platform TEXT,
                     metadata JSONB DEFAULT '{}',
                     created_at TIMESTAMP WITH TIME ZONE,
@@ -301,8 +301,9 @@ def create_required_tables(host, port, dbname, user, password):
             "sessions_indexes": """
                 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
                 CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);
-                CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
                 CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);
+                -- Remove the non-unique index on name as we have a UNIQUE constraint now
+                DROP INDEX IF EXISTS idx_sessions_name;
             """,
             
             "messages": """

@@ -6,7 +6,7 @@ This script provides a simplified command-line interface to send a single messag
 It's designed for quick tests and integrations.
 
 Usage:
-    python agent_test.py --agent simple_agent --session test-session --message "What time is it now?"
+    python agent_test.py --agent simple_agent --session test-session-002 --message "What time is it now?"
 
 Options:
     --debug     Show detailed debug information
@@ -21,11 +21,9 @@ Options:
 import logging
 import sys
 import argparse
-import uuid
-import json
 import os
 import asyncio
-import time
+import json
 import requests
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
@@ -70,10 +68,6 @@ API_KEY = (
 # Debug mode flag
 DEBUG_MODE = os.environ.get("DEBUG", "False").lower() in ("true", "1", "t")
 
-# Session mapping storage
-SESSION_NAME_TO_ID = {}
-SESSION_ID_TO_NAME = {}
-
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Headless CLI for Automagik Agents")
@@ -108,61 +102,6 @@ def get_api_endpoint(path: str) -> str:
     url = f"{API_BASE_URL}/{path}"
     
     return url
-
-def get_sessions_file_path():
-    """Get the path to the sessions mapping file."""
-    return os.path.join(os.path.dirname(__file__), 'chat_sessions.json')
-
-def load_session_mappings():
-    """Load session mappings from file."""
-    global SESSION_NAME_TO_ID, SESSION_ID_TO_NAME
-    sessions_file = get_sessions_file_path()
-    
-    try:
-        if os.path.exists(sessions_file):
-            with open(sessions_file, 'r') as f:
-                data = json.load(f)
-                SESSION_NAME_TO_ID = data.get("name_to_id", {})
-                SESSION_ID_TO_NAME = data.get("id_to_name", {})
-                if DEBUG_MODE:
-                    print(f"Loaded {len(SESSION_NAME_TO_ID)} session mappings from {sessions_file}")
-                    if SESSION_NAME_TO_ID:
-                        print(f"Available sessions: {', '.join(SESSION_NAME_TO_ID.keys())}")
-        elif DEBUG_MODE:
-            print(f"Session mappings file not found at {sessions_file}")
-    except Exception as e:
-        if DEBUG_MODE:
-            print(f"Error loading session mappings from {sessions_file}: {str(e)}")
-        # Initialize empty mappings if file doesn't exist or is invalid
-        SESSION_NAME_TO_ID = {}
-        SESSION_ID_TO_NAME = {}
-
-def save_session_mappings():
-    """Save session mappings to file."""
-    sessions_file = get_sessions_file_path()
-    data = {
-        "name_to_id": SESSION_NAME_TO_ID,
-        "id_to_name": SESSION_ID_TO_NAME
-    }
-    
-    try:
-        with open(sessions_file, 'w') as f:
-            json.dump(data, f, indent=2)
-        if DEBUG_MODE:
-            print(f"Saved {len(SESSION_NAME_TO_ID)} session mappings to {sessions_file}")
-            if SESSION_NAME_TO_ID:
-                print(f"Saved sessions: {', '.join(SESSION_NAME_TO_ID.keys())}")
-    except Exception as e:
-        if DEBUG_MODE:
-            print(f"Error saving session mappings to {sessions_file}: {str(e)}")
-
-def get_session_id_from_name(session_name):
-    """Get a session ID from a name, or None if not found."""
-    # First, ensure mappings are loaded
-    if not SESSION_NAME_TO_ID:
-        load_session_mappings()
-    
-    return SESSION_NAME_TO_ID.get(session_name)
 
 def get_available_agents() -> List[Dict[str, Any]]:
     """Get a list of available agents using the API."""
@@ -245,40 +184,7 @@ async def get_user_by_id(user_id: int) -> Dict[str, Any]:
         # Return fallback data
         return {"id": user_id, "email": f"user{user_id}@example.com", "name": f"User {user_id}"}
 
-async def create_session(user_id: int, agent_name: str, session_name: str = None) -> Optional[str]:
-    """Create a new session or retrieve an existing one by name."""
-    # If a session_name is provided, check if it already exists
-    if session_name:
-        # Load existing mappings
-        load_session_mappings()
-        
-        # Check if this name already exists
-        if session_name in SESSION_NAME_TO_ID:
-            existing_id = SESSION_NAME_TO_ID[session_name]
-            if DEBUG_MODE:
-                print(f"Using existing session: {session_name} (ID: {existing_id})")
-            return existing_id
-    
-    # Generate a unique session ID
-    session_id = str(uuid.uuid4())
-    
-    # If a session_name is provided, associate it with this session ID
-    if session_name:
-        # Store the mapping
-        SESSION_NAME_TO_ID[session_name] = session_id
-        SESSION_ID_TO_NAME[session_id] = session_name
-        
-        # Save the updated mappings
-        save_session_mappings()
-        
-        if DEBUG_MODE:
-            print(f"Created session '{session_name}' with ID: {session_id}")
-    elif DEBUG_MODE:
-        print(f"Generated new session ID: {session_id}")
-    
-    return session_id
-
-async def run_agent(agent_name: str, input_message: str, session_id: str = None, user_id: int = 1, session_name: str = None) -> dict:
+async def run_agent(agent_name: str, input_message: str, session_name: str = None, user_id: int = 1) -> dict:
     """Run the agent with the given message using the API."""
     try:
         # Define the API endpoint with the correct prefix
@@ -296,14 +202,8 @@ async def run_agent(agent_name: str, input_message: str, session_id: str = None,
             "session_origin": "cli"
         }
         
-        # Add session_id if provided
-        if session_id:
-            payload["session_id"] = session_id
-            
-        # Add session_name to context if provided
+        # Add session_name if provided
         if session_name:
-            payload["context"]["session_name"] = session_name
-            # Always include session_name at the top level
             payload["session_name"] = session_name
         
         if DEBUG_MODE:
@@ -330,6 +230,8 @@ async def run_agent(agent_name: str, input_message: str, session_id: str = None,
             result = response.json()
             if DEBUG_MODE:
                 print(f"API Response: {json.dumps(result, indent=2)}")
+                if "session_id" in result:
+                    print(f"Session ID from response: {result['session_id']}")
             return result
         else:
             error_msg = f"API Error: Status {response.status_code}"
@@ -337,6 +239,10 @@ async def run_agent(agent_name: str, input_message: str, session_id: str = None,
                 error_data = response.json()
                 if "detail" in error_data:
                     error_msg = f"API Error: {error_data['detail']}"
+                    
+                    # Detect specific errors related to session name uniqueness
+                    if "duplicate key value violates unique constraint" in error_data.get("detail", "") and "sessions_name_key" in error_data.get("detail", ""):
+                        error_msg = f"Session name '{session_name}' is already in use. Please use a different session name."
             except Exception:
                 error_msg = f"API Error: {response.text}"
             
@@ -402,23 +308,9 @@ async def process_single_message(agent_name: str, message: str, session_name: st
     # Get user info
     user = await get_user_by_id(user_id)
     
-    # Get or create session ID
-    session_id = None
-    if session_name:
-        session_id = get_session_id_from_name(session_name)
-        if not session_id:
-            if DEBUG_MODE:
-                print(f"Session name '{session_name}' not found, creating a new session")
-    
-    # Create a session if needed
-    if not session_id:
-        session_id = await create_session(user_id, agent_name, session_name)
-    
     if DEBUG_MODE:
         if session_name:
-            print(f"Using session: {session_name} (ID: {session_id})")
-        else:
-            print(f"Using session ID: {session_id}")
+            print(f"Using session: {session_name}")
         print(f"Using agent: {agent_name}")
     
     # Get the message from command line or stdin
@@ -438,10 +330,18 @@ async def process_single_message(agent_name: str, message: str, session_name: st
     
     # Process the message
     try:
-        response = await run_agent(agent_name, message, session_id, user_id, session_name)
+        response = await run_agent(agent_name, message, session_name, user_id)
         
         if "error" in response and response["error"]:
             print(f"Error: {response['error']}", file=sys.stderr)
+            
+            # Add helpful advice for session name errors
+            if session_name and "already in use" in response["error"]:
+                print("\nTIP: To see existing sessions, you can run:", file=sys.stderr)
+                print(f"  curl {API_BASE_URL}/api/v1/sessions -H 'x-api-key: {API_KEY}'", file=sys.stderr)
+                print("\nOr use a different session name:", file=sys.stderr)
+                print(f"  python {sys.argv[0]} --agent {agent_name} --session new-session-name --message \"{message}\"", file=sys.stderr)
+            
             sys.exit(1)
         
         # Extract response parts
@@ -482,9 +382,9 @@ async def process_single_message(agent_name: str, message: str, session_name: st
         
         # Display session info for reference
         if session_name and not DEBUG_MODE:
-            print(f"\nSession '{session_name}' (ID: {session_id}) updated successfully")
-        elif not DEBUG_MODE:
-            print(f"\nSession ID: {session_id}")
+            print(f"\nSession '{session_name}' updated successfully")
+        elif DEBUG_MODE and "session_id" in response:
+            print(f"\nSession '{session_name}' with ID: {response['session_id']} updated successfully")
         
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)

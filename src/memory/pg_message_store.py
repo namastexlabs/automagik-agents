@@ -467,25 +467,26 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking if session {session_id} exists: {str(e)}")
             return False
     
-    def get_session_by_name(self, session_name: str) -> Optional[str]:
-        """Get a session ID by its name.
+    def get_session_by_name(self, session_name: str) -> Optional[dict]:
+        """Get a session ID and agent ID by the session's name.
         
         Args:
             session_name: The name of the session to lookup.
             
         Returns:
-            The session ID if found, or None if not found.
+            A dictionary with 'id' and 'agent_id' if found, or None if not found.
         """
         try:
             result = execute_query(
-                "SELECT id FROM sessions WHERE name = %s LIMIT 1",
+                "SELECT id, agent_id FROM sessions WHERE name = %s LIMIT 1",
                 (session_name,)
             )
             
             if result and len(result) > 0:
                 session_id = result[0].get("id")
-                logger.debug(f"Found session with name '{session_name}': {session_id}")
-                return session_id
+                agent_id = result[0].get("agent_id")
+                logger.debug(f"Found session with name '{session_name}': {session_id}, agent_id: {agent_id}")
+                return {"id": session_id, "agent_id": agent_id}
             else:
                 logger.debug(f"No session found with name '{session_name}'")
                 return None
@@ -505,6 +506,9 @@ class PostgresMessageStore(MessageStore):
             
         Returns:
             The session ID (existing or newly created)
+            
+        Raises:
+            ValueError: If trying to use a session with a different agent_id than originally assigned
         """
         # Check if the session exists
         if not self.session_exists(session_id):
@@ -543,16 +547,54 @@ class PostgresMessageStore(MessageStore):
                 logger.warning(f"Provided session ID '{session_id}' is not a valid UUID, creating a new session")
                 return self.create_session(user_id=user_id, agent_id=agent_id, session_origin=session_origin, session_name=session_name)
         else:
+            # Session exists, check if agent_id matches (if provided)
+            if agent_id is not None:
+                # Query the existing agent_id
+                result = execute_query(
+                    """
+                    SELECT agent_id FROM sessions WHERE id = %s::uuid
+                    """,
+                    (session_id,)
+                )
+                
+                if result and result[0].get('agent_id') is not None:
+                    existing_agent_id = result[0]['agent_id']
+                    
+                    # If agent_id is provided and doesn't match the existing one, raise an error
+                    if existing_agent_id != agent_id:
+                        error_msg = f"Session {session_id} is already associated with agent ID {existing_agent_id}, cannot reassign to agent ID {agent_id}"
+                        logger.error(error_msg)
+                        raise ValueError(error_msg)
+                elif result:
+                    # If the session exists but doesn't have an agent_id set, we can update it
+                    execute_query(
+                        """
+                        UPDATE sessions 
+                        SET agent_id = %s,
+                            updated_at = %s
+                        WHERE id = %s::uuid
+                        """,
+                        (
+                            agent_id,
+                            datetime.utcnow(),
+                            session_id
+                        ),
+                        fetch=False
+                    )
+                    logger.info(f"Updated agent_id to {agent_id} for session {session_id}")
+            
             # Session exists, update name if provided
             if session_name:
                 execute_query(
                     """
                     UPDATE sessions 
-                    SET name = %s
+                    SET name = %s,
+                        updated_at = %s
                     WHERE id = %s::uuid
                     """,
                     (
                         session_name,
+                        datetime.utcnow(),
                         session_id
                     ),
                     fetch=False
