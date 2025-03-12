@@ -1,0 +1,8 @@
+{
+  "name_to_id": {
+    "test-session-001": "7b50f422-2711-4104-8d2f-76ac1fa04cca"
+  },
+  "id_to_name": {
+    "7b50f422-2711-4104-8d2f-76ac1fa04cca": "test-session-001"
+  }
+}

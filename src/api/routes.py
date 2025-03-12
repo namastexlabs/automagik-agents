@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 import json
+import math
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Path, Depends
 from src.agents.models.agent_factory import AgentFactory
 from src.config import settings
 from src.memory.message_history import MessageHistory
@@ -14,7 +15,11 @@ from src.api.models import (
     MessageModel,
     SessionResponse,
     SessionListResponse,
-    SessionInfo
+    SessionInfo,
+    UserCreate,
+    UserUpdate,
+    UserInfo,
+    UserListResponse
 )
 from src.memory.pg_message_store import PostgresMessageStore
 from src.utils.db import execute_query
@@ -47,27 +52,30 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Get session_origin from request
         session_origin = request.session_origin
         
+        # Extract session_name if provided
+        session_name = request.session_name
+        
         # Check if session_id is provided
         if not request.session_id:
             # If no session_id is provided, generate a new one
             from src.memory.pg_message_store import PostgresMessageStore
             store = PostgresMessageStore()
             # Generate a new session with an empty string (this will create a new session in the database)
-            new_session_id = store._ensure_session_exists("", request.user_id, session_origin)
+            new_session_id = store._ensure_session_exists("", request.user_id, session_origin, session_name)
             request.session_id = new_session_id
-            logger.info(f"Created new session with ID: {new_session_id} and origin: {session_origin}")
+            logger.info(f"Created new session with ID: {new_session_id}, name: {session_name}, and origin: {session_origin}")
         else:
             # Check if the provided session exists, if not create it
             from src.memory.pg_message_store import PostgresMessageStore
             store = PostgresMessageStore()
             if not store.session_exists(request.session_id):
                 # Create the session with the provided ID
-                store._ensure_session_exists(request.session_id, request.user_id, session_origin)
-                logger.info(f"Created session with provided ID: {request.session_id} and origin: {session_origin}")
+                store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name)
+                logger.info(f"Created session with provided ID: {request.session_id}, name: {session_name}, and origin: {session_origin}")
             else:
                 # Update the session with the current session_origin if needed
-                store._ensure_session_exists(request.session_id, request.user_id, session_origin)
-                logger.info(f"Using existing session: {request.session_id} with origin: {session_origin}")
+                store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name)
+                logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
         
         # Store channel_payload in the users table if provided
         if request.channel_payload:
@@ -336,4 +344,309 @@ async def list_sessions(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to list sessions: {str(e)}"
-        ) 
+        )
+
+# User management endpoints
+@router.get("/users", response_model=UserListResponse, tags=["Users"],
+            summary="List Users",
+            description="Returns a list of all users with pagination options.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def list_users(
+    page: int = Query(1, description="Page number (1-based)"),
+    page_size: int = Query(50, description="Number of users per page"),
+    sort_desc: bool = Query(True, description="Sort by most recent first if True")
+):
+    """List all users with pagination."""
+    try:
+        # Get total count first for pagination
+        count_result = execute_query("SELECT COUNT(*) as count FROM users")
+        total_count = count_result[0]['count'] if count_result else 0
+        
+        # Calculate offset based on page and page_size
+        offset = (page - 1) * page_size
+        
+        # Build the query with sorting
+        order_direction = "DESC" if sort_desc else "ASC"
+        query = f"""
+            SELECT id, email, created_at, updated_at, user_data 
+            FROM users 
+            ORDER BY created_at {order_direction} 
+            LIMIT %s OFFSET %s
+        """
+        
+        # Execute the paginated query
+        users_data = execute_query(query, (page_size, offset))
+        
+        # Process the results
+        users = []
+        for user in users_data:
+            # Parse user_data JSON if it exists
+            user_data = {}
+            if user.get('user_data'):
+                if isinstance(user['user_data'], str):
+                    try:
+                        user_data = json.loads(user['user_data'])
+                    except:
+                        user_data = {}
+                else:
+                    user_data = user['user_data']
+            
+            # Create UserInfo object
+            user_info = UserInfo(
+                id=user['id'],
+                email=user['email'],
+                created_at=user.get('created_at'),
+                updated_at=user.get('updated_at'),
+                name=user_data.get('name'),
+                channel_payload=user_data.get('channel_payload')
+            )
+            users.append(user_info)
+        
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
+        return UserListResponse(
+            users=users,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
+    except Exception as e:
+        logger.error(f"Error listing users: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.post("/users", response_model=UserInfo, tags=["Users"],
+            summary="Create User",
+            description="Creates a new user.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def create_user(user: UserCreate):
+    """Create a new user."""
+    try:
+        # Check if user with the same email already exists
+        existing = execute_query("SELECT id FROM users WHERE email = %s", (user.email,))
+        if existing:
+            raise HTTPException(status_code=409, detail=f"User with email {user.email} already exists")
+        
+        # Prepare user_data
+        now = datetime.utcnow()
+        user_data = {
+            "name": user.name or user.email.split("@")[0],
+            "created_via": "api"
+        }
+        
+        # Add channel_payload if provided
+        if user.channel_payload:
+            user_data["channel_payload"] = user.channel_payload
+        
+        # Insert new user
+        result = execute_query(
+            """
+            INSERT INTO users (email, created_at, updated_at, user_data) 
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, email, created_at, updated_at, user_data
+            """,
+            (
+                user.email,
+                now,
+                now,
+                json.dumps(user_data)
+            )
+        )
+        
+        if not result or len(result) == 0:
+            raise HTTPException(status_code=500, detail="Failed to create user")
+        
+        created_user = result[0]
+        
+        # Parse user_data JSON
+        parsed_user_data = {}
+        if created_user.get('user_data'):
+            if isinstance(created_user['user_data'], str):
+                try:
+                    parsed_user_data = json.loads(created_user['user_data'])
+                except:
+                    parsed_user_data = {}
+            else:
+                parsed_user_data = created_user['user_data']
+        
+        return UserInfo(
+            id=created_user['id'],
+            email=created_user['email'],
+            created_at=created_user.get('created_at'),
+            updated_at=created_user.get('updated_at'),
+            name=parsed_user_data.get('name'),
+            channel_payload=parsed_user_data.get('channel_payload')
+        )
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/users/{user_id}", response_model=UserInfo, tags=["Users"],
+            summary="Get User",
+            description="Returns details for a specific user.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def get_user(user_id: int = Path(..., description="The user ID")):
+    """Get a specific user by ID."""
+    try:
+        user_data = execute_query("SELECT id, email, created_at, updated_at, user_data FROM users WHERE id = %s", (user_id,))
+        if not user_data or len(user_data) == 0:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        
+        user = user_data[0]
+        
+        # Parse user_data JSON
+        parsed_user_data = {}
+        if user.get('user_data'):
+            if isinstance(user['user_data'], str):
+                try:
+                    parsed_user_data = json.loads(user['user_data'])
+                except:
+                    parsed_user_data = {}
+            else:
+                parsed_user_data = user['user_data']
+        
+        return UserInfo(
+            id=user['id'],
+            email=user['email'],
+            created_at=user.get('created_at'),
+            updated_at=user.get('updated_at'),
+            name=parsed_user_data.get('name'),
+            channel_payload=parsed_user_data.get('channel_payload')
+        )
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.put("/users/{user_id}", response_model=UserInfo, tags=["Users"],
+            summary="Update User",
+            description="Updates an existing user.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def update_user(user_update: UserUpdate, user_id: int = Path(..., description="The user ID")):
+    """Update an existing user."""
+    try:
+        # Check if user exists
+        existing = execute_query("SELECT id, email, user_data FROM users WHERE id = %s", (user_id,))
+        if not existing or len(existing) == 0:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        
+        # Get current user data
+        current_user = existing[0]
+        
+        # Parse existing user_data
+        current_user_data = {}
+        if current_user.get('user_data'):
+            if isinstance(current_user['user_data'], str):
+                try:
+                    current_user_data = json.loads(current_user['user_data'])
+                except:
+                    current_user_data = {}
+            else:
+                current_user_data = current_user['user_data']
+        
+        # Prepare updated fields
+        now = datetime.utcnow()
+        update_fields = []
+        update_values = []
+        
+        # Handle email update
+        if user_update.email:
+            update_fields.append("email = %s")
+            update_values.append(user_update.email)
+        
+        # Handle user_data updates
+        updated_user_data = current_user_data.copy()
+        
+        # Update name if provided
+        if user_update.name is not None:
+            updated_user_data["name"] = user_update.name
+        
+        # Update channel_payload if provided
+        if user_update.channel_payload is not None:
+            updated_user_data["channel_payload"] = user_update.channel_payload
+        
+        # Only update user_data if changed
+        if updated_user_data != current_user_data:
+            update_fields.append("user_data = %s")
+            update_values.append(json.dumps(updated_user_data))
+        
+        # Always update updated_at timestamp
+        update_fields.append("updated_at = %s")
+        update_values.append(now)
+        
+        # Build query
+        if not update_fields:
+            # No changes to make
+            return await get_user(user_id)
+        
+        query = f"""
+            UPDATE users 
+            SET {", ".join(update_fields)} 
+            WHERE id = %s
+            RETURNING id, email, created_at, updated_at, user_data
+        """
+        
+        # Add user_id to values
+        update_values.append(user_id)
+        
+        # Execute update
+        result = execute_query(query, tuple(update_values))
+        
+        if not result or len(result) == 0:
+            raise HTTPException(status_code=500, detail="Failed to update user")
+        
+        updated_user = result[0]
+        
+        # Parse user_data JSON
+        parsed_user_data = {}
+        if updated_user.get('user_data'):
+            if isinstance(updated_user['user_data'], str):
+                try:
+                    parsed_user_data = json.loads(updated_user['user_data'])
+                except:
+                    parsed_user_data = {}
+            else:
+                parsed_user_data = updated_user['user_data']
+        
+        return UserInfo(
+            id=updated_user['id'],
+            email=updated_user['email'],
+            created_at=updated_user.get('created_at'),
+            updated_at=updated_user.get('updated_at'),
+            name=parsed_user_data.get('name'),
+            channel_payload=parsed_user_data.get('channel_payload')
+        )
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.delete("/users/{user_id}", response_model=DeleteSessionResponse, tags=["Users"],
+               summary="Delete User",
+               description="Deletes a user account.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def delete_user(user_id: int = Path(..., description="The user ID")):
+    """Delete a user account."""
+    try:
+        # Check if user exists
+        existing = execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
+        if not existing or len(existing) == 0:
+            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+        
+        # Delete the user
+        execute_query("DELETE FROM users WHERE id = %s", (user_id,), fetch=False)
+        
+        return DeleteSessionResponse(
+            status="success",
+            session_id=str(user_id),  # Reusing DeleteSessionResponse model
+            message=f"User with ID {user_id} was deleted successfully"
+        )
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") 

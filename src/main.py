@@ -1,5 +1,7 @@
 import logging
 from datetime import datetime
+import json
+import uuid
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from src.api.routes import router as api_router
 from src.memory.message_history import MessageHistory
 from src.memory.pg_message_store import PostgresMessageStore
 from src.agents.models.agent_factory import AgentFactory
+from src.utils.db import execute_query
 
 # Configure logging
 configure_logging()
@@ -115,18 +118,17 @@ def create_app() -> FastAPI:
                 version = cur.fetchone()[0]
                 logger.info(f"✅ Database connection test successful: {version}")
                 
-                # Check if our tables exist
+                # Check if required tables exist
                 cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sessions')")
                 sessions_table_exists = cur.fetchone()[0]
-                cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'chat_messages')")
+                
+                cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'messages')")
                 messages_table_exists = cur.fetchone()[0]
-                cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')")
-                users_table_exists = cur.fetchone()[0]
                 
-                logger.info(f"Database tables check - Sessions: {sessions_table_exists}, Messages: {messages_table_exists}, Users: {users_table_exists}")
+                logger.info(f"Database tables check - Sessions: {sessions_table_exists}, Messages: {messages_table_exists}")
                 
-                if not (sessions_table_exists and messages_table_exists and users_table_exists):
-                    logger.error("❌ Required database tables are missing - sessions, messages, or users tables not found")
+                if not (sessions_table_exists and messages_table_exists):
+                    logger.error("❌ Required database tables are missing - sessions or messages tables not found")
                     raise ValueError("Required database tables not found")
             pool.putconn(conn)
             
@@ -135,11 +137,8 @@ def create_app() -> FastAPI:
         # Initialize PostgreSQL message store
         pg_store = PostgresMessageStore()
         
-        # Create a test session and message to verify it works
-        logger.info("🔍 Performing verification test of PostgresMessageStore...")
-        import uuid
-        from datetime import datetime
-        test_session_id = f"startup-test-{uuid.uuid4()}"
+        # Verify database functionality without creating persistent test data
+        logger.info("🔍 Performing verification test of PostgresMessageStore without creating persistent sessions...")
         test_user_id = 1  # Use numeric ID instead of string
         
         # First ensure the default user exists
@@ -155,81 +154,81 @@ def create_app() -> FastAPI:
                 INSERT INTO users (id, email, created_at, updated_at) 
                 VALUES (%s, %s, %s, %s)
                 """,
-                (test_user_id, "default@example.com", datetime.utcnow(), datetime.utcnow()),
+                (test_user_id, "admin@automagik", datetime.utcnow(), datetime.utcnow()),
                 fetch=False
             )
             logger.info(f"✅ Created default user '{test_user_id}'")
         else:
             logger.info(f"✅ Default user '{test_user_id}' already exists")
         
-        # Create a test session
+        # Verify message store functionality without creating test sessions
+        # Use a transaction that we'll roll back to avoid persisting test data
         try:
-            logger.info(f"Creating test session {test_session_id}...")
-            execute_query(
-                """
-                INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (test_session_id, test_user_id, "web", datetime.utcnow(), datetime.utcnow()),
-                fetch=False
-            )
-            
-            # Check if session was actually created
-            session_exists = execute_query(
-                "SELECT COUNT(*) as count FROM sessions WHERE id = %s",
-                (test_session_id,)
-            )
-            
-            if session_exists and session_exists[0]["count"] > 0:
-                logger.info(f"✅ Test session {test_session_id} created successfully")
+            logger.info("Testing database message store functionality with transaction rollback...")
+            with pool.getconn() as conn:
+                conn.autocommit = False  # Start a transaction
                 
-                # Try adding a test message
-                test_message_id = f"startup-test-msg-{uuid.uuid4()}"
-                execute_query(
-                    """
-                    INSERT INTO chat_messages (
-                        id, session_id, role, text_content, raw_payload, 
-                        message_timestamp, message_type, user_id
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, 
-                        %s, %s, %s
+                # Generate test UUIDs
+                test_session_id = str(uuid.uuid4())
+                test_message_id = str(uuid.uuid4())
+                
+                # Test inserting temporary session and message
+                with conn.cursor() as cur:
+                    # Insert test session
+                    cur.execute(
+                        """
+                        INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (test_session_id, test_user_id, "verification_test", datetime.utcnow(), datetime.utcnow())
                     )
-                    """,
-                    (
-                        test_message_id,
-                        test_session_id,
-                        "system",
-                        "This is a test message to verify database connectivity",
-                        '{"role": "system", "content": "This is a test message to verify database connectivity"}',
-                        datetime.utcnow(),
-                        "text",
-                        test_user_id
-                    ),
-                    fetch=False
-                )
+                    
+                    # Insert test message
+                    cur.execute(
+                        """
+                        INSERT INTO messages (
+                            id, session_id, role, text_content, raw_payload, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            test_message_id,
+                            test_session_id,
+                            "user",
+                            "Test database connection",
+                            json.dumps({"content": "Test database connection"}),
+                            datetime.utcnow(),
+                            datetime.utcnow()
+                        )
+                    )
+                    
+                    # Verify we can read the data back
+                    cur.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (test_session_id,))
+                    session_count = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM messages WHERE id = %s", (test_message_id,))
+                    message_count = cur.fetchone()[0]
+                    
+                    if session_count > 0 and message_count > 0:
+                        logger.info("✅ Database read/write test successful")
+                    else:
+                        logger.error("❌ Failed to verify database read operations")
+                        raise Exception("Database verification failed")
+                    
+                    # Roll back the transaction to avoid persisting test data
+                    conn.rollback()
+                    logger.info("✅ Test transaction rolled back - no test data persisted")
                 
-                # Verify message was created
-                message_exists = execute_query(
-                    "SELECT COUNT(*) as count FROM chat_messages WHERE id = %s",
-                    (test_message_id,)
-                )
+                # Return connection to pool
+                pool.putconn(conn)
                 
-                if message_exists and message_exists[0]["count"] > 0:
-                    logger.info(f"✅ Test message {test_message_id} created successfully")
-                    logger.info("✅ Database store verification successful - can create sessions and messages")
-                else:
-                    logger.error(f"❌ Failed to create test message {test_message_id}")
-                    raise ValueError("Failed to create test message")
-                
-                # Clean up test data
-                execute_query("DELETE FROM chat_messages WHERE id = %s", (test_message_id,), fetch=False)
-                execute_query("DELETE FROM sessions WHERE id = %s", (test_session_id,), fetch=False)
-                logger.info("✅ Test data cleaned up")
-            else:
-                logger.error(f"❌ Failed to create test session {test_session_id}")
-                raise ValueError("Failed to create test session")
+            logger.info("✅ Database verification completed successfully without creating persistent test data")
         except Exception as test_e:
             logger.error(f"❌ Database verification test failed: {str(test_e)}")
+            # Ensure any open transaction is rolled back
+            try:
+                conn.rollback()
+            except:
+                pass
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
             raise

@@ -19,6 +19,7 @@ class AgentRunRequest(BaseResponseModel):
     channel_payload: Optional[Dict[str, Any]] = None
     context: dict = {}
     session_id: Optional[str] = None
+    session_name: Optional[str] = None  # Optional friendly name for the session
     user_id: Optional[int] = 1  # User ID is now an integer with default value 1
     message_limit: Optional[int] = 10  # Default to last 10 messages
     session_origin: Optional[str] = "automagik-agent"  
@@ -85,6 +86,7 @@ class SessionInfo(BaseResponseModel):
     """Information about a session."""
     session_id: str
     user_id: Optional[int] = None
+    session_name: Optional[str] = None
     created_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
     message_count: Optional[int] = None
@@ -94,6 +96,35 @@ class SessionInfo(BaseResponseModel):
 class SessionListResponse(BaseResponseModel):
     """Response model for listing all sessions."""
     sessions: List[SessionInfo]
+    total_count: int
+    page: int = 1
+    page_size: int = 50
+    total_pages: int = 1
+
+class UserCreate(BaseResponseModel):
+    """Request model for creating a new user."""
+    email: str
+    name: Optional[str] = None
+    channel_payload: Optional[Dict[str, Any]] = None
+
+class UserUpdate(BaseResponseModel):
+    """Request model for updating an existing user."""
+    email: Optional[str] = None
+    name: Optional[str] = None
+    channel_payload: Optional[Dict[str, Any]] = None
+
+class UserInfo(BaseResponseModel):
+    """Response model for user information."""
+    id: int
+    email: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    name: Optional[str] = None
+    channel_payload: Optional[Dict[str, Any]] = None
+
+class UserListResponse(BaseResponseModel):
+    """Response model for listing users."""
+    users: List[UserInfo]
     total_count: int
     page: int = 1
     page_size: int = 50

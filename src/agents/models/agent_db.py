@@ -211,12 +211,12 @@ def link_session_to_agent(session_id: str, agent_id: Union[int, str]) -> bool:
             logger.error(f"Cannot link session to non-existent agent {agent_id}")
             return False
         
-        # Update all messages in the session that don't have an agent_id
+        # Update all messages associated with the session
         execute_query(
             """
-            UPDATE chat_messages
+            UPDATE messages
             SET agent_id = %s
-            WHERE session_id = %s AND agent_id IS NULL
+            WHERE session_id = %s
             """,
             (agent_id, session_id),
             fetch=False

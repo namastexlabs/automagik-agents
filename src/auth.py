@@ -1,6 +1,7 @@
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Depends, Header
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from typing import Optional
 from src.config import settings
 
 API_KEY_NAME = "x-api-key"
@@ -26,4 +27,30 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if api_key != settings.AM_API_KEY:
             return JSONResponse(status_code=401, content={"detail": "Invalid API Key"})
             
-        return await call_next(request) 
+        return await call_next(request)
+
+async def get_api_key(x_api_key: Optional[str] = Header(None, alias=API_KEY_NAME)):
+    """Dependency to validate API key in FastAPI routes.
+    
+    Args:
+        x_api_key: The API key provided in the request header
+        
+    Returns:
+        The validated API key
+        
+    Raises:
+        HTTPException: If API key is missing or invalid
+    """
+    if x_api_key is None:
+        raise HTTPException(
+            status_code=401,
+            detail="API key is missing"
+        )
+    
+    if x_api_key != settings.AM_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key"
+        )
+    
+    return x_api_key 
