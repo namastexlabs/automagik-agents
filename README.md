@@ -40,7 +40,10 @@ We built Automagik because we needed to save time while creating high-quality, p
 
 1. **Installation**
    ```bash
-   pip install automagik-agents
+   git clone https://github.com/namastexlabs/automagik-agents
+   uv venv
+   source .venv/bin/activate
+   uv pip install -e .
    ```
 
 2. **Environment Setup**
@@ -80,7 +83,7 @@ We built Automagik because we needed to save time while creating high-quality, p
 
 ### CLI Commands
 
-1. **Interactive Chat**
+1. **Interactive Chat** - Useful when developing / debugging without an UI.
    ```bash
    # Start a chat session with an agent
    automagik-agents agent chat start --agent my_agent
@@ -89,7 +92,7 @@ We built Automagik because we needed to save time while creating high-quality, p
    automagik-agents agent chat list
    ```
 
-2. **Single Message Mode**
+2. **Agent Mode** - We made this so that we can provide another agent with tools to test the new agents under development.
    ```bash
    # Run a single message through an agent
    automagik-agents agent run message --agent my_agent --message "What time is it?"
