@@ -22,11 +22,17 @@ from src.api.models import (
     UserInfo,
     UserListResponse
 )
+
+# Import memory router
+from src.api.memory_routes import memory_router
 from src.memory.pg_message_store import PostgresMessageStore
 from src.utils.db import execute_query
 
 # Create API router for v1 endpoints
 router = APIRouter()
+
+# Include memory router
+router.include_router(memory_router)
 
 # Get our module's logger
 logger = logging.getLogger(__name__)

@@ -523,6 +523,141 @@ def test_delete_user():
     return {"status": data["status"], "user_id": data["session_id"]}  # API uses session_id field for user_id
 
 # ==========================================
+# Memory Tests
+# ==========================================
+
+def test_create_memory():
+    """Test creating a memory"""
+    global TEST_SESSION_ID
+    global TEST_USER_ID
+    
+    # Create a new memory for the test user
+    memory_data = {
+        "name": "Test Memory",
+        "description": "This is a test memory",
+        "content": "This is the content of the test memory",
+        "user_id": TEST_USER_ID,
+        "read_mode": "user_memory",
+        "access": "read"
+    }
+    
+    if TEST_SESSION_ID:
+        memory_data["session_id"] = TEST_SESSION_ID
+    
+    data = make_request(
+        "post", 
+        f"{BASE_URL}/api/v1/memories", 
+        json=memory_data
+    )
+    
+    assert "id" in data, "Memory ID not returned"
+    assert data["name"] == memory_data["name"], "Memory name doesn't match"
+    assert data["content"] == memory_data["content"], "Memory content doesn't match"
+    
+    # Store memory ID for later tests
+    RESOURCES_TO_CLEANUP["memories"] = RESOURCES_TO_CLEANUP.get("memories", [])
+    RESOURCES_TO_CLEANUP["memories"].append(data["id"])
+    
+    return data
+
+def test_get_memory_by_id():
+    """Test getting a memory by ID"""
+    # Create a memory first if none exists
+    if not RESOURCES_TO_CLEANUP.get("memories"):
+        memory_data = test_create_memory()
+        memory_id = memory_data["id"]
+    else:
+        memory_id = RESOURCES_TO_CLEANUP["memories"][0]
+    
+    # Get the memory by ID
+    data = make_request(
+        "get", 
+        f"{BASE_URL}/api/v1/memories/{memory_id}"
+    )
+    
+    assert data["id"] == memory_id, "Memory ID mismatch"
+    return data
+
+def test_update_memory():
+    """Test updating a memory"""
+    # Create a memory first if none exists
+    if not RESOURCES_TO_CLEANUP.get("memories"):
+        memory_data = test_create_memory()
+        memory_id = memory_data["id"]
+    else:
+        memory_id = RESOURCES_TO_CLEANUP["memories"][0]
+    
+    # Update the memory
+    update_data = {
+        "name": "Updated Memory",
+        "content": "This memory has been updated"
+    }
+    
+    data = make_request(
+        "put", 
+        f"{BASE_URL}/api/v1/memories/{memory_id}", 
+        json=update_data
+    )
+    
+    assert data["id"] == memory_id, "Memory ID mismatch"
+    assert data["name"] == update_data["name"], "Updated name doesn't match"
+    assert data["content"] == update_data["content"], "Updated content doesn't match"
+    
+    return data
+
+def test_list_memories():
+    """Test listing memories"""
+    # Create a memory first if none exists
+    if not RESOURCES_TO_CLEANUP.get("memories"):
+        test_create_memory()
+    
+    # List all memories
+    data = make_request(
+        "get", 
+        f"{BASE_URL}/api/v1/memories"
+    )
+    
+    assert "memories" in data, "Memories field missing"
+    assert "count" in data, "Count field missing"
+    assert "page" in data, "Page field missing"
+    assert "page_size" in data, "Page size field missing"
+    assert "pages" in data, "Pages field missing"
+    assert len(data["memories"]) > 0, "No memories returned"
+    
+    return data
+
+def test_delete_memory():
+    """Test deleting a memory"""
+    # Create a memory first if none exists
+    if not RESOURCES_TO_CLEANUP.get("memories"):
+        memory_data = test_create_memory()
+        memory_id = memory_data["id"]
+    else:
+        memory_id = RESOURCES_TO_CLEANUP["memories"].pop()
+    
+    # Delete the memory
+    data = make_request(
+        "delete", 
+        f"{BASE_URL}/api/v1/memories/{memory_id}"
+    )
+    
+    assert data["id"] == memory_id, "Memory ID mismatch"
+    
+    # Verify memory is deleted
+    try:
+        make_request(
+            "get", 
+            f"{BASE_URL}/api/v1/memories/{memory_id}",
+            expected_status=404
+        )
+    except AssertionError as e:
+        # We expect a 404 error, if we don't get it, re-raise the exception
+        if "Expected status 404" not in str(e):
+            raise
+    
+    return data
+
+# ==========================================
 # Error Case Tests
 # ==========================================
 
@@ -591,6 +726,18 @@ def test_invalid_user_create():
 def cleanup_resources():
     """Clean up all test resources created during testing"""
     log("Cleaning up test resources", always=True)
+    
+    # Clean up memories
+    if "memories" in RESOURCES_TO_CLEANUP:
+        for memory_id in RESOURCES_TO_CLEANUP["memories"]:
+            try:
+                log(f"Deleting memory: {memory_id}")
+                requests.delete(
+                    f"{BASE_URL}/api/v1/memories/{memory_id}",
+                    headers=HEADERS
+                )
+            except Exception as e:
+                log(f"Error deleting memory {memory_id}: {str(e)}", level="ERROR")
     
     # Clean up sessions
     for session_id in RESOURCES_TO_CLEANUP["sessions"]:
@@ -676,6 +823,12 @@ def main():
         test_get_session_by_id,
         test_list_sessions,
         
+        # Memory tests
+        test_create_memory,
+        test_get_memory_by_id,
+        test_update_memory,
+        test_list_memories,
+        
         # Error case tests
         test_invalid_api_key,
         test_nonexistent_user,
@@ -683,6 +836,7 @@ def main():
         test_invalid_user_create,
         
         # Cleanup tests
+        test_delete_memory,
         test_delete_session,
         test_delete_user
     ]

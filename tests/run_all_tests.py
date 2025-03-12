@@ -132,11 +132,23 @@ def run_standalone_tests(args, output_dir=None):
     
     if args.memory:
         print("\n\033[1m==== Running Memory Tests ====\033[0m\n")
+        # Run standard memory tests
+        print("\n\033[1m==== Running Standard Memory Tests ====\033[0m\n")
         cmd = ["python", "tests/standalone/memory_test_script.py"]
         if args.generate_reports and output_dir and args.json:
             json_path = os.path.join(output_dir, "memory_results.json")
             cmd.append(f"--output={json_path}")
-        results["memory"] = subprocess.run(cmd, check=False).returncode
+        standard_memory_result = subprocess.run(cmd, check=False).returncode
+        
+        # Run Sofia memory API tests
+        print("\n\033[1m==== Running Sofia Memory API Tests ====\033[0m\n")
+        cmd = ["python", "tests/standalone/test_sofia_memory_api.py", "--direct"]
+        if args.verbose:
+            cmd.append("--verbose")
+        sofia_memory_result = subprocess.run(cmd, check=False).returncode
+        
+        # A memory test fails if either of the test scripts fails
+        results["memory"] = 0 if (standard_memory_result == 0 and sofia_memory_result == 0) else 1
     
     # Return 0 if all tests passed, 1 otherwise
     return 0 if all(code == 0 for code in results.values()) else 1

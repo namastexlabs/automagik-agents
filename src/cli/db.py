@@ -199,7 +199,8 @@ def create_required_tables_direct(host, port, dbname, user, password):
                     version VARCHAR,
                     config JSONB,
                     active BOOLEAN DEFAULT TRUE,
-                    run_id INTEGER,
+                    run_id INTEGER DEFAULT 0,
+                    system_prompt TEXT,
                     created_at TIMESTAMP WITH TIME ZONE,
                     updated_at TIMESTAMP WITH TIME ZONE
                 )
@@ -257,6 +258,7 @@ def create_required_tables_direct(host, port, dbname, user, password):
                     content TEXT,
                     session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
                     read_mode TEXT,
                     access TEXT,
                     metadata JSONB,
@@ -422,6 +424,35 @@ def create_required_tables_direct(host, port, dbname, user, password):
         """)
         conn.commit()
         logger.info("✅ Added performance indexes for timestamp queries")
+        
+        # Create a trigger to increment run_id when an agent is used
+        cursor.execute("""
+        CREATE OR REPLACE FUNCTION increment_agent_run_id()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            -- Increment the run_id for the agent being used
+            UPDATE agents
+            SET run_id = COALESCE(run_id, 0) + 1
+            WHERE id = NEW.agent_id;
+            
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """)
+        
+        cursor.execute("""
+        DROP TRIGGER IF EXISTS increment_agent_run_id_on_message ON messages;
+        """)
+        
+        cursor.execute("""
+        CREATE TRIGGER increment_agent_run_id_on_message
+        AFTER INSERT ON messages
+        FOR EACH ROW
+        WHEN (NEW.role = 'user')
+        EXECUTE FUNCTION increment_agent_run_id();
+        """)
+        conn.commit()
+        logger.info("✅ Added trigger to increment agent run_id")
         
         # Create default user if not exists
         cursor.execute("SELECT COUNT(*) FROM users WHERE id = 1")

@@ -132,6 +132,12 @@ class AgentFactory:
         if not agent_name.endswith('_agent'):
             agent_name = f"{agent_name}_agent"
             
+        # Special case for sofia_agent to ensure run_id is always up to date
+        if agent_name == "sofia_agent" and agent_name in cls._initialized_agents:
+            # Force recreation of sofia_agent to refresh run_id
+            del cls._initialized_agents[agent_name]
+            logger.info(f"Forcing recreation of {agent_name} to refresh run_id")
+            
         if agent_name not in cls._initialized_agents:
             if agent_name not in cls._agents:
                 cls.discover_agents()
