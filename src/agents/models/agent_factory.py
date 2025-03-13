@@ -3,6 +3,7 @@ import logging
 import json
 from pathlib import Path
 from typing import Dict, Type, List, Tuple, Optional, Any
+import uuid
 
 from src.agents.models.base_agent import BaseAgent
 from src.agents.models.agent_db import register_agent, get_agent_by_name, link_session_to_agent
@@ -131,6 +132,12 @@ class AgentFactory:
         if not agent_name.endswith('_agent'):
             agent_name = f"{agent_name}_agent"
             
+        # Special case for sofia_agent to ensure run_id is always up to date
+        if agent_name == "sofia_agent" and agent_name in cls._initialized_agents:
+            # Force recreation of sofia_agent to refresh run_id
+            del cls._initialized_agents[agent_name]
+            logger.info(f"Forcing recreation of {agent_name} to refresh run_id")
+            
         if agent_name not in cls._initialized_agents:
             if agent_name not in cls._agents:
                 cls.discover_agents()
@@ -191,40 +198,63 @@ class AgentFactory:
         return cls._agents[agent_name][1]
     
     @classmethod
-    def link_agent_to_session(cls, agent_name: str, session_id: str) -> bool:
+    def link_agent_to_session(cls, agent_name: str, session_id_or_name: str) -> bool:
         """Link an agent to a session in the database.
         
         Args:
-            agent_name: The name of the agent
-            session_id: The session ID
+            agent_name: The name of the agent.
+            session_id_or_name: The session ID or name to link.
             
         Returns:
-            True if successful, False otherwise
+            True on success, False on failure.
         """
+        # Try to determine if session_id_or_name is a session name or ID
         try:
-            # Add _agent suffix if not present
-            if not agent_name.endswith('_agent'):
-                agent_name = f"{agent_name}_agent"
+            # First try to validate as UUID
+            uuid_obj = uuid.UUID(session_id_or_name)
+            session_id = session_id_or_name
+        except ValueError:
+            # Not a UUID, could be a session name
+            try:
+                # Import inside the method to avoid circular imports
+                from src.memory.pg_message_store import PostgresMessageStore
+                store = PostgresMessageStore()
+                resolved_id = store.get_session_by_name(session_id_or_name)
                 
-            # Get agent ID
-            if agent_name in cls._agent_db_ids:
-                agent_id = cls._agent_db_ids[agent_name]
-            else:
-                # Try to get the agent ID from the database
-                db_agent = get_agent_by_name(agent_name)
-                if not db_agent:
-                    # Discover agents to make sure it's registered
-                    cls.discover_agents()
-                    db_agent = get_agent_by_name(agent_name)
-                    if not db_agent:
-                        logger.error(f"Agent {agent_name} not found in database")
-                        return False
+                if not resolved_id:
+                    logger.warning(f"No session found with name '{session_id_or_name}'")
+                    return False
                 
-                agent_id = db_agent["id"]
-                cls._agent_db_ids[agent_name] = agent_id
+                session_id = resolved_id
+                logger.info(f"Resolved session name '{session_id_or_name}' to ID {session_id}")
+            except Exception as e:
+                logger.error(f"Error resolving session name '{session_id_or_name}': {str(e)}")
+                return False
+        
+        # Now that we have a valid session ID, proceed with linking
+        try:
+            # Get the database ID for the agent name
+            agent = None
+            for name, (a_class, _) in cls._agents.items():
+                if name == agent_name or f"{name}_agent" == agent_name:
+                    a_instance = cls.get_agent(name)
+                    agent_id = getattr(a_instance, "db_id", None)
+                    if agent_id:
+                        from src.agents.models.agent_db import link_session_to_agent
+                        return link_session_to_agent(session_id, agent_id)
             
-            # Link the session to the agent
-            return link_session_to_agent(session_id, agent_id)
+            # Try direct lookup by name in case the agent was registered directly in the database
+            from src.agents.models.agent_db import get_agent_by_name, link_session_to_agent
+            agent_rec = get_agent_by_name(agent_name)
+            if agent_rec and "id" in agent_rec:
+                return link_session_to_agent(session_id, agent_rec["id"])
+            
+            agent_rec = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
+            if agent_rec and "id" in agent_rec:
+                return link_session_to_agent(session_id, agent_rec["id"])
+                
+            logger.warning(f"Could not find agent ID for agent {agent_name}")
+            return False
         except Exception as e:
-            logger.error(f"Error linking agent {agent_name} to session {session_id}: {str(e)}")
+            logger.error(f"Error linking agent {agent_name} to session {session_id_or_name}: {e}")
             return False 

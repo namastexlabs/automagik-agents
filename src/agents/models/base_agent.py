@@ -101,6 +101,9 @@ class BaseAgent(ABC):
         except Exception as e:
             error_msg = f"Error running agent: {str(e)}"
             logging.error(error_msg)
+            logging.error(f"Stack trace: {logging._srcfile}")
+            import traceback
+            logging.error(traceback.format_exc())
             return AgentBaseResponse.from_agent_response(
                 message="An error occurred while processing your request.",
                 history=message_history,
@@ -114,8 +117,38 @@ class BaseAgent(ABC):
         # Extract tool calls and outputs from the current run only
         tool_calls = []
         tool_outputs = []
-        for message in result.all_messages():
-            if hasattr(message, 'parts'):
+        
+        # Safely extract the messages from the result
+        try:
+            all_messages = result.all_messages()
+        except Exception as e:
+            logging.warning(f"Error getting all messages from result: {str(e)}")
+            all_messages = []
+            
+        for message in all_messages:
+            # Handle dictionary messages from database
+            if isinstance(message, dict):
+                # Extract tool calls from dict if present
+                if 'tool_calls' in message and isinstance(message['tool_calls'], list):
+                    for tc in message['tool_calls']:
+                        if isinstance(tc, dict) and 'tool_name' in tc:
+                            tool_calls.append({
+                                'tool_name': tc.get('tool_name', ''),
+                                'args': tc.get('args', {}),
+                                'tool_call_id': tc.get('tool_call_id', '')
+                            })
+                
+                # Extract tool outputs from dict if present
+                if 'tool_outputs' in message and isinstance(message['tool_outputs'], list):
+                    for to in message['tool_outputs']:
+                        if isinstance(to, dict) and 'tool_name' in to:
+                            tool_outputs.append({
+                                'tool_name': to.get('tool_name', ''),
+                                'tool_call_id': to.get('tool_call_id', ''),
+                                'content': to.get('content', '')
+                            })
+            # Handle ModelMessage objects with parts
+            elif hasattr(message, 'parts'):
                 for part in message.parts:
                     if hasattr(part, 'part_kind'):
                         if part.part_kind == 'tool-call':

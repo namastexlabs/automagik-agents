@@ -311,8 +311,19 @@ class MessageHistory:
             result = {"messages": []}
             
             for message in self.messages:
-                if not message or not hasattr(message, "parts") or not message.parts:
-                    logger.warning("Skipping invalid message in to_dict")
+                # If it's already a dictionary with role, we can add it directly
+                if isinstance(message, dict) and 'role' in message:
+                    result["messages"].append(message)
+                    continue
+                    
+                # Skip invalid messages
+                if not message:
+                    logger.warning("Skipping null message in to_dict")
+                    continue
+                    
+                # Handle ModelMessage objects with parts attribute
+                if not hasattr(message, "parts") or not message.parts:
+                    logger.warning("Skipping message without parts in to_dict")
                     continue
                     
                 # Determine role based on message parts
@@ -323,10 +334,16 @@ class MessageHistory:
                 elif any(isinstance(p, UserPromptPart) for p in message.parts):
                     role = "user"
                 
-                # Extract content from message parts, handling TextPart specially
+                # Extract content from message parts, handling both TextPart and UserPromptPart
                 content = ""
                 for part in message.parts:
                     if isinstance(part, TextPart):
+                        content = part.content
+                        break
+                    elif isinstance(part, UserPromptPart):
+                        content = part.content
+                        break
+                    elif isinstance(part, SystemPromptPart):
                         content = part.content
                         break
                 
@@ -396,8 +413,22 @@ class MessageHistory:
             List of messages, optionally filtered and sorted
         """
         messages = self.messages
-        system_prompt = next((msg for msg in messages if any(isinstance(p, SystemPromptPart) for p in msg.parts)), None)
-        non_system_messages = [msg for msg in messages if not any(isinstance(p, SystemPromptPart) for p in msg.parts)]
+        system_prompt = None
+        non_system_messages = []
+        
+        # Safely separate system messages from non-system messages
+        for msg in messages:
+            try:
+                if hasattr(msg, 'parts') and any(isinstance(p, SystemPromptPart) for p in msg.parts):
+                    system_prompt = msg
+                elif isinstance(msg, dict) and msg.get('role') == 'system':
+                    system_prompt = msg
+                else:
+                    non_system_messages.append(msg)
+            except Exception as e:
+                logger.warning(f"Error processing message in get_filtered_messages: {str(e)}")
+                # Still add the message to non_system_messages as a fallback
+                non_system_messages.append(msg)
         
         # Sort messages by recency
         sorted_messages = sorted(
@@ -433,8 +464,22 @@ class MessageHistory:
             Tuple of (paginated messages, total messages, current page, total pages)
         """
         messages = self.messages
-        system_prompt = next((msg for msg in messages if any(isinstance(p, SystemPromptPart) for p in msg.parts)), None)
-        non_system_messages = [msg for msg in messages if not any(isinstance(p, SystemPromptPart) for p in msg.parts)]
+        system_prompt = None
+        non_system_messages = []
+        
+        # Safely separate system messages from non-system messages
+        for msg in messages:
+            try:
+                if hasattr(msg, 'parts') and any(isinstance(p, SystemPromptPart) for p in msg.parts):
+                    system_prompt = msg
+                elif isinstance(msg, dict) and msg.get('role') == 'system':
+                    system_prompt = msg
+                else:
+                    non_system_messages.append(msg)
+            except Exception as e:
+                logger.warning(f"Error processing message in get_paginated_messages: {str(e)}")
+                # Still add the message to non_system_messages as a fallback
+                non_system_messages.append(msg)
         
         # Sort messages by timestamp
         sorted_messages = sorted(
@@ -481,10 +526,16 @@ class MessageHistory:
             elif any(isinstance(p, UserPromptPart) for p in message.parts):
                 role = "user"
             
-            # Extract content from message parts, handling TextPart specially
+            # Extract content from message parts, handling both TextPart and UserPromptPart
             content = ""
             for part in message.parts:
                 if isinstance(part, TextPart):
+                    content = part.content
+                    break
+                elif isinstance(part, UserPromptPart):
+                    content = part.content
+                    break
+                elif isinstance(part, SystemPromptPart):
                     content = part.content
                     break
             

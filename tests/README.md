@@ -1,50 +1,194 @@
-# API Testing
+# Automagik Agents Tests
 
-This directory contains tests for the Automagik Agents API.
+This directory contains automated tests for the Automagik Agents system. The tests ensure that the API, CLI, and memory features are functioning correctly, handling both valid and invalid requests properly, and maintaining data consistency.
 
-## Setup
+## Directory Structure
 
-1. Install the required dependencies:
-   ```bash
-   pip install requests python-dotenv
-   ```
-
-2. Environment Configuration:
-   - The tests use the `.env` file in the root directory of the project
-   - Ensure the root `.env` file contains the `AM_API_KEY` variable
-   - No need to create a separate `.env` file in the tests directory
+```
+tests/
+├── run_all_tests.py           # Main entry point for running all tests
+├── requirements-test.txt      # Test dependencies
+├── standalone/                # Simple standalone test scripts
+│   ├── api_test_script.py     # Self-contained API test script
+│   ├── cli_test_script.py     # CLI commands test script
+│   └── memory_test_script.py  # Agent memory capabilities test script
+└── pytest/                    # Pytest-based tests
+    ├── test_all.py            # Unified pytest runner for all tests
+    └── test_api_endpoints.py  # API endpoint tests with pytest fixtures
+```
 
 ## Running the Tests
 
-Run the API tests:
+### Using the unified test runner (recommended)
+
+The `run_all_tests.py` script provides a unified interface for running all test types:
+
 ```bash
-python api_tests.py
+# Run all tests with pytest
+python tests/run_all_tests.py
+
+# Run only specific test types
+python tests/run_all_tests.py --api --no-cli --no-memory
+
+# Run with verbose output
+python tests/run_all_tests.py --verbose
+
+# Generate HTML, JSON, and JUnit reports
+python tests/run_all_tests.py --html --json --junit
+
+# Run in standalone mode (without pytest)
+python tests/run_all_tests.py --standalone
+
+# Specify output directory for reports
+python tests/run_all_tests.py --output-dir=my_test_reports
 ```
 
-## Test Description
+### Using pytest directly
 
-The test script (`api_tests.py`) tests all the API endpoints in sequence:
+You can also run tests directly with pytest:
 
-1. **Health Check**: Tests the `/health` endpoint to ensure the API is running
-2. **Root Endpoint**: Tests the root endpoint (`/`) to verify service information
-3. **List Agents**: Tests the `/api/v1/agent/list` endpoint to get available agents
-4. **Run Agent**: Tests the `/api/v1/agent/{agent_name}/run` endpoint to create a new session
-5. **Get Session**: Tests the `/api/v1/session/{session_id}` endpoint to verify session creation
-6. **List Sessions**: Tests the `/api/v1/sessions` endpoint to verify the test session appears in the list
-7. **Delete Session**: Tests the `/api/v1/session/{session_id}` (DELETE) endpoint to clean up the test session
+```bash
+# Run all tests with the unified runner
+pytest tests/pytest/test_all.py
 
-## Environment Variables
+# Run specific test types
+pytest tests/pytest/test_all.py -k "test_api or test_cli"
 
-The tests use the following environment variables from the root `.env` file:
+# Run API endpoint tests only
+pytest tests/pytest/test_api_endpoints.py
+```
 
-- `AM_API_KEY`: Your API key for authentication (required for most endpoints)
-- `API_BASE_URL`: Optional override for the base URL of the API (default: `http://localhost:8000`)
-- `TEST_USER_ID`: Optional override for the user ID to use for testing (default: `test-user`)
+### Running standalone tests directly
 
-## Adding New Tests
+During development, you can run the standalone scripts directly:
 
-To add a new test:
+```bash
+# Run the standalone API tests
+python tests/standalone/api_test_script.py
 
-1. Create a new test function in `api_tests.py`
-2. Add the function call to the `main()` function in the appropriate sequence
-3. Follow the existing pattern of making API calls, printing responses, and asserting on results 
+# Run the CLI tests
+python tests/standalone/cli_test_script.py
+
+# Run the memory tests
+python tests/standalone/memory_test_script.py
+```
+
+## Available Test Scripts
+
+1. **API Tests**:
+   - **Standalone** (`tests/standalone/api_test_script.py`): Tests API endpoints
+   - **Pytest** (`tests/pytest/test_api_endpoints.py`): API tests with pytest fixtures
+
+2. **CLI Tests** (`tests/standalone/cli_test_script.py`):
+   - Tests all CLI commands and subcommands
+   - Verifies expected outputs and error handling
+   - Available through unified pytest runner
+
+3. **Memory Tests** (`tests/standalone/memory_test_script.py`):
+   - Tests agent memory capabilities through sequential conversations
+   - Verifies context retention and conversation flow
+   - Available through unified pytest runner
+
+4. **Unified Runner** (`tests/pytest/test_all.py`):
+   - Runs all standalone tests through pytest
+   - Provides consistent reporting and CI integration
+   - Imports and executes the standalone scripts
+
+## Test Dependencies
+
+Install the test dependencies with:
+
+```bash
+pip install -r tests/requirements-test.txt
+```
+
+## Configuration
+
+Tests use the following environment variables (which can be set in the `.env` file):
+
+- `API_BASE_URL`: The base URL of the API (default: http://localhost:8881)
+- `AM_API_KEY`: The API key for authentication
+
+## Test Coverage
+
+The tests cover:
+
+1. **System Endpoints**:
+   - Health check
+   - Root endpoint
+   - OpenAPI schema
+   - Swagger and ReDoc documentation
+
+2. **User Management**:
+   - Create users
+   - Get users by ID, email, and phone number
+   - Update user emails and data
+   - List users
+   - Delete users
+
+3. **Agent Management**:
+   - List available agents
+   - Run an agent with a new session
+
+4. **Session Management**:
+   - Get session by ID
+   - List all sessions
+   - Delete sessions
+
+5. **CLI Commands**:
+   - Global options (--help, --version)
+   - API commands (auth, config)
+   - Database commands (init, reset)
+   - Agent chat and run commands
+   - Agent creation and management
+
+6. **Agent Memory**:
+   - Context retention across multiple messages
+   - Information recall
+   - Conversation flow maintenance
+
+## Test Reports
+
+When using pytest mode, various report formats are available:
+
+- **HTML reports**: `--html`
+- **JUnit XML**: `--junit`
+- **JSON**: `--json`
+
+## Continuous Integration
+
+These tests are designed to be run in CI/CD pipelines to ensure system reliability.
+
+Example GitHub Actions workflow:
+
+```yaml
+name: System Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tests/requirements-test.txt
+      - name: Run all tests
+        run: |
+          python tests/run_all_tests.py --html --json --junit
+      - name: Upload test reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports
+          path: test_reports/
+``` 
