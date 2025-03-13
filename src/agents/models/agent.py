@@ -73,7 +73,22 @@ class AgentBaseResponse(BaseModel):
         """
         # Create a safe history dict
         try:
+            # First try a direct conversion to dictionary
             history_dict = history.to_dict()
+            
+            # Assert that we have a valid structure
+            if not isinstance(history_dict, dict) or "messages" not in history_dict:
+                raise ValueError("Invalid history dictionary structure")
+                
+            # Validate each message has the proper structure
+            for i, msg in enumerate(history_dict["messages"]):
+                if not isinstance(msg, dict):
+                    logging.warning(f"Message at index {i} is not a dict, removing it")
+                    history_dict["messages"][i] = None
+            
+            # Filter out None messages
+            history_dict["messages"] = [msg for msg in history_dict["messages"] if msg is not None]
+            
         except Exception as e:
             # If history serialization fails, provide a minimal valid dict
             logging.error(f"Error serializing history: {str(e)}")

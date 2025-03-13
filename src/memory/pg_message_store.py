@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+import math
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -37,63 +38,99 @@ class PostgresMessageStore(MessageStore):
                     cur.execute("SELECT version()")
                     version = cur.fetchone()[0]
                     logger.info(f"✅ PostgresMessageStore successfully connected to database: {version}")
+                    
+                    # Check if run_finished_at column exists in sessions table, add it if not
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.columns 
+                            WHERE table_name = 'sessions' AND column_name = 'run_finished_at'
+                        ) as exists
+                    """)
+                    column_exists = cur.fetchone()[0]
+                    
+                    if not column_exists:
+                        logger.info("Adding run_finished_at column to sessions table...")
+                        try:
+                            cur.execute("""
+                                ALTER TABLE sessions
+                                ADD COLUMN run_finished_at TIMESTAMP WITH TIME ZONE
+                            """)
+                            conn.commit()
+                            logger.info("✅ Added run_finished_at column to sessions table")
+                        except Exception as e:
+                            logger.error(f"❌ Error adding run_finished_at column: {str(e)}")
+                            conn.rollback()
+                    
                 pool.putconn(conn)
         except Exception as e:
             logger.error(f"❌ PostgresMessageStore failed to connect to database during initialization: {str(e)}")
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def get_messages(self, session_id: str) -> List[ModelMessage]:
-        """Retrieve all messages for a session from PostgreSQL.
+    def get_messages(self, session_id: str, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """Retrieve messages for a session with pagination.
         
         Args:
             session_id: The unique session identifier.
+            limit: Maximum number of messages to retrieve (default: 100).
+            offset: Number of messages to skip (default: 0).
             
         Returns:
-            List of messages in the session.
+            A list of message dictionaries.
         """
         try:
-            # Check if session exists
-            if not self.session_exists(session_id):
-                logger.debug(f"Session {session_id} does not exist, returning empty list")
-                return []
-            
-            # Get messages from database
-            logger.info(f"🔍 Retrieving messages for session {session_id}")
-            messages = execute_query(
-                """
-                SELECT 
-                    id, role, text_content, raw_payload, 
-                    message_timestamp, agent_id, tool_calls, tool_outputs,
-                    channel_payload, system_prompt
-                FROM 
-                    chat_messages 
-                WHERE 
-                    session_id = %s
-                ORDER BY 
-                    message_timestamp
-                """,
-                (session_id,)
-            )
-            
-            # Log the result
-            if messages:
-                logger.info(f"✅ Retrieved {len(messages)} messages for session {session_id}")
-            else:
-                logger.warning(f"⚠️ No messages found for session {session_id}")
-            
-            # Ensure messages is not None
-            if messages is None:
-                logger.warning(f"Retrieved None instead of messages list for session {session_id}")
-                return []
-            
-            # Convert to ModelMessage objects
+            # Try to use the session_messages view if it exists
             try:
-                return [self._db_to_model_message(msg) for msg in messages]
-            except Exception as e:
-                logger.error(f"Error converting messages for session {session_id}: {str(e)}")
+                result = execute_query(
+                    """
+                    SELECT *
+                    FROM session_messages 
+                    WHERE session_id = %s::uuid 
+                    LIMIT %s OFFSET %s
+                    """,
+                    (session_id, limit, offset)
+                )
+            except Exception as view_error:
+                # Fall back to direct query if view doesn't exist
+                logger.debug(f"Could not use session_messages view, falling back to direct query: {str(view_error)}")
+                result = execute_query(
+                    """
+                    SELECT 
+                        id, 
+                        session_id, 
+                        role, 
+                        text_content, 
+                        tool_calls, 
+                        tool_outputs, 
+                        raw_payload, 
+                        created_at,
+                        updated_at, 
+                        message_type,
+                        user_id,
+                        agent_id,
+                        context,
+                        system_prompt
+                    FROM messages 
+                    WHERE session_id = %s::uuid 
+                    ORDER BY created_at ASC, updated_at ASC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (session_id, limit, offset)
+                )
+            
+            if not result:
+                logger.debug(f"No messages found for session {session_id}")
                 return []
-                
+            
+            # Convert the database results to ModelMessage objects
+            messages = []
+            for db_msg in result:
+                # Convert database message to ModelMessage
+                model_message = self._db_to_model_message(db_msg)
+                messages.append(model_message)
+            
+            logger.debug(f"Retrieved {len(messages)} messages for session {session_id}")
+            return messages
         except Exception as e:
             logger.error(f"Error retrieving messages for session {session_id}: {str(e)}")
             import traceback
@@ -133,12 +170,49 @@ class PostgresMessageStore(MessageStore):
             tool_outputs = []
             
             # Extract text content and other data from message parts
-            for part in message.parts:
-                if hasattr(part, "content"):
-                    text_content = part.content
-                    if hasattr(part, "assistant_name") and part.assistant_name:
-                        assistant_name = part.assistant_name
+            # First, look for the main text part which contains the response text
+            text_part = None
+            
+            # Try to determine message type by role first
+            message_role = self._determine_message_role(message)
+            
+            # Handle user messages - we need to extract content from UserPromptPart
+            if message_role == "user":
+                # For user messages, find the UserPromptPart
+                for part in message.parts:
+                    if isinstance(part, UserPromptPart) or (hasattr(part, "part_kind") and part.part_kind == "user"):
+                        if hasattr(part, "content"):
+                            text_content = part.content
+                            break
+            else:
+                # For assistant/system messages, find the text part
+                for part in message.parts:
+                    # Find the first text part (the main response content)
+                    if hasattr(part, "part_kind") and part.part_kind == "text":
+                        text_part = part
+                        break
                 
+                # If we found a text part, use it for the main content
+                if text_part and hasattr(text_part, "content"):
+                    text_content = text_part.content
+                    if hasattr(text_part, "assistant_name") and text_part.assistant_name:
+                        assistant_name = text_part.assistant_name
+            
+            # Process all parts to collect tool calls, outputs, and assistant name if not already set
+            for part in message.parts:
+                # Skip the text part we already processed
+                if part is text_part:
+                    continue
+                    
+                # If we still don't have content, try to get it from any part
+                if not text_content and hasattr(part, "content"):
+                    text_content = part.content
+                    
+                # Get assistant name if not already set
+                if not assistant_name and hasattr(part, "assistant_name") and part.assistant_name:
+                    assistant_name = part.assistant_name
+                
+                # Process tool-related parts
                 if hasattr(part, "part_kind"):
                     if part.part_kind == "tool-call" and hasattr(part, "tool_call"):
                         tool_calls.append({
@@ -163,6 +237,22 @@ class PostgresMessageStore(MessageStore):
                 "tool_outputs": tool_outputs
             }
             
+            # Ensure text_content is never empty
+            if not text_content:
+                # Try to extract content from raw message attributes
+                if hasattr(message, "content"):
+                    text_content = message.content
+                elif role == "user" and hasattr(message, "message_input"):
+                    text_content = message.message_input
+                
+                # Last resort - log a warning and set a placeholder
+                if not text_content:
+                    logger.warning(f"No content found for {role} message in session {session_id}. Using placeholder.")
+                    text_content = "[No content available]"
+                    
+                # Update the payload
+                message_payload["content"] = text_content
+            
             # Add context to payload for user messages
             if context and role == "user":
                 message_payload["channel_payload"] = context
@@ -179,8 +269,8 @@ class PostgresMessageStore(MessageStore):
                 logger.error(f"Error serializing message payload: {str(e)}")
                 message_payload_json = json.dumps({"content": text_content, "role": role})
             
-            # Generate a unique message ID
-            message_id = f"m_{uuid.uuid4()}"
+            # Generate a unique UUID for the message
+            message_id = str(uuid.uuid4())
             
             # Serialize tool calls and outputs for dedicated columns
             tool_calls_json = None
@@ -197,26 +287,27 @@ class PostgresMessageStore(MessageStore):
                 except Exception as e:
                     logger.error(f"Error serializing tool outputs: {str(e)}")
             
-            # Prepare channel_payload column data
-            channel_payload_json = None
+            # Prepare context column data
+            context_json = None
             if context and role == "user":
                 try:
-                    channel_payload_json = json.dumps(context, ensure_ascii=False)
+                    context_json = json.dumps(context, ensure_ascii=False)
                 except Exception as e:
                     logger.error(f"Error serializing channel_payload: {str(e)}")
             
-            # Insert the message into the database
-            execute_query(
+            # Insert the message into the database - use RETURNING to get the inserted record
+            result = execute_query(
                 """
-                INSERT INTO chat_messages (
+                INSERT INTO messages (
                     id, session_id, role, text_content, raw_payload, 
-                    message_timestamp, message_type, user_id, agent_id,
-                    tool_calls, tool_outputs, channel_payload, system_prompt
+                    message_type, user_id, agent_id,
+                    tool_calls, tool_outputs, context, system_prompt
                 ) VALUES (
-                    %s, %s, %s, %s, %s, 
-                    %s, %s, %s, %s,
+                    %s, %s::uuid, %s, %s, %s, 
+                    %s, %s, %s,
                     %s, %s, %s, %s
                 )
+                RETURNING id, created_at, updated_at
                 """,
                 (
                     message_id, 
@@ -224,19 +315,35 @@ class PostgresMessageStore(MessageStore):
                     role, 
                     text_content, 
                     message_payload_json,
-                    datetime.utcnow(),
                     "text",
                     user_id,
                     agent_id,
                     tool_calls_json,
                     tool_outputs_json,
-                    channel_payload_json,
+                    context_json,
                     system_prompt
-                ),
-                fetch=False
+                )
             )
             
-            logger.debug(f"Added message {message_id} to session {session_id} with role {role}")
+            inserted_id = result[0]["id"] if result else None
+            created_at = result[0]["created_at"] if result and "created_at" in result[0] else None
+            logger.debug(f"Added message {inserted_id} to session {session_id} with role {role} at {created_at}")
+            
+            # If this is an assistant message (response), update run_finished_at in the session
+            if role == "assistant":
+                # Get the current time from the database for consistency
+                current_time = execute_query("SELECT NOW() as current_time")[0]["current_time"]
+                
+                execute_query(
+                    """
+                    UPDATE sessions 
+                    SET run_finished_at = %s
+                    WHERE id = %s::uuid
+                    """,
+                    (current_time, session_id),
+                    fetch=False
+                )
+                logger.debug(f"Updated session {session_id} run_finished_at to {current_time}")
             
         except Exception as e:
             logger.error(f"❌ Error adding message to session {session_id}: {str(e)}")
@@ -244,79 +351,75 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
     def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None, user_id: int = 1) -> None:
-        """Update the system prompt for a session in PostgreSQL.
+        """Update the system prompt for a session.
         
         Args:
             session_id: The unique session identifier.
-            system_prompt: The system prompt content.
-            agent_id: Optional agent ID associated with the message.
-            user_id: User ID associated with the message (defaults to 1).
+            system_prompt: The new system prompt text.
+            agent_id: Optional agent ID to associate with the message.
+            user_id: Optional user ID to associate with the message.
         """
         try:
-            # Make sure the session exists
+            # Ensure session exists
             session_id = self._ensure_session_exists(session_id, user_id)
             
-            # Prepare system payload with UTF-8 handling
-            system_payload = {"content": system_prompt, "role": "system"}
-            system_payload_json = json.dumps(system_payload, ensure_ascii=False)
-            system_payload_json = system_payload_json.encode('utf-8').decode('utf-8')
-            
-            # First check if system prompt exists
-            existing = execute_query(
+            # Check if there's an existing system prompt
+            existing_system = execute_query(
                 """
-                SELECT id FROM chat_messages 
-                WHERE session_id = %s AND role = 'system'
+                SELECT id 
+                FROM messages 
+                WHERE session_id = %s::uuid AND role = 'system'
+                ORDER BY updated_at DESC 
                 LIMIT 1
                 """,
                 (session_id,)
             )
             
-            if existing:
+            if existing_system:
                 # Update existing system prompt
                 execute_query(
                     """
-                    UPDATE chat_messages 
-                    SET text_content = %s, raw_payload = %s, updated_at = %s, agent_id = %s, user_id = %s
+                    UPDATE messages 
+                    SET text_content = %s, raw_payload = %s, agent_id = %s, user_id = %s
                     WHERE id = %s
                     """,
                     (
                         system_prompt, 
-                        system_payload_json,
-                        datetime.utcnow(),
+                        json.dumps({"content": system_prompt, "role": "system"}),
                         agent_id,
                         user_id,
-                        existing[0]["id"]
+                        existing_system[0]["id"]
                     ),
                     fetch=False
                 )
                 logger.debug(f"Updated system prompt for session {session_id} with agent_id {agent_id} and user_id {user_id}")
             else:
-                # Add new system prompt with NULL id to trigger auto-generation
-                result = execute_query(
+                # Generate a new UUID for the message
+                message_id = str(uuid.uuid4())
+                
+                # Add new system prompt
+                execute_query(
                     """
-                    INSERT INTO chat_messages (
-                        session_id, role, text_content, raw_payload, 
-                        message_timestamp, message_type, user_id, agent_id
+                    INSERT INTO messages (
+                        id, session_id, role, text_content, raw_payload, 
+                        message_type, user_id, agent_id
                     ) VALUES (
-                        %s, %s, %s, %s, 
-                        %s, %s, %s, %s
+                        %s, %s::uuid, %s, %s, %s, 
+                        %s, %s, %s
                     )
-                    RETURNING id
                     """,
                     (
+                        message_id,
                         session_id, 
                         "system", 
                         system_prompt, 
-                        system_payload_json,
-                        datetime.utcnow(),
+                        json.dumps({"content": system_prompt, "role": "system"}),
                         "text",
                         user_id,
                         agent_id
-                    )
+                    ),
+                    fetch=False
                 )
-                
-                # Get the auto-generated message ID
-                message_id = result[0]["id"] if result else None
                 logger.debug(f"Added system prompt {message_id} to session {session_id} for user {user_id} with agent_id {agent_id}")
         except Exception as e:
             logger.error(f"Error updating system prompt for session {session_id}: {str(e)}")
@@ -326,7 +429,7 @@ class PostgresMessageStore(MessageStore):
             # Don't re-raise the exception to allow the application to continue
     
     def clear_session(self, session_id: str) -> None:
-        """Clear all messages in a session from PostgreSQL.
+        """Clear all messages for a session.
         
         Args:
             session_id: The unique session identifier.
@@ -334,230 +437,170 @@ class PostgresMessageStore(MessageStore):
         try:
             # Delete all messages for the session
             execute_query(
-                "DELETE FROM chat_messages WHERE session_id = %s",
+                "DELETE FROM messages WHERE session_id = %s::uuid",
                 (session_id,),
                 fetch=False
             )
             logger.debug(f"Cleared messages for session {session_id}")
         except Exception as e:
             logger.error(f"Error clearing session {session_id}: {str(e)}")
-            # Log traceback for debugging but don't crash
-            import traceback
-            logger.debug(f"Traceback: {traceback.format_exc()}")
-            # Don't re-raise the exception to allow the application to continue
     
     def session_exists(self, session_id: str) -> bool:
         """Check if a session exists in the database.
         
         Args:
-            session_id: The session ID to check.
+            session_id: The unique session identifier to check.
             
         Returns:
-            bool: True if the session exists, False otherwise.
+            True if the session exists, False otherwise.
         """
         try:
-            if not session_id:
-                return False
-                
             result = execute_query(
-                "SELECT COUNT(*) as count FROM sessions WHERE id = %s",
+                "SELECT 1 FROM sessions WHERE id = %s::uuid",
                 (session_id,)
             )
-            return result[0]["count"] > 0
+            
+            exists = bool(result and len(result) > 0)
+            logger.debug(f"Session {session_id} exists: {exists}")
+            return exists
         except Exception as e:
-            logger.error(f"Error checking session {session_id}: {str(e)}")
+            logger.error(f"Error checking if session {session_id} exists: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: int, agent_id: Optional = None, session_origin: str = "web") -> str:
-        """
-        Ensures a session exists, creating it if necessary.
-        Also ensures the user exists, creating it if necessary.
+    def get_session_by_name(self, session_name: str) -> Optional[dict]:
+        """Get a session ID and agent ID by the session's name.
         
         Args:
-            session_id: The ID of the session
-            user_id: The ID of the user associated with the session (as integer)
-            agent_id: Optional agent ID to associate with the session
-            session_origin: Origin of the session (e.g., "web", "api", "discord")
+            session_name: The name of the session to lookup.
             
         Returns:
-            str: The session ID (which may be auto-generated if not provided)
+            A dictionary with 'id' and 'agent_id' if found, or None if not found.
         """
         try:
-            # First ensure user exists
-            logger.info(f"▶️ Ensuring user {user_id} exists before checking session")
-            self._ensure_user_exists(user_id)
+            result = execute_query(
+                "SELECT id, agent_id FROM sessions WHERE name = %s LIMIT 1",
+                (session_name,)
+            )
             
-            # Then check if session already exists
-            if session_id and self.session_exists(session_id):
-                logger.info(f"✅ Session {session_id} already exists")
+            if result and len(result) > 0:
+                session_id = result[0].get("id")
+                agent_id = result[0].get("agent_id")
+                logger.debug(f"Found session with name '{session_name}': {session_id}, agent_id: {agent_id}")
+                return {"id": session_id, "agent_id": agent_id}
+            else:
+                logger.debug(f"No session found with name '{session_name}'")
+                return None
+        except Exception as e:
+            logger.error(f"Error looking up session by name '{session_name}': {str(e)}")
+            return None
+    
+    def _ensure_session_exists(self, session_id: str, user_id: int = 1, session_origin: str = None, session_name: str = None, agent_id: Optional[int] = None) -> str:
+        """Ensure a session exists, creating it if necessary.
+        
+        Args:
+            session_id: The session ID to check/create
+            user_id: The user ID to associate with the session
+            session_origin: Optional session origin information
+            session_name: Optional friendly name for the session
+            agent_id: Optional agent ID to associate with the session
+            
+        Returns:
+            The session ID (existing or newly created)
+            
+        Raises:
+            ValueError: If trying to use a session with a different agent_id than originally assigned
+        """
+        # Check if the session exists
+        if not self.session_exists(session_id):
+            # Check if the session_id is a valid UUID
+            try:
+                # Validate but don't modify the original session_id
+                uuid_obj = uuid.UUID(session_id)
+                # If valid UUID but doesn't exist, create it with the specified ID
+                # Prepare metadata with session_origin if provided
+                metadata = {}
+                if session_origin:
+                    metadata['session_origin'] = session_origin
                 
-                # Update the user_id and platform for the session if needed
                 execute_query(
                     """
-                    UPDATE sessions
-                    SET user_id = CASE 
-                            WHEN (user_id IS NULL OR user_id = 0) 
-                            THEN %s 
-                            ELSE user_id 
-                        END,
-                        platform = CASE 
-                            WHEN (platform IS NULL OR platform = '' OR platform <> %s) 
-                            THEN %s 
-                            ELSE platform 
-                        END
-                    WHERE id = %s
+                    INSERT INTO sessions (id, user_id, agent_id, platform, name, metadata, created_at, updated_at) 
+                    VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
                     """,
-                    (user_id, session_origin, session_origin, session_id),
+                    (
+                        session_id, 
+                        user_id,
+                        agent_id,  # Add agent_id parameter
+                        session_origin or 'web',  # Use session_origin as platform or default to 'web'
+                        session_name,
+                        json.dumps(metadata),
+                        datetime.utcnow(), 
+                        datetime.utcnow()
+                    ),
                     fetch=False
                 )
-                logger.info(f"Updated user_id to {user_id} and platform to {session_origin} for existing session {session_id}")
-                
-                # If agent_id is provided, link it to the existing session
-                if agent_id:
-                    from src.agents.models.agent_db import link_session_to_agent
-                    link_session_to_agent(session_id, agent_id)
-                    
+                logger.info(f"Created new session with provided ID {session_id} for user {user_id}")
                 return session_id
-            
-            # Log session creation
-            if session_id:
-                logger.info(f"▶️ Creating new session with ID: {session_id}")
-            else:
-                logger.info(f"▶️ Creating new session with auto-generated ID")
-            
-            # If session_id is empty, generate a new one
-            if not session_id:
-                # Generate a new session using the database default
-                try:
-                    logger.info("▶️ Executing INSERT INTO sessions with auto-generated ID")
-                    
-                    # Check if agent_id column exists in sessions table
-                    agent_id_exists = execute_query(
-                        """
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.columns 
-                            WHERE table_name = 'sessions' AND column_name = 'agent_id'
-                        ) as exists
-                        """
-                    )
-                    
-                    agent_id_exists = agent_id_exists and agent_id_exists[0]["exists"]
-                    
-                    # Build the SQL dynamically based on the columns that exist
-                    columns = ["user_id", "platform", "created_at", "updated_at"]
-                    values = [user_id, session_origin, datetime.utcnow(), datetime.utcnow()]
-                    
-                    if agent_id and agent_id_exists:
-                        columns.append("agent_id")
-                        values.append(agent_id)
-                    
-                    # Construct the SQL query with the correct number of placeholders
-                    placeholders = ', '.join(['%s' for _ in values])
-                    sql = f"""
-                        INSERT INTO sessions ({', '.join(columns)}) 
-                        VALUES ({placeholders})
-                        RETURNING id
+            except ValueError:
+                # Not a valid UUID, create a new session with a valid UUID
+                logger.warning(f"Provided session ID '{session_id}' is not a valid UUID, creating a new session")
+                return self.create_session(user_id=user_id, agent_id=agent_id, session_origin=session_origin, session_name=session_name)
+        else:
+            # Session exists, check if agent_id matches (if provided)
+            if agent_id is not None:
+                # Query the existing agent_id
+                result = execute_query(
                     """
+                    SELECT agent_id FROM sessions WHERE id = %s::uuid
+                    """,
+                    (session_id,)
+                )
+                
+                if result and result[0].get('agent_id') is not None:
+                    existing_agent_id = result[0]['agent_id']
                     
-                    result = execute_query(sql, values)
-                    
-                    if result and len(result) > 0:
-                        new_session_id = result[0]["id"]
-                        logger.info(f"✅ Created new session with auto-generated ID {new_session_id}")
-                        return new_session_id
-                    else:
-                        logger.error(f"❌ Failed to get ID for newly created session")
-                        return str(uuid.uuid4())  # Fallback to UUID
-                except Exception as e:
-                    logger.error(f"❌ Error creating session: {str(e)}")
-                    import traceback
-                    logger.error(f"Detailed error: {traceback.format_exc()}")
-                    # Return a UUID as fallback
-                    fallback_id = str(uuid.uuid4())
-                    logger.warning(f"⚠️ Using fallback session ID: {fallback_id}")
-                    return fallback_id
-            else:
-                # Use the provided session ID as-is without any validation or transformation
-                try:
-                    logger.info(f"▶️ Executing INSERT INTO sessions with provided ID: {session_id}")
-                    
-                    # Check if agent_id column exists in sessions table
-                    agent_id_exists = execute_query(
+                    # If agent_id is provided and doesn't match the existing one, raise an error
+                    if existing_agent_id != agent_id:
+                        error_msg = f"Session {session_id} is already associated with agent ID {existing_agent_id}, cannot reassign to agent ID {agent_id}"
+                        logger.error(error_msg)
+                        raise ValueError(error_msg)
+                elif result:
+                    # If the session exists but doesn't have an agent_id set, we can update it
+                    execute_query(
                         """
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.columns 
-                            WHERE table_name = 'sessions' AND column_name = 'agent_id'
-                        ) as exists
-                        """
+                        UPDATE sessions 
+                        SET agent_id = %s,
+                            updated_at = %s
+                        WHERE id = %s::uuid
+                        """,
+                        (
+                            agent_id,
+                            datetime.utcnow(),
+                            session_id
+                        ),
+                        fetch=False
                     )
-                    
-                    agent_id_exists = agent_id_exists and agent_id_exists[0]["exists"]
-                    
-                    # Build the SQL dynamically based on the columns that exist
-                    columns = ["id", "user_id", "platform", "created_at", "updated_at"]
-                    values = [session_id, user_id, session_origin, datetime.utcnow(), datetime.utcnow()]
-                    
-                    if agent_id and agent_id_exists:
-                        columns.append("agent_id")
-                        values.append(agent_id)
-                    
-                    # Construct the SQL query with the correct number of placeholders
-                    placeholders = ', '.join(['%s' for _ in values])
-                    sql = f"""
-                        INSERT INTO sessions ({', '.join(columns)}) 
-                        VALUES ({placeholders})
+                    logger.info(f"Updated agent_id to {agent_id} for session {session_id}")
+            
+            # Session exists, update name if provided
+            if session_name:
+                execute_query(
                     """
-                    
-                    execute_query(sql, values, fetch=False)
-                    
-                    logger.info(f"✅ Created new session {session_id} for user {user_id}")
-                except Exception as e:
-                    # If we get an error (like a duplicate key), check if it's because the session already exists
-                    if "duplicate key" in str(e):
-                        logger.debug(f"⚠️ Session {session_id} already exists (caught duplicate key)")
-                        
-                        # Update the user_id for the session if it's NULL and update platform if different
-                        execute_query(
-                            """
-                            UPDATE sessions
-                            SET user_id = CASE 
-                                    WHEN (user_id IS NULL OR user_id = 0) 
-                                    THEN %s 
-                                    ELSE user_id 
-                                END,
-                                platform = CASE 
-                                    WHEN (platform IS NULL OR platform = '' OR platform <> %s) 
-                                    THEN %s 
-                                    ELSE platform 
-                                END
-                            WHERE id = %s
-                            """,
-                            (user_id, session_origin, session_origin, session_id),
-                            fetch=False
-                        )
-                        logger.info(f"Updated user_id to {user_id} and platform for existing session {session_id}")
-                        
-                        return session_id
-                    # Otherwise log the error but return the session_id anyway
-                    logger.error(f"❌ Error creating session with ID {session_id}: {str(e)}")
-                    import traceback
-                    logger.error(f"Detailed error: {traceback.format_exc()}")
-            
-            # Verify the session was created
-            logger.info(f"▶️ Verifying session {session_id} was created")
-            session_exists = self.session_exists(session_id)
-            if session_exists:
-                logger.info(f"✅ Verified session {session_id} exists in database")
-            else:
-                logger.warning(f"⚠️ Session {session_id} not found in database after creation")
-            
+                    UPDATE sessions 
+                    SET name = %s,
+                        updated_at = %s
+                    WHERE id = %s::uuid
+                    """,
+                    (
+                        session_name,
+                        datetime.utcnow(),
+                        session_id
+                    ),
+                    fetch=False
+                )
+                logger.info(f"Updated session name to '{session_name}' for session {session_id}")
             return session_id
-        except Exception as e:
-            logger.error(f"❌ Error ensuring session {session_id}: {str(e)}")
-            import traceback
-            logger.error(f"Detailed error: {traceback.format_exc()}")
-            # Return the session_id even if there was an error
-            return session_id or str(uuid.uuid4())
     
     def _ensure_user_exists(self, user_id: int) -> None:
         """
@@ -713,11 +756,13 @@ class PostgresMessageStore(MessageStore):
             if tool_outputs is None:
                 tool_outputs = []
             
+            # Create appropriate ModelMessage based on role
+            message = None
             if role == "system":
-                return ModelRequest(parts=[SystemPromptPart(content=content)])
+                message = ModelRequest(parts=[SystemPromptPart(content=content)])
             elif role == "user":
-                return ModelRequest(parts=[UserPromptPart(content=content)])
-            else:  # assistant
+                message = ModelRequest(parts=[UserPromptPart(content=content)])
+            else:  # assistant role
                 # Create text part
                 text_part = TextPart(content=content)
                 
@@ -756,22 +801,68 @@ class PostgresMessageStore(MessageStore):
                 
                 # Create message with all parts
                 message = ModelResponse(parts=parts)
+            
+            # Add metadata to any type of message
+            if message:
+                # Add message ID
+                if db_message.get("id"):
+                    message.id = db_message["id"]
+                
+                # Add session ID
+                if db_message.get("session_id"):
+                    message.session_id = db_message["session_id"]
+                
+                # Add user ID if available
+                if db_message.get("user_id"):
+                    message.user_id = db_message["user_id"]
                 
                 # Add agent ID if available
                 if db_message.get("agent_id"):
                     message.agent_id = db_message["agent_id"]
                 
-                # Add system_prompt if available
-                # First check the dedicated column
-                if db_message.get("system_prompt"):
-                    message.system_prompt = db_message["system_prompt"]
-                # If not in the column, check if it's in the raw_payload
-                elif raw_payload.get("system_prompt"):
-                    message.system_prompt = raw_payload["system_prompt"]
+                # Add system_prompt if available (for assistant messages)
+                if role == "assistant":
+                    # First check the dedicated column
+                    if db_message.get("system_prompt"):
+                        message.system_prompt = db_message["system_prompt"]
+                    # If not in the column, check if it's in the raw_payload
+                    elif raw_payload.get("system_prompt"):
+                        message.system_prompt = raw_payload["system_prompt"]
+                
+                # Add context if available (for user messages)
+                if role == "user" and db_message.get("context"):
+                    if isinstance(db_message["context"], str):
+                        try:
+                            context_json = json.loads(db_message["context"])
+                            message.context = context_json
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse context JSON for message {db_message.get('id')}")
+                    elif isinstance(db_message["context"], dict):
+                        message.context = db_message["context"]
+                
+                # Use updated_at as the timestamp
+                if db_message.get("updated_at"):
+                    message.timestamp = db_message["updated_at"]
+                elif db_message.get("created_at"):
+                    message.timestamp = db_message["created_at"]
+                
+                # Store created_at if available
+                if hasattr(message, "created_at") and db_message.get("created_at"):
+                    message.created_at = db_message["created_at"]
+                
+                # Store updated_at if available
+                if hasattr(message, "updated_at") and db_message.get("updated_at"):
+                    message.updated_at = db_message["updated_at"]
                 
                 return message
+            else:
+                # Fallback for unexpected message types
+                return ModelResponse(parts=[TextPart(content=content or "Empty message")])
+                
         except Exception as e:
             logger.error(f"Error converting database message to ModelMessage: {str(e)}")
+            import traceback
+            logger.error(f"Detailed error: {traceback.format_exc()}")
             # Return a simple text message as fallback
             return ModelResponse(parts=[TextPart(content="Error retrieving message")])
     
@@ -805,22 +896,23 @@ class PostgresMessageStore(MessageStore):
             # Calculate total pages
             total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
             
-            # Get sessions with pagination
+            # Get sessions with pagination - use direct agent_id from sessions table
             sessions_query = execute_query(
                 f"""
                 SELECT 
                     s.id as session_id, 
                     s.user_id, 
+                    s.agent_id,
                     s.created_at,
                     s.platform,
-                    (SELECT COUNT(*) FROM chat_messages cm WHERE cm.session_id = s.id) as message_count,
-                    (SELECT MAX(message_timestamp) FROM chat_messages cm WHERE cm.session_id = s.id) as last_updated,
-                    (SELECT a.name FROM agents a 
-                     JOIN chat_messages cm ON a.id = cm.agent_id 
-                     WHERE cm.session_id = s.id 
-                     LIMIT 1) as agent_name
+                    s.name as session_name,
+                    (SELECT COUNT(*) FROM messages cm WHERE cm.session_id = s.id) as message_count,
+                    (SELECT MAX(updated_at) FROM messages cm WHERE cm.session_id = s.id) as last_updated,
+                    a.name as agent_name
                 FROM 
                     sessions s
+                LEFT JOIN
+                    agents a ON s.agent_id = a.id
                 ORDER BY 
                     {order_by}
                 LIMIT 
@@ -836,6 +928,8 @@ class PostgresMessageStore(MessageStore):
                 session_info = {
                     "session_id": session['session_id'],
                     "user_id": session['user_id'],
+                    "agent_id": session['agent_id'],
+                    "session_name": session['session_name'],
                     "created_at": session['created_at'],
                     "last_updated": session['last_updated'],
                     "message_count": int(session['message_count']) if session['message_count'] is not None else 0,
@@ -864,4 +958,320 @@ class PostgresMessageStore(MessageStore):
                 "page": page,
                 "page_size": page_size,
                 "total_pages": 0
-            } 
+            }
+    
+    def create_session(self, user_id: int = 1, agent_id: Optional[int] = None, session_origin: str = None, session_name: str = None) -> str:
+        """Create a new session for a user and agent.
+        
+        Args:
+            user_id: The user ID to associate with the session.
+            agent_id: Optional agent ID to associate with the session.
+            session_origin: Optional origin information for the session.
+            session_name: Optional friendly name for the session.
+            
+        Returns:
+            The new session ID.
+        """
+        try:
+            # Generate a UUID for the session
+            session_id = str(uuid.uuid4())
+            
+            logger.info(f"Creating new session for user {user_id} with agent {agent_id} origin {session_origin}")
+            
+            # Prepare metadata with session_origin if provided
+            metadata = {}
+            if session_origin:
+                metadata['session_origin'] = session_origin
+            
+            # Insert the session
+            execute_query(
+                """
+                INSERT INTO sessions (id, user_id, agent_id, platform, name, metadata, created_at, updated_at) 
+                VALUES (%s::uuid, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    session_id, 
+                    user_id, 
+                    agent_id,  # Add agent_id parameter
+                    session_origin or 'web',  # Use session_origin as platform or default to 'web'
+                    session_name,
+                    json.dumps(metadata),
+                    datetime.utcnow(), 
+                    datetime.utcnow()
+                ),
+                fetch=False
+            )
+            
+            logger.info(f"Created new session {session_id} for user {user_id} with agent {agent_id}")
+            return session_id
+        except Exception as e:
+            logger.error(f"Error creating session: {str(e)}")
+            raise e
+    
+    def get_session_metadata(self, session_id: str) -> Dict:
+        """Get metadata for a specific session.
+        
+        Args:
+            session_id: The unique session identifier.
+            
+        Returns:
+            A dictionary containing session metadata or an empty dict if not found.
+        """
+        try:
+            # First check if session exists
+            if not self.session_exists(session_id):
+                logger.warning(f"No session found with ID {session_id}")
+                return {}
+                
+            # Get session details including metadata
+            session_details = execute_query(
+                """
+                SELECT 
+                    s.user_id, 
+                    s.agent_id, 
+                    s.created_at, 
+                    s.updated_at,
+                    s.terminated_at,
+                    s.metadata,
+                    s.platform,
+                    u.email as user_email,
+                    u.name as user_name
+                FROM 
+                    sessions s
+                LEFT JOIN 
+                    users u ON s.user_id = u.id
+                WHERE 
+                    s.id = %s::uuid
+                """,
+                (session_id,)
+            )
+            
+            metadata = {}
+            if session_details:
+                session_data = session_details[0]
+                
+                # Get metadata from JSONB field
+                stored_metadata = session_data.get("metadata")
+                if stored_metadata:
+                    # If it's already a dict, use it; otherwise parse it
+                    if isinstance(stored_metadata, dict):
+                        metadata = stored_metadata
+                    else:
+                        try:
+                            metadata = json.loads(stored_metadata)
+                        except (json.JSONDecodeError, TypeError):
+                            metadata = {}
+                            
+                # Add standard session details to metadata
+                metadata["user_id"] = session_data.get("user_id")
+                metadata["agent_id"] = session_data.get("agent_id")
+                metadata["platform"] = session_data.get("platform")
+                metadata["created_at"] = session_data.get("created_at").isoformat() if session_data.get("created_at") else None
+                metadata["updated_at"] = session_data.get("updated_at").isoformat() if session_data.get("updated_at") else None
+                metadata["terminated_at"] = session_data.get("terminated_at").isoformat() if session_data.get("terminated_at") else None
+                metadata["user_email"] = session_data.get("user_email")
+                metadata["user_name"] = session_data.get("user_name")
+            
+            return metadata
+        except Exception as e:
+            logger.error(f"Error retrieving metadata for session {session_id}: {str(e)}")
+            return {}
+    
+    def list_sessions(self, user_id: Optional[int] = None, page: int = 1, page_size: int = 10) -> Dict:
+        """List chat sessions with pagination.
+        
+        Args:
+            user_id: Optional user ID to filter sessions.
+            page: Page number (1-indexed).
+            page_size: Number of items per page.
+            
+        Returns:
+            Dictionary containing sessions list and pagination details.
+        """
+        try:
+            # Calculate offset
+            offset = (page - 1) * page_size
+            
+            # Build the query based on filters
+            base_query = """
+                SELECT 
+                    s.id, 
+                    s.user_id, 
+                    s.agent_id, 
+                    s.name,
+                    s.platform,
+                    s.created_at, 
+                    s.updated_at,
+                    s.terminated_at,
+                    u.email as user_email,
+                    u.name as user_name,
+                    a.name as agent_name,
+                    COUNT(m.id) as message_count
+                FROM 
+                    sessions s
+                LEFT JOIN 
+                    users u ON s.user_id = u.id
+                LEFT JOIN 
+                    agents a ON s.agent_id = a.id
+                LEFT JOIN 
+                    messages m ON s.id = m.session_id
+            """
+            
+            count_query = "SELECT COUNT(*) FROM sessions s"
+            
+            # Add filters if user_id is provided
+            where_clause = ""
+            params = []
+            
+            if user_id:
+                where_clause = "WHERE s.user_id = %s"
+                params.append(user_id)
+                count_query += " WHERE s.user_id = %s"
+            
+            # Complete the query with grouping, ordering and pagination
+            query = f"""
+                {base_query}
+                {where_clause}
+                GROUP BY s.id, u.email, u.name, a.name
+                ORDER BY s.updated_at DESC
+                LIMIT %s OFFSET %s
+            """
+            
+            # Add pagination parameters
+            params.extend([page_size, offset])
+            
+            # Execute the query
+            sessions_result = execute_query(query, params)
+            
+            # Get total count
+            count_result = execute_query(count_query, [user_id] if user_id else [])
+            total_count = count_result[0]['count'] if count_result else 0
+            
+            # Calculate total pages
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 0
+            
+            # Format the results
+            sessions = []
+            for session in sessions_result:
+                # Format the session data
+                formatted_session = {
+                    "id": str(session["id"]),  # Ensure UUID is returned as string
+                    "user_id": session["user_id"],
+                    "agent_id": session["agent_id"],
+                    "session_name": session["name"],
+                    "platform": session["platform"],
+                    "user_email": session["user_email"],
+                    "user_name": session["user_name"],
+                    "agent_name": session["agent_name"],
+                    "message_count": session["message_count"],
+                    "created_at": session["created_at"].isoformat() if session["created_at"] else None,
+                    "updated_at": session["updated_at"].isoformat() if session["updated_at"] else None,
+                    "terminated_at": session["terminated_at"].isoformat() if session["terminated_at"] else None
+                }
+                
+                # Get the most recent message for the session
+                last_message = execute_query(
+                    """
+                    SELECT 
+                        text_content, 
+                        role, 
+                        updated_at
+                    FROM 
+                        messages 
+                    WHERE 
+                        session_id = %s::uuid
+                    ORDER BY 
+                        updated_at DESC 
+                    LIMIT 1
+                    """,
+                    (session["id"],)
+                )
+                
+                if last_message:
+                    formatted_session["last_message"] = {
+                        "content": last_message[0]["text_content"],
+                        "role": last_message[0]["role"],
+                        "timestamp": last_message[0]["updated_at"].isoformat() if last_message[0]["updated_at"] else None
+                    }
+                
+                sessions.append(formatted_session)
+            
+            return {
+                "sessions": sessions,
+                "total_count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages
+            }
+        except Exception as e:
+            logger.error(f"Error listing sessions: {str(e)}")
+            return {
+                "sessions": [],
+                "total_count": 0,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": 0
+            }
+    
+    def update_session_metadata(self, session_id: str, metadata: Dict) -> bool:
+        """Update metadata for a session.
+        
+        Args:
+            session_id: The unique session identifier.
+            metadata: Dictionary of key-value pairs to update.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            # Ensure session exists
+            if not self.session_exists(session_id):
+                logger.warning(f"Cannot update metadata for non-existent session {session_id}")
+                return False
+                
+            # Get current metadata to merge with new values
+            current_metadata = execute_query(
+                """
+                SELECT metadata FROM sessions WHERE id = %s::uuid
+                """,
+                (session_id,)
+            )
+            
+            merged_metadata = {}
+            
+            # Parse existing metadata if it exists
+            if current_metadata and current_metadata[0].get("metadata"):
+                existing = current_metadata[0].get("metadata")
+                if isinstance(existing, dict):
+                    merged_metadata = existing
+                else:
+                    try:
+                        merged_metadata = json.loads(existing)
+                    except (json.JSONDecodeError, TypeError):
+                        merged_metadata = {}
+            
+            # Merge with new metadata values
+            for key, value in metadata.items():
+                # Skip any None values
+                if value is None:
+                    continue
+                    
+                # Add/update the key-value pair
+                merged_metadata[key] = value
+            
+            # Update the session with merged metadata
+            execute_query(
+                """
+                UPDATE sessions
+                SET metadata = %s
+                WHERE id = %s::uuid
+                """,
+                (json.dumps(merged_metadata), session_id),
+                fetch=False
+            )
+            
+            logger.debug(f"Updated metadata for session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating metadata for session {session_id}: {str(e)}")
+            return False 

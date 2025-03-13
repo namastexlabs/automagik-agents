@@ -38,8 +38,8 @@ def main():
             parser.add_argument(
                 "--reload", 
                 action="store_true", 
-                default=False,
-                help="Enable auto-reload for development (default: False)"
+                default=None,
+                help="Enable auto-reload for development (default: auto-enabled in development mode)"
             )
             parser.add_argument(
                 "--host", 
@@ -57,11 +57,20 @@ def main():
             # Parse arguments
             args = parser.parse_args()
             
+            # Determine if auto-reload should be enabled
+            # If --reload flag is explicitly provided, use that value
+            # Otherwise, auto-enable in development mode
+            from src.config import Environment
+            should_reload = args.reload
+            if should_reload is None:
+                should_reload = settings.AM_ENV == Environment.DEVELOPMENT
+            
             # Log the configuration
+            reload_status = "Enabled" if should_reload else "Disabled"
             logger.info("Starting server with configuration:")
             logger.info(f"├── Host: {args.host}")
             logger.info(f"├── Port: {args.port}")
-            logger.info(f"└── Auto-reload: {'Enabled' if args.reload else 'Disabled'}")
+            logger.info(f"└── Auto-reload: {reload_status}")
             
             # Run the server with the provided arguments
             import uvicorn
@@ -69,23 +78,28 @@ def main():
                 "src.main:app",
                 host=args.host,
                 port=args.port,
-                reload=args.reload
+                reload=should_reload
             )
         else:
             # If no arguments are passed, run with default settings
             import uvicorn
             
+            # Auto-enable reload in development mode
+            from src.config import Environment
+            should_reload = settings.AM_ENV == Environment.DEVELOPMENT
+            reload_status = "Enabled" if should_reload else "Disabled"
+            
             # Log the default configuration
             logger.info("Starting server with default configuration:")
             logger.info(f"├── Host: {settings.AM_HOST}")
             logger.info(f"├── Port: {settings.AM_PORT}")
-            logger.info(f"└── Auto-reload: Disabled")
+            logger.info(f"└── Auto-reload: {reload_status}")
             
             uvicorn.run(
                 "src.main:app",
                 host=settings.AM_HOST,
                 port=int(settings.AM_PORT),
-                reload=False
+                reload=should_reload
             )
     except Exception as e:
         logger.error(f"Error running application: {str(e)}")

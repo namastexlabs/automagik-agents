@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     POSTGRES_POOL_MAX: int = Field(10, description="Maximum connections in the pool")
 
     # Server
-    AM_PORT: int = Field(8000, description="Port to run the server on")
+    AM_PORT: int = Field(8881, description="Port to run the server on")
     AM_HOST: str = Field("0.0.0.0", description="Host to bind the server to")
     AM_ENV: Environment = Field(Environment.DEVELOPMENT, description="Environment (development, production, testing)")
 
@@ -75,52 +75,48 @@ class Settings(BaseSettings):
 
 def load_settings() -> Settings:
     """Load and validate settings from environment variables and .env file."""
-    # Load environment variables from .env file with more debugging
+    # Check if we're in debug mode (AM_LOG_LEVEL set to DEBUG)
+    debug_mode = os.environ.get('AM_LOG_LEVEL', '').upper() == 'DEBUG'
+    
+    # Load environment variables from .env file
     try:
         load_dotenv(override=True)
         print(f"📝 .env file loaded from: {Path('.env').absolute()}")
     except Exception as e:
         print(f"⚠️ Error loading .env file: {str(e)}")
 
-    # Debug DATABASE_URL
-    print(f"🔍 DATABASE_URL from environment after dotenv: {os.environ.get('DATABASE_URL', 'Not set')}")
+    # Debug DATABASE_URL only if in debug mode
+    if debug_mode:
+        print(f"🔍 DATABASE_URL from environment after dotenv: {os.environ.get('DATABASE_URL', 'Not set')}")
 
     # Strip comments from environment variables
     for key in os.environ:
         if isinstance(os.environ[key], str) and '#' in os.environ[key]:
             os.environ[key] = os.environ[key].split('#')[0].strip()
-            print(f"📝 Stripped comments from environment variable: {key}")
+            if debug_mode:
+                print(f"📝 Stripped comments from environment variable: {key}")
 
     try:
         # Explicitly set reload=True to ensure environment variables are reloaded
         settings = Settings(_env_file='.env', _env_file_encoding='utf-8')
         
-        # Debug DATABASE_URL after loading settings
-        print(f"🔍 DATABASE_URL after loading settings: {settings.DATABASE_URL}")
+        # Debug DATABASE_URL after loading settings - only in debug mode
+        if debug_mode:
+            print(f"🔍 DATABASE_URL after loading settings: {settings.DATABASE_URL}")
         
         # Final check - if there's a mismatch, use the environment value
         env_db_url = os.environ.get('DATABASE_URL')
         if env_db_url and env_db_url != settings.DATABASE_URL:
-            print(f"⚠️ Overriding settings.DATABASE_URL with environment value")
+            if debug_mode:
+                print(f"⚠️ Overriding settings.DATABASE_URL with environment value")
             # This is a bit hacky but necessary to fix mismatches
             settings.DATABASE_URL = env_db_url
-            print(f"📝 Final DATABASE_URL: {settings.DATABASE_URL}")
-            
-        # Print configuration info
-        print("🔧 Configuration loaded:")
-        print(f"├── Environment: {settings.AM_ENV}")
-        print(f"├── Log Level: {settings.AM_LOG_LEVEL}")
-        print(f"├── Server: {settings.AM_HOST}:{settings.AM_PORT}")
-        print(f"├── OpenAI API Key: {settings.OPENAI_API_KEY[:5]}...{settings.OPENAI_API_KEY[-5:]}")
-        print(f"├── API Key: {settings.AM_API_KEY[:5]}...{settings.AM_API_KEY[-5:]}")
-        print(f"├── Discord Bot Token: {settings.DISCORD_BOT_TOKEN[:5]}...{settings.DISCORD_BOT_TOKEN[-5:]}")
-        print(f"├── Database URL: {mask_connection_string(settings.DATABASE_URL)}")
-
-        if settings.NOTION_TOKEN:
-            print(f"└── Notion Token: {settings.NOTION_TOKEN[:5]}...{settings.NOTION_TOKEN[-5:]}")
-        else:
-            print("└── Notion Token: Not set")
-
+            if debug_mode:
+                print(f"📝 Final DATABASE_URL: {settings.DATABASE_URL}")
+                
+        # We no longer print the detailed configuration here
+        # This is now handled by the CLI's debug flag handler in src/cli/__init__.py
+        
         return settings
     except Exception as e:
         print("❌ Error loading configuration:")

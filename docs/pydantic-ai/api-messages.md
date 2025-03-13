@@ -1,0 +1,4786 @@
+# pydantic_ai.messages
+
+Version
+
+Showing documentation for the latest release v0.0.36 2025-03-07.
+
+# pydantic_ai.messages
+
+```
+pydantic_ai.messages
+```
+
+The structure of ModelMessage can be shown as a graph:
+
+```
+ModelMessage
+```
+
+```
+graph RL
+    SystemPromptPart(SystemPromptPart) --- ModelRequestPart
+    UserPromptPart(UserPromptPart) --- ModelRequestPart
+    ToolReturnPart(ToolReturnPart) --- ModelRequestPart
+    RetryPromptPart(RetryPromptPart) --- ModelRequestPart
+    TextPart(TextPart) --- ModelResponsePart
+    ToolCallPart(ToolCallPart) --- ModelResponsePart
+    ModelRequestPart("ModelRequestPart<br>(Union)") --- ModelRequest
+    ModelRequest("ModelRequest(parts=list[...])") --- ModelMessage
+    ModelResponsePart("ModelResponsePart<br>(Union)") --- ModelResponse
+    ModelResponse("ModelResponse(parts=list[...])") --- ModelMessage("ModelMessage<br>(Union)")
+```
+
+```
+graph RL
+    SystemPromptPart(SystemPromptPart) --- ModelRequestPart
+    UserPromptPart(UserPromptPart) --- ModelRequestPart
+    ToolReturnPart(ToolReturnPart) --- ModelRequestPart
+    RetryPromptPart(RetryPromptPart) --- ModelRequestPart
+    TextPart(TextPart) --- ModelResponsePart
+    ToolCallPart(ToolCallPart) --- ModelResponsePart
+    ModelRequestPart("ModelRequestPart<br>(Union)") --- ModelRequest
+    ModelRequest("ModelRequest(parts=list[...])") --- ModelMessage
+    ModelResponsePart("ModelResponsePart<br>(Union)") --- ModelResponse
+    ModelResponse("ModelResponse(parts=list[...])") --- ModelMessage("ModelMessage<br>(Union)")
+```
+
+[](https://ai.pydantic.dev)
+
+### SystemPromptPart
+
+dataclass
+
+```
+dataclass
+```
+
+A system prompt, generally written by the application developer.
+
+This gives the model context and guidance on how to respond.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+```
+
+```
+@dataclass
+class SystemPromptPart:
+    """A system prompt, generally written by the application developer.
+
+    This gives the model context and guidance on how to respond.
+    """
+
+    content: str
+    """The content of the prompt."""
+
+    dynamic_ref: str | None = None
+    """The ref of the dynamic system prompt function that generated this part.
+
+    Only set if system prompt is dynamic, see [`system_prompt`][pydantic_ai.Agent.system_prompt] for more information.
+    """
+
+    part_kind: Literal['system-prompt'] = 'system-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def otel_event(self) -> Event:
+        return Event('gen_ai.system.message', body={'content': self.content, 'role': 'system'})
+```
+
+```
+@dataclass
+class SystemPromptPart:
+    """A system prompt, generally written by the application developer.
+
+    This gives the model context and guidance on how to respond.
+    """
+
+    content: str
+    """The content of the prompt."""
+
+    dynamic_ref: str | None = None
+    """The ref of the dynamic system prompt function that generated this part.
+
+    Only set if system prompt is dynamic, see [`system_prompt`][pydantic_ai.Agent.system_prompt] for more information.
+    """
+
+    part_kind: Literal['system-prompt'] = 'system-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def otel_event(self) -> Event:
+        return Event('gen_ai.system.message', body={'content': self.content, 'role': 'system'})
+```
+
+#### content
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content: str
+```
+
+```
+content: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The content of the prompt.
+
+#### dynamic_ref
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+dynamic_ref: str | None = None
+```
+
+```
+dynamic_ref: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The ref of the dynamic system prompt function that generated this part.
+
+Only set if system prompt is dynamic, see system_prompt for more information.
+
+```
+system_prompt
+```
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['system-prompt'] = 'system-prompt'
+```
+
+```
+part_kind: Literal['system-prompt'] = 'system-prompt'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+### AudioUrl
+
+dataclass
+
+```
+dataclass
+```
+
+A URL to an audio file.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+```
+
+```
+@dataclass
+class AudioUrl:
+    """A URL to an audio file."""
+
+    url: str
+    """The URL of the audio file."""
+
+    kind: Literal['audio-url'] = 'audio-url'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def media_type(self) -> AudioMediaType:
+        """Return the media type of the audio file, based on the url."""
+        if self.url.endswith('.mp3'):
+            return 'audio/mpeg'
+        elif self.url.endswith('.wav'):
+            return 'audio/wav'
+        else:
+            raise ValueError(f'Unknown audio file extension: {self.url}')
+```
+
+```
+@dataclass
+class AudioUrl:
+    """A URL to an audio file."""
+
+    url: str
+    """The URL of the audio file."""
+
+    kind: Literal['audio-url'] = 'audio-url'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def media_type(self) -> AudioMediaType:
+        """Return the media type of the audio file, based on the url."""
+        if self.url.endswith('.mp3'):
+            return 'audio/mpeg'
+        elif self.url.endswith('.wav'):
+            return 'audio/wav'
+        else:
+            raise ValueError(f'Unknown audio file extension: {self.url}')
+```
+
+#### url
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+url: str
+```
+
+```
+url: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The URL of the audio file.
+
+#### kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+kind: Literal['audio-url'] = 'audio-url'
+```
+
+```
+kind: Literal['audio-url'] = 'audio-url'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Type identifier, this is available on all parts as a discriminator.
+
+#### media_type
+
+property
+
+```
+property
+```
+
+```
+media_type: AudioMediaType
+```
+
+```
+media_type: AudioMediaType
+```
+
+Return the media type of the audio file, based on the url.
+
+### ImageUrl
+
+dataclass
+
+```
+dataclass
+```
+
+A URL to an image.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+```
+
+```
+@dataclass
+class ImageUrl:
+    """A URL to an image."""
+
+    url: str
+    """The URL of the image."""
+
+    kind: Literal['image-url'] = 'image-url'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def media_type(self) -> ImageMediaType:
+        """Return the media type of the image, based on the url."""
+        if self.url.endswith(('.jpg', '.jpeg')):
+            return 'image/jpeg'
+        elif self.url.endswith('.png'):
+            return 'image/png'
+        elif self.url.endswith('.gif'):
+            return 'image/gif'
+        elif self.url.endswith('.webp'):
+            return 'image/webp'
+        else:
+            raise ValueError(f'Unknown image file extension: {self.url}')
+```
+
+```
+@dataclass
+class ImageUrl:
+    """A URL to an image."""
+
+    url: str
+    """The URL of the image."""
+
+    kind: Literal['image-url'] = 'image-url'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def media_type(self) -> ImageMediaType:
+        """Return the media type of the image, based on the url."""
+        if self.url.endswith(('.jpg', '.jpeg')):
+            return 'image/jpeg'
+        elif self.url.endswith('.png'):
+            return 'image/png'
+        elif self.url.endswith('.gif'):
+            return 'image/gif'
+        elif self.url.endswith('.webp'):
+            return 'image/webp'
+        else:
+            raise ValueError(f'Unknown image file extension: {self.url}')
+```
+
+#### url
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+url: str
+```
+
+```
+url: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The URL of the image.
+
+#### kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+kind: Literal['image-url'] = 'image-url'
+```
+
+```
+kind: Literal['image-url'] = 'image-url'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Type identifier, this is available on all parts as a discriminator.
+
+#### media_type
+
+property
+
+```
+property
+```
+
+```
+media_type: ImageMediaType
+```
+
+```
+media_type: ImageMediaType
+```
+
+Return the media type of the image, based on the url.
+
+### BinaryContent
+
+dataclass
+
+```
+dataclass
+```
+
+Binary content, e.g. an audio or image file.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+91
+ 92
+ 93
+ 94
+ 95
+ 96
+ 97
+ 98
+ 99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+```
+
+```
+@dataclass
+class BinaryContent:
+    """Binary content, e.g. an audio or image file."""
+
+    data: bytes
+    """The binary data."""
+
+    media_type: AudioMediaType | ImageMediaType | str
+    """The media type of the binary data."""
+
+    kind: Literal['binary'] = 'binary'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def is_audio(self) -> bool:
+        """Return `True` if the media type is an audio type."""
+        return self.media_type.startswith('audio/')
+
+    @property
+    def is_image(self) -> bool:
+        """Return `True` if the media type is an image type."""
+        return self.media_type.startswith('image/')
+
+    @property
+    def audio_format(self) -> Literal['mp3', 'wav']:
+        """Return the audio format given the media type."""
+        if self.media_type == 'audio/mpeg':
+            return 'mp3'
+        elif self.media_type == 'audio/wav':
+            return 'wav'
+        else:
+            raise ValueError(f'Unknown audio media type: {self.media_type}')
+```
+
+```
+@dataclass
+class BinaryContent:
+    """Binary content, e.g. an audio or image file."""
+
+    data: bytes
+    """The binary data."""
+
+    media_type: AudioMediaType | ImageMediaType | str
+    """The media type of the binary data."""
+
+    kind: Literal['binary'] = 'binary'
+    """Type identifier, this is available on all parts as a discriminator."""
+
+    @property
+    def is_audio(self) -> bool:
+        """Return `True` if the media type is an audio type."""
+        return self.media_type.startswith('audio/')
+
+    @property
+    def is_image(self) -> bool:
+        """Return `True` if the media type is an image type."""
+        return self.media_type.startswith('image/')
+
+    @property
+    def audio_format(self) -> Literal['mp3', 'wav']:
+        """Return the audio format given the media type."""
+        if self.media_type == 'audio/mpeg':
+            return 'mp3'
+        elif self.media_type == 'audio/wav':
+            return 'wav'
+        else:
+            raise ValueError(f'Unknown audio media type: {self.media_type}')
+```
+
+#### data
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+data: bytes
+```
+
+```
+data: bytes
+```
+
+[bytes](https://docs.python.org/3/library/stdtypes.html#bytes)
+
+The binary data.
+
+#### media_type
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+media_type: AudioMediaType | ImageMediaType | str
+```
+
+```
+media_type: AudioMediaType | ImageMediaType | str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The media type of the binary data.
+
+#### kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+kind: Literal['binary'] = 'binary'
+```
+
+```
+kind: Literal['binary'] = 'binary'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Type identifier, this is available on all parts as a discriminator.
+
+#### is_audio
+
+property
+
+```
+property
+```
+
+```
+is_audio: bool
+```
+
+```
+is_audio: bool
+```
+
+[bool](https://docs.python.org/3/library/functions.html#bool)
+
+Return True if the media type is an audio type.
+
+```
+True
+```
+
+#### is_image
+
+property
+
+```
+property
+```
+
+```
+is_image: bool
+```
+
+```
+is_image: bool
+```
+
+[bool](https://docs.python.org/3/library/functions.html#bool)
+
+Return True if the media type is an image type.
+
+```
+True
+```
+
+#### audio_format
+
+property
+
+```
+property
+```
+
+```
+audio_format: Literal['mp3', 'wav']
+```
+
+```
+audio_format: Literal['mp3', 'wav']
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Return the audio format given the media type.
+
+### UserPromptPart
+
+dataclass
+
+```
+dataclass
+```
+
+A user prompt, generally written by the end user.
+
+Content comes from the user_prompt parameter of Agent.run,
+Agent.run_sync, and Agent.run_stream.
+
+```
+user_prompt
+```
+
+```
+Agent.run
+```
+
+```
+Agent.run_sync
+```
+
+```
+Agent.run_stream
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+```
+
+```
+@dataclass
+class UserPromptPart:
+    """A user prompt, generally written by the end user.
+
+    Content comes from the `user_prompt` parameter of [`Agent.run`][pydantic_ai.Agent.run],
+    [`Agent.run_sync`][pydantic_ai.Agent.run_sync], and [`Agent.run_stream`][pydantic_ai.Agent.run_stream].
+    """
+
+    content: str | Sequence[UserContent]
+    """The content of the prompt."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp of the prompt."""
+
+    part_kind: Literal['user-prompt'] = 'user-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def otel_event(self) -> Event:
+        if isinstance(self.content, str):
+            content = self.content
+        else:
+            # TODO figure out what to record for images and audio
+            content = [part if isinstance(part, str) else {'kind': part.kind} for part in self.content]
+        return Event('gen_ai.user.message', body={'content': content, 'role': 'user'})
+```
+
+```
+@dataclass
+class UserPromptPart:
+    """A user prompt, generally written by the end user.
+
+    Content comes from the `user_prompt` parameter of [`Agent.run`][pydantic_ai.Agent.run],
+    [`Agent.run_sync`][pydantic_ai.Agent.run_sync], and [`Agent.run_stream`][pydantic_ai.Agent.run_stream].
+    """
+
+    content: str | Sequence[UserContent]
+    """The content of the prompt."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp of the prompt."""
+
+    part_kind: Literal['user-prompt'] = 'user-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def otel_event(self) -> Event:
+        if isinstance(self.content, str):
+            content = self.content
+        else:
+            # TODO figure out what to record for images and audio
+            content = [part if isinstance(part, str) else {'kind': part.kind} for part in self.content]
+        return Event('gen_ai.user.message', body={'content': content, 'role': 'user'})
+```
+
+#### content
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content: str | Sequence[UserContent]
+```
+
+```
+content: str | Sequence[UserContent]
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[Sequence](https://docs.python.org/3/library/collections.abc.html#collections.abc.Sequence)
+
+The content of the prompt.
+
+#### timestamp
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+[datetime](https://docs.python.org/3/library/datetime.html#datetime.datetime)
+
+[field](https://docs.python.org/3/library/dataclasses.html#dataclasses.field)
+
+The timestamp of the prompt.
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['user-prompt'] = 'user-prompt'
+```
+
+```
+part_kind: Literal['user-prompt'] = 'user-prompt'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+### ToolReturnPart
+
+dataclass
+
+```
+dataclass
+```
+
+A tool return message, this encodes the result of running a tool.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+157
+158
+159
+160
+161
+162
+163
+164
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+```
+
+```
+@dataclass
+class ToolReturnPart:
+    """A tool return message, this encodes the result of running a tool."""
+
+    tool_name: str
+    """The name of the "tool" was called."""
+
+    content: Any
+    """The return value."""
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp, when the tool returned."""
+
+    part_kind: Literal['tool-return'] = 'tool-return'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def model_response_str(self) -> str:
+        """Return a string representation of the content for the model."""
+        if isinstance(self.content, str):
+            return self.content
+        else:
+            return tool_return_ta.dump_json(self.content).decode()
+
+    def model_response_object(self) -> dict[str, Any]:
+        """Return a dictionary representation of the content, wrapping non-dict types appropriately."""
+        # gemini supports JSON dict return values, but no other JSON types, hence we wrap anything else in a dict
+        if isinstance(self.content, dict):
+            return tool_return_ta.dump_python(self.content, mode='json')  # pyright: ignore[reportUnknownMemberType]
+        else:
+            return {'return_value': tool_return_ta.dump_python(self.content, mode='json')}
+
+    def otel_event(self) -> Event:
+        return Event(
+            'gen_ai.tool.message',
+            body={'content': self.content, 'role': 'tool', 'id': self.tool_call_id, 'name': self.tool_name},
+        )
+```
+
+```
+@dataclass
+class ToolReturnPart:
+    """A tool return message, this encodes the result of running a tool."""
+
+    tool_name: str
+    """The name of the "tool" was called."""
+
+    content: Any
+    """The return value."""
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp, when the tool returned."""
+
+    part_kind: Literal['tool-return'] = 'tool-return'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def model_response_str(self) -> str:
+        """Return a string representation of the content for the model."""
+        if isinstance(self.content, str):
+            return self.content
+        else:
+            return tool_return_ta.dump_json(self.content).decode()
+
+    def model_response_object(self) -> dict[str, Any]:
+        """Return a dictionary representation of the content, wrapping non-dict types appropriately."""
+        # gemini supports JSON dict return values, but no other JSON types, hence we wrap anything else in a dict
+        if isinstance(self.content, dict):
+            return tool_return_ta.dump_python(self.content, mode='json')  # pyright: ignore[reportUnknownMemberType]
+        else:
+            return {'return_value': tool_return_ta.dump_python(self.content, mode='json')}
+
+    def otel_event(self) -> Event:
+        return Event(
+            'gen_ai.tool.message',
+            body={'content': self.content, 'role': 'tool', 'id': self.tool_call_id, 'name': self.tool_name},
+        )
+```
+
+#### tool_name
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+tool_name: str
+```
+
+```
+tool_name: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The name of the "tool" was called.
+
+#### content
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content: Any
+```
+
+```
+content: Any
+```
+
+[Any](https://docs.python.org/3/library/typing.html#typing.Any)
+
+The return value.
+
+#### tool_call_id
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str | None = None
+```
+
+```
+tool_call_id: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Optional tool call identifier, this is used by some models including OpenAI.
+
+#### timestamp
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+[datetime](https://docs.python.org/3/library/datetime.html#datetime.datetime)
+
+[field](https://docs.python.org/3/library/dataclasses.html#dataclasses.field)
+
+The timestamp, when the tool returned.
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['tool-return'] = 'tool-return'
+```
+
+```
+part_kind: Literal['tool-return'] = 'tool-return'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+#### model_response_str
+
+```
+model_response_str() -> str
+```
+
+```
+model_response_str() -> str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Return a string representation of the content for the model.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+176
+177
+178
+179
+180
+181
+```
+
+```
+def model_response_str(self) -> str:
+    """Return a string representation of the content for the model."""
+    if isinstance(self.content, str):
+        return self.content
+    else:
+        return tool_return_ta.dump_json(self.content).decode()
+```
+
+```
+def model_response_str(self) -> str:
+    """Return a string representation of the content for the model."""
+    if isinstance(self.content, str):
+        return self.content
+    else:
+        return tool_return_ta.dump_json(self.content).decode()
+```
+
+#### model_response_object
+
+```
+model_response_object() -> dict[str, Any]
+```
+
+```
+model_response_object() -> dict[str, Any]
+```
+
+[dict](https://docs.python.org/3/library/stdtypes.html#dict)
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[Any](https://docs.python.org/3/library/typing.html#typing.Any)
+
+Return a dictionary representation of the content, wrapping non-dict types appropriately.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+183
+184
+185
+186
+187
+188
+189
+```
+
+```
+def model_response_object(self) -> dict[str, Any]:
+    """Return a dictionary representation of the content, wrapping non-dict types appropriately."""
+    # gemini supports JSON dict return values, but no other JSON types, hence we wrap anything else in a dict
+    if isinstance(self.content, dict):
+        return tool_return_ta.dump_python(self.content, mode='json')  # pyright: ignore[reportUnknownMemberType]
+    else:
+        return {'return_value': tool_return_ta.dump_python(self.content, mode='json')}
+```
+
+```
+def model_response_object(self) -> dict[str, Any]:
+    """Return a dictionary representation of the content, wrapping non-dict types appropriately."""
+    # gemini supports JSON dict return values, but no other JSON types, hence we wrap anything else in a dict
+    if isinstance(self.content, dict):
+        return tool_return_ta.dump_python(self.content, mode='json')  # pyright: ignore[reportUnknownMemberType]
+    else:
+        return {'return_value': tool_return_ta.dump_python(self.content, mode='json')}
+```
+
+### RetryPromptPart
+
+dataclass
+
+```
+dataclass
+```
+
+A message back to a model asking it to try again.
+
+This can be sent for a number of reasons:
+
+* Pydantic validation of tool arguments failed, here content is derived from a Pydantic
+  ValidationError
+* a tool raised a ModelRetry exception
+* no tool was found for the tool name
+* the model returned plain text when a structured response was expected
+* Pydantic validation of a structured response failed, here content is derived from a Pydantic
+  ValidationError
+* a result validator raised a ModelRetry exception
+
+```
+ValidationError
+```
+
+```
+ModelRetry
+```
+
+```
+ValidationError
+```
+
+```
+ModelRetry
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+```
+
+```
+@dataclass
+class RetryPromptPart:
+    """A message back to a model asking it to try again.
+
+    This can be sent for a number of reasons:
+
+    * Pydantic validation of tool arguments failed, here content is derived from a Pydantic
+      [`ValidationError`][pydantic_core.ValidationError]
+    * a tool raised a [`ModelRetry`][pydantic_ai.exceptions.ModelRetry] exception
+    * no tool was found for the tool name
+    * the model returned plain text when a structured response was expected
+    * Pydantic validation of a structured response failed, here content is derived from a Pydantic
+      [`ValidationError`][pydantic_core.ValidationError]
+    * a result validator raised a [`ModelRetry`][pydantic_ai.exceptions.ModelRetry] exception
+    """
+
+    content: list[pydantic_core.ErrorDetails] | str
+    """Details of why and how the model should retry.
+
+    If the retry was triggered by a [`ValidationError`][pydantic_core.ValidationError], this will be a list of
+    error details.
+    """
+
+    tool_name: str | None = None
+    """The name of the tool that was called, if any."""
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp, when the retry was triggered."""
+
+    part_kind: Literal['retry-prompt'] = 'retry-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def model_response(self) -> str:
+        """Return a string message describing why the retry is requested."""
+        if isinstance(self.content, str):
+            description = self.content
+        else:
+            json_errors = error_details_ta.dump_json(self.content, exclude={'__all__': {'ctx'}}, indent=2)
+            description = f'{len(self.content)} validation errors: {json_errors.decode()}'
+        return f'{description}\n\nFix the errors and try again.'
+
+    def otel_event(self) -> Event:
+        if self.tool_name is None:
+            return Event('gen_ai.user.message', body={'content': self.model_response(), 'role': 'user'})
+        else:
+            return Event(
+                'gen_ai.tool.message',
+                body={
+                    'content': self.model_response(),
+                    'role': 'tool',
+                    'id': self.tool_call_id,
+                    'name': self.tool_name,
+                },
+            )
+```
+
+```
+@dataclass
+class RetryPromptPart:
+    """A message back to a model asking it to try again.
+
+    This can be sent for a number of reasons:
+
+    * Pydantic validation of tool arguments failed, here content is derived from a Pydantic
+      [`ValidationError`][pydantic_core.ValidationError]
+    * a tool raised a [`ModelRetry`][pydantic_ai.exceptions.ModelRetry] exception
+    * no tool was found for the tool name
+    * the model returned plain text when a structured response was expected
+    * Pydantic validation of a structured response failed, here content is derived from a Pydantic
+      [`ValidationError`][pydantic_core.ValidationError]
+    * a result validator raised a [`ModelRetry`][pydantic_ai.exceptions.ModelRetry] exception
+    """
+
+    content: list[pydantic_core.ErrorDetails] | str
+    """Details of why and how the model should retry.
+
+    If the retry was triggered by a [`ValidationError`][pydantic_core.ValidationError], this will be a list of
+    error details.
+    """
+
+    tool_name: str | None = None
+    """The name of the tool that was called, if any."""
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp, when the retry was triggered."""
+
+    part_kind: Literal['retry-prompt'] = 'retry-prompt'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def model_response(self) -> str:
+        """Return a string message describing why the retry is requested."""
+        if isinstance(self.content, str):
+            description = self.content
+        else:
+            json_errors = error_details_ta.dump_json(self.content, exclude={'__all__': {'ctx'}}, indent=2)
+            description = f'{len(self.content)} validation errors: {json_errors.decode()}'
+        return f'{description}\n\nFix the errors and try again.'
+
+    def otel_event(self) -> Event:
+        if self.tool_name is None:
+            return Event('gen_ai.user.message', body={'content': self.model_response(), 'role': 'user'})
+        else:
+            return Event(
+                'gen_ai.tool.message',
+                body={
+                    'content': self.model_response(),
+                    'role': 'tool',
+                    'id': self.tool_call_id,
+                    'name': self.tool_name,
+                },
+            )
+```
+
+#### content
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content: list[ErrorDetails] | str
+```
+
+```
+content: list[ErrorDetails] | str
+```
+
+[list](https://docs.python.org/3/library/stdtypes.html#list)
+
+[ErrorDetails](https://docs.pydantic.dev/latest/api/pydantic_core/#pydantic_core.ErrorDetails)
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Details of why and how the model should retry.
+
+If the retry was triggered by a ValidationError, this will be a list of
+error details.
+
+```
+ValidationError
+```
+
+#### tool_name
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_name: str | None = None
+```
+
+```
+tool_name: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The name of the tool that was called, if any.
+
+#### tool_call_id
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str | None = None
+```
+
+```
+tool_call_id: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Optional tool call identifier, this is used by some models including OpenAI.
+
+#### timestamp
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+[datetime](https://docs.python.org/3/library/datetime.html#datetime.datetime)
+
+[field](https://docs.python.org/3/library/dataclasses.html#dataclasses.field)
+
+The timestamp, when the retry was triggered.
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['retry-prompt'] = 'retry-prompt'
+```
+
+```
+part_kind: Literal['retry-prompt'] = 'retry-prompt'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+#### model_response
+
+```
+model_response() -> str
+```
+
+```
+model_response() -> str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Return a string message describing why the retry is requested.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+236
+237
+238
+239
+240
+241
+242
+243
+```
+
+```
+def model_response(self) -> str:
+    """Return a string message describing why the retry is requested."""
+    if isinstance(self.content, str):
+        description = self.content
+    else:
+        json_errors = error_details_ta.dump_json(self.content, exclude={'__all__': {'ctx'}}, indent=2)
+        description = f'{len(self.content)} validation errors: {json_errors.decode()}'
+    return f'{description}\n\nFix the errors and try again.'
+```
+
+```
+def model_response(self) -> str:
+    """Return a string message describing why the retry is requested."""
+    if isinstance(self.content, str):
+        description = self.content
+    else:
+        json_errors = error_details_ta.dump_json(self.content, exclude={'__all__': {'ctx'}}, indent=2)
+        description = f'{len(self.content)} validation errors: {json_errors.decode()}'
+    return f'{description}\n\nFix the errors and try again.'
+```
+
+### ModelRequestPart
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelRequestPart = Annotated[
+    Union[
+        SystemPromptPart,
+        UserPromptPart,
+        ToolReturnPart,
+        RetryPromptPart,
+    ],
+    Discriminator("part_kind"),
+]
+```
+
+```
+ModelRequestPart = Annotated[
+    Union[
+        SystemPromptPart,
+        UserPromptPart,
+        ToolReturnPart,
+        RetryPromptPart,
+    ],
+    Discriminator("part_kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[SystemPromptPart](https://ai.pydantic.dev#pydantic_ai.messages.SystemPromptPart)
+
+[UserPromptPart](https://ai.pydantic.dev#pydantic_ai.messages.UserPromptPart)
+
+[ToolReturnPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolReturnPart)
+
+[RetryPromptPart](https://ai.pydantic.dev#pydantic_ai.messages.RetryPromptPart)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+A message part sent by PydanticAI to a model.
+
+### ModelRequest
+
+dataclass
+
+```
+dataclass
+```
+
+A request generated by PydanticAI and sent to a model, e.g. a message from the PydanticAI app to the model.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+266
+267
+268
+269
+270
+271
+272
+273
+274
+```
+
+```
+@dataclass
+class ModelRequest:
+    """A request generated by PydanticAI and sent to a model, e.g. a message from the PydanticAI app to the model."""
+
+    parts: list[ModelRequestPart]
+    """The parts of the user message."""
+
+    kind: Literal['request'] = 'request'
+    """Message type identifier, this is available on all parts as a discriminator."""
+```
+
+```
+@dataclass
+class ModelRequest:
+    """A request generated by PydanticAI and sent to a model, e.g. a message from the PydanticAI app to the model."""
+
+    parts: list[ModelRequestPart]
+    """The parts of the user message."""
+
+    kind: Literal['request'] = 'request'
+    """Message type identifier, this is available on all parts as a discriminator."""
+```
+
+#### parts
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+parts: list[ModelRequestPart]
+```
+
+```
+parts: list[ModelRequestPart]
+```
+
+[list](https://docs.python.org/3/library/stdtypes.html#list)
+
+[ModelRequestPart](https://ai.pydantic.dev#pydantic_ai.messages.ModelRequestPart)
+
+The parts of the user message.
+
+#### kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+kind: Literal['request'] = 'request'
+```
+
+```
+kind: Literal['request'] = 'request'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Message type identifier, this is available on all parts as a discriminator.
+
+### TextPart
+
+dataclass
+
+```
+dataclass
+```
+
+A plain text response from a model.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+```
+
+```
+@dataclass
+class TextPart:
+    """A plain text response from a model."""
+
+    content: str
+    """The text content of the response."""
+
+    part_kind: Literal['text'] = 'text'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def has_content(self) -> bool:
+        """Return `True` if the text content is non-empty."""
+        return bool(self.content)
+```
+
+```
+@dataclass
+class TextPart:
+    """A plain text response from a model."""
+
+    content: str
+    """The text content of the response."""
+
+    part_kind: Literal['text'] = 'text'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def has_content(self) -> bool:
+        """Return `True` if the text content is non-empty."""
+        return bool(self.content)
+```
+
+#### content
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content: str
+```
+
+```
+content: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The text content of the response.
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['text'] = 'text'
+```
+
+```
+part_kind: Literal['text'] = 'text'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+#### has_content
+
+```
+has_content() -> bool
+```
+
+```
+has_content() -> bool
+```
+
+[bool](https://docs.python.org/3/library/functions.html#bool)
+
+Return True if the text content is non-empty.
+
+```
+True
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+287
+288
+289
+```
+
+```
+def has_content(self) -> bool:
+    """Return `True` if the text content is non-empty."""
+    return bool(self.content)
+```
+
+```
+def has_content(self) -> bool:
+    """Return `True` if the text content is non-empty."""
+    return bool(self.content)
+```
+
+### ToolCallPart
+
+dataclass
+
+```
+dataclass
+```
+
+A tool call from a model.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+330
+331
+332
+333
+334
+335
+336
+337
+338
+```
+
+```
+@dataclass
+class ToolCallPart:
+    """A tool call from a model."""
+
+    tool_name: str
+    """The name of the tool to call."""
+
+    args: str | dict[str, Any]
+    """The arguments to pass to the tool.
+
+    This is stored either as a JSON string or a Python dictionary depending on how data was received.
+    """
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    part_kind: Literal['tool-call'] = 'tool-call'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def args_as_dict(self) -> dict[str, Any]:
+        """Return the arguments as a Python dictionary.
+
+        This is just for convenience with models that require dicts as input.
+        """
+        if isinstance(self.args, dict):
+            return self.args
+        args = pydantic_core.from_json(self.args)
+        assert isinstance(args, dict), 'args should be a dict'
+        return cast(dict[str, Any], args)
+
+    def args_as_json_str(self) -> str:
+        """Return the arguments as a JSON string.
+
+        This is just for convenience with models that require JSON strings as input.
+        """
+        if isinstance(self.args, str):
+            return self.args
+        return pydantic_core.to_json(self.args).decode()
+
+    def has_content(self) -> bool:
+        """Return `True` if the arguments contain any data."""
+        if isinstance(self.args, dict):
+            # TODO: This should probably return True if you have the value False, or 0, etc.
+            #   It makes sense to me to ignore empty strings, but not sure about empty lists or dicts
+            return any(self.args.values())
+        else:
+            return bool(self.args)
+```
+
+```
+@dataclass
+class ToolCallPart:
+    """A tool call from a model."""
+
+    tool_name: str
+    """The name of the tool to call."""
+
+    args: str | dict[str, Any]
+    """The arguments to pass to the tool.
+
+    This is stored either as a JSON string or a Python dictionary depending on how data was received.
+    """
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI."""
+
+    part_kind: Literal['tool-call'] = 'tool-call'
+    """Part type identifier, this is available on all parts as a discriminator."""
+
+    def args_as_dict(self) -> dict[str, Any]:
+        """Return the arguments as a Python dictionary.
+
+        This is just for convenience with models that require dicts as input.
+        """
+        if isinstance(self.args, dict):
+            return self.args
+        args = pydantic_core.from_json(self.args)
+        assert isinstance(args, dict), 'args should be a dict'
+        return cast(dict[str, Any], args)
+
+    def args_as_json_str(self) -> str:
+        """Return the arguments as a JSON string.
+
+        This is just for convenience with models that require JSON strings as input.
+        """
+        if isinstance(self.args, str):
+            return self.args
+        return pydantic_core.to_json(self.args).decode()
+
+    def has_content(self) -> bool:
+        """Return `True` if the arguments contain any data."""
+        if isinstance(self.args, dict):
+            # TODO: This should probably return True if you have the value False, or 0, etc.
+            #   It makes sense to me to ignore empty strings, but not sure about empty lists or dicts
+            return any(self.args.values())
+        else:
+            return bool(self.args)
+```
+
+#### tool_name
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+tool_name: str
+```
+
+```
+tool_name: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The name of the tool to call.
+
+#### args
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+args: str | dict[str, Any]
+```
+
+```
+args: str | dict[str, Any]
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[dict](https://docs.python.org/3/library/stdtypes.html#dict)
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[Any](https://docs.python.org/3/library/typing.html#typing.Any)
+
+The arguments to pass to the tool.
+
+This is stored either as a JSON string or a Python dictionary depending on how data was received.
+
+#### tool_call_id
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str | None = None
+```
+
+```
+tool_call_id: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Optional tool call identifier, this is used by some models including OpenAI.
+
+#### part_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_kind: Literal['tool-call'] = 'tool-call'
+```
+
+```
+part_kind: Literal['tool-call'] = 'tool-call'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part type identifier, this is available on all parts as a discriminator.
+
+#### args_as_dict
+
+```
+args_as_dict() -> dict[str, Any]
+```
+
+```
+args_as_dict() -> dict[str, Any]
+```
+
+[dict](https://docs.python.org/3/library/stdtypes.html#dict)
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[Any](https://docs.python.org/3/library/typing.html#typing.Any)
+
+Return the arguments as a Python dictionary.
+
+This is just for convenience with models that require dicts as input.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+```
+
+```
+def args_as_dict(self) -> dict[str, Any]:
+    """Return the arguments as a Python dictionary.
+
+    This is just for convenience with models that require dicts as input.
+    """
+    if isinstance(self.args, dict):
+        return self.args
+    args = pydantic_core.from_json(self.args)
+    assert isinstance(args, dict), 'args should be a dict'
+    return cast(dict[str, Any], args)
+```
+
+```
+def args_as_dict(self) -> dict[str, Any]:
+    """Return the arguments as a Python dictionary.
+
+    This is just for convenience with models that require dicts as input.
+    """
+    if isinstance(self.args, dict):
+        return self.args
+    args = pydantic_core.from_json(self.args)
+    assert isinstance(args, dict), 'args should be a dict'
+    return cast(dict[str, Any], args)
+```
+
+#### args_as_json_str
+
+```
+args_as_json_str() -> str
+```
+
+```
+args_as_json_str() -> str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Return the arguments as a JSON string.
+
+This is just for convenience with models that require JSON strings as input.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+322
+323
+324
+325
+326
+327
+328
+329
+```
+
+```
+def args_as_json_str(self) -> str:
+    """Return the arguments as a JSON string.
+
+    This is just for convenience with models that require JSON strings as input.
+    """
+    if isinstance(self.args, str):
+        return self.args
+    return pydantic_core.to_json(self.args).decode()
+```
+
+```
+def args_as_json_str(self) -> str:
+    """Return the arguments as a JSON string.
+
+    This is just for convenience with models that require JSON strings as input.
+    """
+    if isinstance(self.args, str):
+        return self.args
+    return pydantic_core.to_json(self.args).decode()
+```
+
+#### has_content
+
+```
+has_content() -> bool
+```
+
+```
+has_content() -> bool
+```
+
+[bool](https://docs.python.org/3/library/functions.html#bool)
+
+Return True if the arguments contain any data.
+
+```
+True
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+331
+332
+333
+334
+335
+336
+337
+338
+```
+
+```
+def has_content(self) -> bool:
+    """Return `True` if the arguments contain any data."""
+    if isinstance(self.args, dict):
+        # TODO: This should probably return True if you have the value False, or 0, etc.
+        #   It makes sense to me to ignore empty strings, but not sure about empty lists or dicts
+        return any(self.args.values())
+    else:
+        return bool(self.args)
+```
+
+```
+def has_content(self) -> bool:
+    """Return `True` if the arguments contain any data."""
+    if isinstance(self.args, dict):
+        # TODO: This should probably return True if you have the value False, or 0, etc.
+        #   It makes sense to me to ignore empty strings, but not sure about empty lists or dicts
+        return any(self.args.values())
+    else:
+        return bool(self.args)
+```
+
+### ModelResponsePart
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelResponsePart = Annotated[
+    Union[TextPart, ToolCallPart],
+    Discriminator("part_kind"),
+]
+```
+
+```
+ModelResponsePart = Annotated[
+    Union[TextPart, ToolCallPart],
+    Discriminator("part_kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[TextPart](https://ai.pydantic.dev#pydantic_ai.messages.TextPart)
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+A message part returned by a model.
+
+### ModelResponse
+
+dataclass
+
+```
+dataclass
+```
+
+A response from a model, e.g. a message from the model to the PydanticAI app.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+385
+386
+387
+388
+389
+390
+391
+392
+```
+
+```
+@dataclass
+class ModelResponse:
+    """A response from a model, e.g. a message from the model to the PydanticAI app."""
+
+    parts: list[ModelResponsePart]
+    """The parts of the model message."""
+
+    model_name: str | None = None
+    """The name of the model that generated the response."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp of the response.
+
+    If the model provides a timestamp in the response (as OpenAI does) that will be used.
+    """
+
+    kind: Literal['response'] = 'response'
+    """Message type identifier, this is available on all parts as a discriminator."""
+
+    def otel_events(self) -> list[Event]:
+        """Return OpenTelemetry events for the response."""
+        result: list[Event] = []
+
+        def new_event_body():
+            new_body: dict[str, Any] = {'role': 'assistant'}
+            ev = Event('gen_ai.assistant.message', body=new_body)
+            result.append(ev)
+            return new_body
+
+        body = new_event_body()
+        for part in self.parts:
+            if isinstance(part, ToolCallPart):
+                body.setdefault('tool_calls', []).append(
+                    {
+                        'id': part.tool_call_id,
+                        'type': 'function',  # TODO https://github.com/pydantic/pydantic-ai/issues/888
+                        'function': {
+                            'name': part.tool_name,
+                            'arguments': part.args,
+                        },
+                    }
+                )
+            elif isinstance(part, TextPart):
+                if body.get('content'):
+                    body = new_event_body()
+                body['content'] = part.content
+
+        return result
+```
+
+```
+@dataclass
+class ModelResponse:
+    """A response from a model, e.g. a message from the model to the PydanticAI app."""
+
+    parts: list[ModelResponsePart]
+    """The parts of the model message."""
+
+    model_name: str | None = None
+    """The name of the model that generated the response."""
+
+    timestamp: datetime = field(default_factory=_now_utc)
+    """The timestamp of the response.
+
+    If the model provides a timestamp in the response (as OpenAI does) that will be used.
+    """
+
+    kind: Literal['response'] = 'response'
+    """Message type identifier, this is available on all parts as a discriminator."""
+
+    def otel_events(self) -> list[Event]:
+        """Return OpenTelemetry events for the response."""
+        result: list[Event] = []
+
+        def new_event_body():
+            new_body: dict[str, Any] = {'role': 'assistant'}
+            ev = Event('gen_ai.assistant.message', body=new_body)
+            result.append(ev)
+            return new_body
+
+        body = new_event_body()
+        for part in self.parts:
+            if isinstance(part, ToolCallPart):
+                body.setdefault('tool_calls', []).append(
+                    {
+                        'id': part.tool_call_id,
+                        'type': 'function',  # TODO https://github.com/pydantic/pydantic-ai/issues/888
+                        'function': {
+                            'name': part.tool_name,
+                            'arguments': part.args,
+                        },
+                    }
+                )
+            elif isinstance(part, TextPart):
+                if body.get('content'):
+                    body = new_event_body()
+                body['content'] = part.content
+
+        return result
+```
+
+#### parts
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+parts: list[ModelResponsePart]
+```
+
+```
+parts: list[ModelResponsePart]
+```
+
+[list](https://docs.python.org/3/library/stdtypes.html#list)
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+The parts of the model message.
+
+#### model_name
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+model_name: str | None = None
+```
+
+```
+model_name: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The name of the model that generated the response.
+
+#### timestamp
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+```
+timestamp: datetime = field(default_factory=now_utc)
+```
+
+[datetime](https://docs.python.org/3/library/datetime.html#datetime.datetime)
+
+[field](https://docs.python.org/3/library/dataclasses.html#dataclasses.field)
+
+The timestamp of the response.
+
+If the model provides a timestamp in the response (as OpenAI does) that will be used.
+
+#### kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+kind: Literal['response'] = 'response'
+```
+
+```
+kind: Literal['response'] = 'response'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Message type identifier, this is available on all parts as a discriminator.
+
+#### otel_events
+
+```
+otel_events() -> list[Event]
+```
+
+```
+otel_events() -> list[Event]
+```
+
+[list](https://docs.python.org/3/library/stdtypes.html#list)
+
+Return OpenTelemetry events for the response.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+385
+386
+387
+388
+389
+390
+391
+392
+```
+
+```
+def otel_events(self) -> list[Event]:
+    """Return OpenTelemetry events for the response."""
+    result: list[Event] = []
+
+    def new_event_body():
+        new_body: dict[str, Any] = {'role': 'assistant'}
+        ev = Event('gen_ai.assistant.message', body=new_body)
+        result.append(ev)
+        return new_body
+
+    body = new_event_body()
+    for part in self.parts:
+        if isinstance(part, ToolCallPart):
+            body.setdefault('tool_calls', []).append(
+                {
+                    'id': part.tool_call_id,
+                    'type': 'function',  # TODO https://github.com/pydantic/pydantic-ai/issues/888
+                    'function': {
+                        'name': part.tool_name,
+                        'arguments': part.args,
+                    },
+                }
+            )
+        elif isinstance(part, TextPart):
+            if body.get('content'):
+                body = new_event_body()
+            body['content'] = part.content
+
+    return result
+```
+
+```
+def otel_events(self) -> list[Event]:
+    """Return OpenTelemetry events for the response."""
+    result: list[Event] = []
+
+    def new_event_body():
+        new_body: dict[str, Any] = {'role': 'assistant'}
+        ev = Event('gen_ai.assistant.message', body=new_body)
+        result.append(ev)
+        return new_body
+
+    body = new_event_body()
+    for part in self.parts:
+        if isinstance(part, ToolCallPart):
+            body.setdefault('tool_calls', []).append(
+                {
+                    'id': part.tool_call_id,
+                    'type': 'function',  # TODO https://github.com/pydantic/pydantic-ai/issues/888
+                    'function': {
+                        'name': part.tool_name,
+                        'arguments': part.args,
+                    },
+                }
+            )
+        elif isinstance(part, TextPart):
+            if body.get('content'):
+                body = new_event_body()
+            body['content'] = part.content
+
+    return result
+```
+
+### ModelMessage
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelMessage = Annotated[
+    Union[ModelRequest, ModelResponse],
+    Discriminator("kind"),
+]
+```
+
+```
+ModelMessage = Annotated[
+    Union[ModelRequest, ModelResponse],
+    Discriminator("kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[ModelRequest](https://ai.pydantic.dev#pydantic_ai.messages.ModelRequest)
+
+[ModelResponse](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponse)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+Any message sent to or returned by a model.
+
+### ModelMessagesTypeAdapter
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelMessagesTypeAdapter = TypeAdapter(
+    list[ModelMessage], config=ConfigDict(defer_build=True)
+)
+```
+
+```
+ModelMessagesTypeAdapter = TypeAdapter(
+    list[ModelMessage], config=ConfigDict(defer_build=True)
+)
+```
+
+[TypeAdapter](https://docs.pydantic.dev/latest/api/type_adapter/#pydantic.type_adapter.TypeAdapter)
+
+[list](https://docs.python.org/3/library/stdtypes.html#list)
+
+[ModelMessage](https://ai.pydantic.dev#pydantic_ai.messages.ModelMessage)
+
+[ConfigDict](https://docs.pydantic.dev/latest/api/config/#pydantic.config.ConfigDict)
+
+Pydantic TypeAdapter for (de)serializing messages.
+
+```
+TypeAdapter
+```
+
+### TextPartDelta
+
+dataclass
+
+```
+dataclass
+```
+
+A partial update (delta) for a TextPart to append new text content.
+
+```
+TextPart
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+```
+
+```
+@dataclass
+class TextPartDelta:
+    """A partial update (delta) for a `TextPart` to append new text content."""
+
+    content_delta: str
+    """The incremental text content to add to the existing `TextPart` content."""
+
+    part_delta_kind: Literal['text'] = 'text'
+    """Part delta type identifier, used as a discriminator."""
+
+    def apply(self, part: ModelResponsePart) -> TextPart:
+        """Apply this text delta to an existing `TextPart`.
+
+        Args:
+            part: The existing model response part, which must be a `TextPart`.
+
+        Returns:
+            A new `TextPart` with updated text content.
+
+        Raises:
+            ValueError: If `part` is not a `TextPart`.
+        """
+        if not isinstance(part, TextPart):
+            raise ValueError('Cannot apply TextPartDeltas to non-TextParts')
+        return replace(part, content=part.content + self.content_delta)
+```
+
+```
+@dataclass
+class TextPartDelta:
+    """A partial update (delta) for a `TextPart` to append new text content."""
+
+    content_delta: str
+    """The incremental text content to add to the existing `TextPart` content."""
+
+    part_delta_kind: Literal['text'] = 'text'
+    """Part delta type identifier, used as a discriminator."""
+
+    def apply(self, part: ModelResponsePart) -> TextPart:
+        """Apply this text delta to an existing `TextPart`.
+
+        Args:
+            part: The existing model response part, which must be a `TextPart`.
+
+        Returns:
+            A new `TextPart` with updated text content.
+
+        Raises:
+            ValueError: If `part` is not a `TextPart`.
+        """
+        if not isinstance(part, TextPart):
+            raise ValueError('Cannot apply TextPartDeltas to non-TextParts')
+        return replace(part, content=part.content + self.content_delta)
+```
+
+#### content_delta
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+content_delta: str
+```
+
+```
+content_delta: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The incremental text content to add to the existing TextPart content.
+
+```
+TextPart
+```
+
+#### part_delta_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_delta_kind: Literal['text'] = 'text'
+```
+
+```
+part_delta_kind: Literal['text'] = 'text'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part delta type identifier, used as a discriminator.
+
+#### apply
+
+```
+apply(part: ModelResponsePart) -> TextPart
+```
+
+```
+apply(part: ModelResponsePart) -> TextPart
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+[TextPart](https://ai.pydantic.dev#pydantic_ai.messages.TextPart)
+
+Apply this text delta to an existing TextPart.
+
+```
+TextPart
+```
+
+Parameters:
+
+```
+part
+```
+
+```
+ModelResponsePart
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+The existing model response part, which must be a TextPart.
+
+```
+TextPart
+```
+
+Returns:
+
+```
+TextPart
+```
+
+[TextPart](https://ai.pydantic.dev#pydantic_ai.messages.TextPart)
+
+A new TextPart with updated text content.
+
+```
+TextPart
+```
+
+Raises:
+
+```
+ValueError
+```
+
+[ValueError](https://docs.python.org/3/library/exceptions.html#ValueError)
+
+If part is not a TextPart.
+
+```
+part
+```
+
+```
+TextPart
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+```
+
+```
+def apply(self, part: ModelResponsePart) -> TextPart:
+    """Apply this text delta to an existing `TextPart`.
+
+    Args:
+        part: The existing model response part, which must be a `TextPart`.
+
+    Returns:
+        A new `TextPart` with updated text content.
+
+    Raises:
+        ValueError: If `part` is not a `TextPart`.
+    """
+    if not isinstance(part, TextPart):
+        raise ValueError('Cannot apply TextPartDeltas to non-TextParts')
+    return replace(part, content=part.content + self.content_delta)
+```
+
+```
+def apply(self, part: ModelResponsePart) -> TextPart:
+    """Apply this text delta to an existing `TextPart`.
+
+    Args:
+        part: The existing model response part, which must be a `TextPart`.
+
+    Returns:
+        A new `TextPart` with updated text content.
+
+    Raises:
+        ValueError: If `part` is not a `TextPart`.
+    """
+    if not isinstance(part, TextPart):
+        raise ValueError('Cannot apply TextPartDeltas to non-TextParts')
+    return replace(part, content=part.content + self.content_delta)
+```
+
+### ToolCallPartDelta
+
+dataclass
+
+```
+dataclass
+```
+
+A partial update (delta) for a ToolCallPart to modify tool name, arguments, or tool call ID.
+
+```
+ToolCallPart
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+```
+
+```
+@dataclass
+class ToolCallPartDelta:
+    """A partial update (delta) for a `ToolCallPart` to modify tool name, arguments, or tool call ID."""
+
+    tool_name_delta: str | None = None
+    """Incremental text to add to the existing tool name, if any."""
+
+    args_delta: str | dict[str, Any] | None = None
+    """Incremental data to add to the tool arguments.
+
+    If this is a string, it will be appended to existing JSON arguments.
+    If this is a dict, it will be merged with existing dict arguments.
+    """
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI.
+
+    Note this is never treated as a delta â it can replace None, but otherwise if a
+    non-matching value is provided an error will be raised."""
+
+    part_delta_kind: Literal['tool_call'] = 'tool_call'
+    """Part delta type identifier, used as a discriminator."""
+
+    def as_part(self) -> ToolCallPart | None:
+        """Convert this delta to a fully formed `ToolCallPart` if possible, otherwise return `None`.
+
+        Returns:
+            A `ToolCallPart` if both `tool_name_delta` and `args_delta` are set, otherwise `None`.
+        """
+        if self.tool_name_delta is None or self.args_delta is None:
+            return None
+
+        return ToolCallPart(
+            self.tool_name_delta,
+            self.args_delta,
+            self.tool_call_id,
+        )
+
+    @overload
+    def apply(self, part: ModelResponsePart) -> ToolCallPart: ...
+
+    @overload
+    def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta: ...
+
+    def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+        """Apply this delta to a part or delta, returning a new part or delta with the changes applied.
+
+        Args:
+            part: The existing model response part or delta to update.
+
+        Returns:
+            Either a new `ToolCallPart` or an updated `ToolCallPartDelta`.
+
+        Raises:
+            ValueError: If `part` is neither a `ToolCallPart` nor a `ToolCallPartDelta`.
+            UnexpectedModelBehavior: If applying JSON deltas to dict arguments or vice versa.
+        """
+        if isinstance(part, ToolCallPart):
+            return self._apply_to_part(part)
+
+        if isinstance(part, ToolCallPartDelta):
+            return self._apply_to_delta(part)
+
+        raise ValueError(f'Can only apply ToolCallPartDeltas to ToolCallParts or ToolCallPartDeltas, not {part}')
+
+    def _apply_to_delta(self, delta: ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+        """Internal helper to apply this delta to another delta."""
+        if self.tool_name_delta:
+            # Append incremental text to the existing tool_name_delta
+            updated_tool_name_delta = (delta.tool_name_delta or '') + self.tool_name_delta
+            delta = replace(delta, tool_name_delta=updated_tool_name_delta)
+
+        if isinstance(self.args_delta, str):
+            if isinstance(delta.args_delta, dict):
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply JSON deltas to non-JSON tool arguments ({delta=}, {self=})'
+                )
+            updated_args_delta = (delta.args_delta or '') + self.args_delta
+            delta = replace(delta, args_delta=updated_args_delta)
+        elif isinstance(self.args_delta, dict):
+            if isinstance(delta.args_delta, str):
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply dict deltas to non-dict tool arguments ({delta=}, {self=})'
+                )
+            updated_args_delta = {**(delta.args_delta or {}), **self.args_delta}
+            delta = replace(delta, args_delta=updated_args_delta)
+
+        if self.tool_call_id:
+            # Set the tool_call_id if it wasn't present, otherwise error if it has changed
+            if delta.tool_call_id is not None and delta.tool_call_id != self.tool_call_id:
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply a new tool_call_id to a ToolCallPartDelta that already has one ({delta=}, {self=})'
+                )
+            delta = replace(delta, tool_call_id=self.tool_call_id)
+
+        # If we now have enough data to create a full ToolCallPart, do so
+        if delta.tool_name_delta is not None and delta.args_delta is not None:
+            return ToolCallPart(
+                delta.tool_name_delta,
+                delta.args_delta,
+                delta.tool_call_id,
+            )
+
+        return delta
+
+    def _apply_to_part(self, part: ToolCallPart) -> ToolCallPart:
+        """Internal helper to apply this delta directly to a `ToolCallPart`."""
+        if self.tool_name_delta:
+            # Append incremental text to the existing tool_name
+            tool_name = part.tool_name + self.tool_name_delta
+            part = replace(part, tool_name=tool_name)
+
+        if isinstance(self.args_delta, str):
+            if not isinstance(part.args, str):
+                raise UnexpectedModelBehavior(f'Cannot apply JSON deltas to non-JSON tool arguments ({part=}, {self=})')
+            updated_json = part.args + self.args_delta
+            part = replace(part, args=updated_json)
+        elif isinstance(self.args_delta, dict):
+            if not isinstance(part.args, dict):
+                raise UnexpectedModelBehavior(f'Cannot apply dict deltas to non-dict tool arguments ({part=}, {self=})')
+            updated_dict = {**(part.args or {}), **self.args_delta}
+            part = replace(part, args=updated_dict)
+
+        if self.tool_call_id:
+            # Replace the tool_call_id entirely if given
+            if part.tool_call_id is not None and part.tool_call_id != self.tool_call_id:
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply a new tool_call_id to a ToolCallPartDelta that already has one ({part=}, {self=})'
+                )
+            part = replace(part, tool_call_id=self.tool_call_id)
+        return part
+```
+
+```
+@dataclass
+class ToolCallPartDelta:
+    """A partial update (delta) for a `ToolCallPart` to modify tool name, arguments, or tool call ID."""
+
+    tool_name_delta: str | None = None
+    """Incremental text to add to the existing tool name, if any."""
+
+    args_delta: str | dict[str, Any] | None = None
+    """Incremental data to add to the tool arguments.
+
+    If this is a string, it will be appended to existing JSON arguments.
+    If this is a dict, it will be merged with existing dict arguments.
+    """
+
+    tool_call_id: str | None = None
+    """Optional tool call identifier, this is used by some models including OpenAI.
+
+    Note this is never treated as a delta â it can replace None, but otherwise if a
+    non-matching value is provided an error will be raised."""
+
+    part_delta_kind: Literal['tool_call'] = 'tool_call'
+    """Part delta type identifier, used as a discriminator."""
+
+    def as_part(self) -> ToolCallPart | None:
+        """Convert this delta to a fully formed `ToolCallPart` if possible, otherwise return `None`.
+
+        Returns:
+            A `ToolCallPart` if both `tool_name_delta` and `args_delta` are set, otherwise `None`.
+        """
+        if self.tool_name_delta is None or self.args_delta is None:
+            return None
+
+        return ToolCallPart(
+            self.tool_name_delta,
+            self.args_delta,
+            self.tool_call_id,
+        )
+
+    @overload
+    def apply(self, part: ModelResponsePart) -> ToolCallPart: ...
+
+    @overload
+    def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta: ...
+
+    def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+        """Apply this delta to a part or delta, returning a new part or delta with the changes applied.
+
+        Args:
+            part: The existing model response part or delta to update.
+
+        Returns:
+            Either a new `ToolCallPart` or an updated `ToolCallPartDelta`.
+
+        Raises:
+            ValueError: If `part` is neither a `ToolCallPart` nor a `ToolCallPartDelta`.
+            UnexpectedModelBehavior: If applying JSON deltas to dict arguments or vice versa.
+        """
+        if isinstance(part, ToolCallPart):
+            return self._apply_to_part(part)
+
+        if isinstance(part, ToolCallPartDelta):
+            return self._apply_to_delta(part)
+
+        raise ValueError(f'Can only apply ToolCallPartDeltas to ToolCallParts or ToolCallPartDeltas, not {part}')
+
+    def _apply_to_delta(self, delta: ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+        """Internal helper to apply this delta to another delta."""
+        if self.tool_name_delta:
+            # Append incremental text to the existing tool_name_delta
+            updated_tool_name_delta = (delta.tool_name_delta or '') + self.tool_name_delta
+            delta = replace(delta, tool_name_delta=updated_tool_name_delta)
+
+        if isinstance(self.args_delta, str):
+            if isinstance(delta.args_delta, dict):
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply JSON deltas to non-JSON tool arguments ({delta=}, {self=})'
+                )
+            updated_args_delta = (delta.args_delta or '') + self.args_delta
+            delta = replace(delta, args_delta=updated_args_delta)
+        elif isinstance(self.args_delta, dict):
+            if isinstance(delta.args_delta, str):
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply dict deltas to non-dict tool arguments ({delta=}, {self=})'
+                )
+            updated_args_delta = {**(delta.args_delta or {}), **self.args_delta}
+            delta = replace(delta, args_delta=updated_args_delta)
+
+        if self.tool_call_id:
+            # Set the tool_call_id if it wasn't present, otherwise error if it has changed
+            if delta.tool_call_id is not None and delta.tool_call_id != self.tool_call_id:
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply a new tool_call_id to a ToolCallPartDelta that already has one ({delta=}, {self=})'
+                )
+            delta = replace(delta, tool_call_id=self.tool_call_id)
+
+        # If we now have enough data to create a full ToolCallPart, do so
+        if delta.tool_name_delta is not None and delta.args_delta is not None:
+            return ToolCallPart(
+                delta.tool_name_delta,
+                delta.args_delta,
+                delta.tool_call_id,
+            )
+
+        return delta
+
+    def _apply_to_part(self, part: ToolCallPart) -> ToolCallPart:
+        """Internal helper to apply this delta directly to a `ToolCallPart`."""
+        if self.tool_name_delta:
+            # Append incremental text to the existing tool_name
+            tool_name = part.tool_name + self.tool_name_delta
+            part = replace(part, tool_name=tool_name)
+
+        if isinstance(self.args_delta, str):
+            if not isinstance(part.args, str):
+                raise UnexpectedModelBehavior(f'Cannot apply JSON deltas to non-JSON tool arguments ({part=}, {self=})')
+            updated_json = part.args + self.args_delta
+            part = replace(part, args=updated_json)
+        elif isinstance(self.args_delta, dict):
+            if not isinstance(part.args, dict):
+                raise UnexpectedModelBehavior(f'Cannot apply dict deltas to non-dict tool arguments ({part=}, {self=})')
+            updated_dict = {**(part.args or {}), **self.args_delta}
+            part = replace(part, args=updated_dict)
+
+        if self.tool_call_id:
+            # Replace the tool_call_id entirely if given
+            if part.tool_call_id is not None and part.tool_call_id != self.tool_call_id:
+                raise UnexpectedModelBehavior(
+                    f'Cannot apply a new tool_call_id to a ToolCallPartDelta that already has one ({part=}, {self=})'
+                )
+            part = replace(part, tool_call_id=self.tool_call_id)
+        return part
+```
+
+#### tool_name_delta
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_name_delta: str | None = None
+```
+
+```
+tool_name_delta: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Incremental text to add to the existing tool name, if any.
+
+#### args_delta
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+args_delta: str | dict[str, Any] | None = None
+```
+
+```
+args_delta: str | dict[str, Any] | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[dict](https://docs.python.org/3/library/stdtypes.html#dict)
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[Any](https://docs.python.org/3/library/typing.html#typing.Any)
+
+Incremental data to add to the tool arguments.
+
+If this is a string, it will be appended to existing JSON arguments.
+If this is a dict, it will be merged with existing dict arguments.
+
+#### tool_call_id
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str | None = None
+```
+
+```
+tool_call_id: str | None = None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+Optional tool call identifier, this is used by some models including OpenAI.
+
+Note this is never treated as a delta â it can replace None, but otherwise if a
+non-matching value is provided an error will be raised.
+
+#### part_delta_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+part_delta_kind: Literal['tool_call'] = 'tool_call'
+```
+
+```
+part_delta_kind: Literal['tool_call'] = 'tool_call'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Part delta type identifier, used as a discriminator.
+
+#### as_part
+
+```
+as_part() -> ToolCallPart | None
+```
+
+```
+as_part() -> ToolCallPart | None
+```
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+Convert this delta to a fully formed ToolCallPart if possible, otherwise return None.
+
+```
+ToolCallPart
+```
+
+```
+None
+```
+
+Returns:
+
+```
+ToolCallPart | None
+```
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+A ToolCallPart if both tool_name_delta and args_delta are set, otherwise None.
+
+```
+ToolCallPart
+```
+
+```
+tool_name_delta
+```
+
+```
+args_delta
+```
+
+```
+None
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+```
+
+```
+def as_part(self) -> ToolCallPart | None:
+    """Convert this delta to a fully formed `ToolCallPart` if possible, otherwise return `None`.
+
+    Returns:
+        A `ToolCallPart` if both `tool_name_delta` and `args_delta` are set, otherwise `None`.
+    """
+    if self.tool_name_delta is None or self.args_delta is None:
+        return None
+
+    return ToolCallPart(
+        self.tool_name_delta,
+        self.args_delta,
+        self.tool_call_id,
+    )
+```
+
+```
+def as_part(self) -> ToolCallPart | None:
+    """Convert this delta to a fully formed `ToolCallPart` if possible, otherwise return `None`.
+
+    Returns:
+        A `ToolCallPart` if both `tool_name_delta` and `args_delta` are set, otherwise `None`.
+    """
+    if self.tool_name_delta is None or self.args_delta is None:
+        return None
+
+    return ToolCallPart(
+        self.tool_name_delta,
+        self.args_delta,
+        self.tool_call_id,
+    )
+```
+
+#### apply
+
+```
+apply(part: ModelResponsePart) -> ToolCallPart
+```
+
+```
+apply(part: ModelResponsePart) -> ToolCallPart
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+```
+apply(
+    part: ModelResponsePart | ToolCallPartDelta,
+) -> ToolCallPart | ToolCallPartDelta
+```
+
+```
+apply(
+    part: ModelResponsePart | ToolCallPartDelta,
+) -> ToolCallPart | ToolCallPartDelta
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+```
+apply(
+    part: ModelResponsePart | ToolCallPartDelta,
+) -> ToolCallPart | ToolCallPartDelta
+```
+
+```
+apply(
+    part: ModelResponsePart | ToolCallPartDelta,
+) -> ToolCallPart | ToolCallPartDelta
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+Apply this delta to a part or delta, returning a new part or delta with the changes applied.
+
+Parameters:
+
+```
+part
+```
+
+```
+ModelResponsePart | ToolCallPartDelta
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+The existing model response part or delta to update.
+
+Returns:
+
+```
+ToolCallPart | ToolCallPartDelta
+```
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+Either a new ToolCallPart or an updated ToolCallPartDelta.
+
+```
+ToolCallPart
+```
+
+```
+ToolCallPartDelta
+```
+
+Raises:
+
+```
+ValueError
+```
+
+[ValueError](https://docs.python.org/3/library/exceptions.html#ValueError)
+
+If part is neither a ToolCallPart nor a ToolCallPartDelta.
+
+```
+part
+```
+
+```
+ToolCallPart
+```
+
+```
+ToolCallPartDelta
+```
+
+```
+UnexpectedModelBehavior
+```
+
+[UnexpectedModelBehavior](https://ai.pydantic.dev/exceptions/#pydantic_ai.exceptions.UnexpectedModelBehavior)
+
+If applying JSON deltas to dict arguments or vice versa.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+```
+
+```
+def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+    """Apply this delta to a part or delta, returning a new part or delta with the changes applied.
+
+    Args:
+        part: The existing model response part or delta to update.
+
+    Returns:
+        Either a new `ToolCallPart` or an updated `ToolCallPartDelta`.
+
+    Raises:
+        ValueError: If `part` is neither a `ToolCallPart` nor a `ToolCallPartDelta`.
+        UnexpectedModelBehavior: If applying JSON deltas to dict arguments or vice versa.
+    """
+    if isinstance(part, ToolCallPart):
+        return self._apply_to_part(part)
+
+    if isinstance(part, ToolCallPartDelta):
+        return self._apply_to_delta(part)
+
+    raise ValueError(f'Can only apply ToolCallPartDeltas to ToolCallParts or ToolCallPartDeltas, not {part}')
+```
+
+```
+def apply(self, part: ModelResponsePart | ToolCallPartDelta) -> ToolCallPart | ToolCallPartDelta:
+    """Apply this delta to a part or delta, returning a new part or delta with the changes applied.
+
+    Args:
+        part: The existing model response part or delta to update.
+
+    Returns:
+        Either a new `ToolCallPart` or an updated `ToolCallPartDelta`.
+
+    Raises:
+        ValueError: If `part` is neither a `ToolCallPart` nor a `ToolCallPartDelta`.
+        UnexpectedModelBehavior: If applying JSON deltas to dict arguments or vice versa.
+    """
+    if isinstance(part, ToolCallPart):
+        return self._apply_to_part(part)
+
+    if isinstance(part, ToolCallPartDelta):
+        return self._apply_to_delta(part)
+
+    raise ValueError(f'Can only apply ToolCallPartDeltas to ToolCallParts or ToolCallPartDeltas, not {part}')
+```
+
+### ModelResponsePartDelta
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelResponsePartDelta = Annotated[
+    Union[TextPartDelta, ToolCallPartDelta],
+    Discriminator("part_delta_kind"),
+]
+```
+
+```
+ModelResponsePartDelta = Annotated[
+    Union[TextPartDelta, ToolCallPartDelta],
+    Discriminator("part_delta_kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[TextPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.TextPartDelta)
+
+[ToolCallPartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPartDelta)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+A partial update (delta) for any model response part.
+
+### PartStartEvent
+
+dataclass
+
+```
+dataclass
+```
+
+An event indicating that a new part has started.
+
+If multiple PartStartEvents are received with the same index,
+the new one should fully replace the old one.
+
+```
+PartStartEvent
+```
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+```
+
+```
+@dataclass
+class PartStartEvent:
+    """An event indicating that a new part has started.
+
+    If multiple `PartStartEvent`s are received with the same index,
+    the new one should fully replace the old one.
+    """
+
+    index: int
+    """The index of the part within the overall response parts list."""
+
+    part: ModelResponsePart
+    """The newly started `ModelResponsePart`."""
+
+    event_kind: Literal['part_start'] = 'part_start'
+    """Event type identifier, used as a discriminator."""
+```
+
+```
+@dataclass
+class PartStartEvent:
+    """An event indicating that a new part has started.
+
+    If multiple `PartStartEvent`s are received with the same index,
+    the new one should fully replace the old one.
+    """
+
+    index: int
+    """The index of the part within the overall response parts list."""
+
+    part: ModelResponsePart
+    """The newly started `ModelResponsePart`."""
+
+    event_kind: Literal['part_start'] = 'part_start'
+    """Event type identifier, used as a discriminator."""
+```
+
+#### index
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+index: int
+```
+
+```
+index: int
+```
+
+[int](https://docs.python.org/3/library/functions.html#int)
+
+The index of the part within the overall response parts list.
+
+#### part
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+part: ModelResponsePart
+```
+
+```
+part: ModelResponsePart
+```
+
+[ModelResponsePart](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePart)
+
+The newly started ModelResponsePart.
+
+```
+ModelResponsePart
+```
+
+#### event_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+event_kind: Literal['part_start'] = 'part_start'
+```
+
+```
+event_kind: Literal['part_start'] = 'part_start'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Event type identifier, used as a discriminator.
+
+### PartDeltaEvent
+
+dataclass
+
+```
+dataclass
+```
+
+An event indicating a delta update for an existing part.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+```
+
+```
+@dataclass
+class PartDeltaEvent:
+    """An event indicating a delta update for an existing part."""
+
+    index: int
+    """The index of the part within the overall response parts list."""
+
+    delta: ModelResponsePartDelta
+    """The delta to apply to the specified part."""
+
+    event_kind: Literal['part_delta'] = 'part_delta'
+    """Event type identifier, used as a discriminator."""
+```
+
+```
+@dataclass
+class PartDeltaEvent:
+    """An event indicating a delta update for an existing part."""
+
+    index: int
+    """The index of the part within the overall response parts list."""
+
+    delta: ModelResponsePartDelta
+    """The delta to apply to the specified part."""
+
+    event_kind: Literal['part_delta'] = 'part_delta'
+    """Event type identifier, used as a discriminator."""
+```
+
+#### index
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+index: int
+```
+
+```
+index: int
+```
+
+[int](https://docs.python.org/3/library/functions.html#int)
+
+The index of the part within the overall response parts list.
+
+#### delta
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+delta: ModelResponsePartDelta
+```
+
+```
+delta: ModelResponsePartDelta
+```
+
+[ModelResponsePartDelta](https://ai.pydantic.dev#pydantic_ai.messages.ModelResponsePartDelta)
+
+The delta to apply to the specified part.
+
+#### event_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+event_kind: Literal['part_delta'] = 'part_delta'
+```
+
+```
+event_kind: Literal['part_delta'] = 'part_delta'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Event type identifier, used as a discriminator.
+
+### FinalResultEvent
+
+dataclass
+
+```
+dataclass
+```
+
+An event indicating the response to the current model request matches the result schema.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+598
+599
+600
+601
+602
+603
+604
+605
+606
+607
+```
+
+```
+@dataclass
+class FinalResultEvent:
+    """An event indicating the response to the current model request matches the result schema."""
+
+    tool_name: str | None
+    """The name of the result tool that was called. `None` if the result is from text content and not from a tool."""
+    tool_call_id: str | None
+    """The tool call ID, if any, that this result is associated with."""
+    event_kind: Literal['final_result'] = 'final_result'
+    """Event type identifier, used as a discriminator."""
+```
+
+```
+@dataclass
+class FinalResultEvent:
+    """An event indicating the response to the current model request matches the result schema."""
+
+    tool_name: str | None
+    """The name of the result tool that was called. `None` if the result is from text content and not from a tool."""
+    tool_call_id: str | None
+    """The tool call ID, if any, that this result is associated with."""
+    event_kind: Literal['final_result'] = 'final_result'
+    """Event type identifier, used as a discriminator."""
+```
+
+#### tool_name
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+tool_name: str | None
+```
+
+```
+tool_name: str | None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The name of the result tool that was called. None if the result is from text content and not from a tool.
+
+```
+None
+```
+
+#### tool_call_id
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str | None
+```
+
+```
+tool_call_id: str | None
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+The tool call ID, if any, that this result is associated with.
+
+#### event_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+event_kind: Literal['final_result'] = 'final_result'
+```
+
+```
+event_kind: Literal['final_result'] = 'final_result'
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Event type identifier, used as a discriminator.
+
+### ModelResponseStreamEvent
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+ModelResponseStreamEvent = Annotated[
+    Union[PartStartEvent, PartDeltaEvent],
+    Discriminator("event_kind"),
+]
+```
+
+```
+ModelResponseStreamEvent = Annotated[
+    Union[PartStartEvent, PartDeltaEvent],
+    Discriminator("event_kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[PartStartEvent](https://ai.pydantic.dev#pydantic_ai.messages.PartStartEvent)
+
+[PartDeltaEvent](https://ai.pydantic.dev#pydantic_ai.messages.PartDeltaEvent)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+An event in the model response stream, either starting a new part or applying a delta to an existing one.
+
+### AgentStreamEvent
+
+module-attribute
+
+```
+module-attribute
+```
+
+```
+AgentStreamEvent = Annotated[
+    Union[PartStartEvent, PartDeltaEvent, FinalResultEvent],
+    Discriminator("event_kind"),
+]
+```
+
+```
+AgentStreamEvent = Annotated[
+    Union[PartStartEvent, PartDeltaEvent, FinalResultEvent],
+    Discriminator("event_kind"),
+]
+```
+
+[Annotated](https://docs.python.org/3/library/typing.html#typing.Annotated)
+
+[Union](https://docs.python.org/3/library/typing.html#typing.Union)
+
+[PartStartEvent](https://ai.pydantic.dev#pydantic_ai.messages.PartStartEvent)
+
+[PartDeltaEvent](https://ai.pydantic.dev#pydantic_ai.messages.PartDeltaEvent)
+
+[FinalResultEvent](https://ai.pydantic.dev#pydantic_ai.messages.FinalResultEvent)
+
+[Discriminator](https://docs.pydantic.dev/latest/api/types/#pydantic.types.Discriminator)
+
+An event in the agent stream.
+
+### FunctionToolCallEvent
+
+dataclass
+
+```
+dataclass
+```
+
+An event indicating the start to a call to a function tool.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+```
+
+```
+@dataclass
+class FunctionToolCallEvent:
+    """An event indicating the start to a call to a function tool."""
+
+    part: ToolCallPart
+    """The (function) tool call to make."""
+    call_id: str = field(init=False)
+    """An ID used for matching details about the call to its result. If present, defaults to the part's tool_call_id."""
+    event_kind: Literal['function_tool_call'] = 'function_tool_call'
+    """Event type identifier, used as a discriminator."""
+
+    def __post_init__(self):
+        self.call_id = self.part.tool_call_id or str(uuid.uuid4())
+```
+
+```
+@dataclass
+class FunctionToolCallEvent:
+    """An event indicating the start to a call to a function tool."""
+
+    part: ToolCallPart
+    """The (function) tool call to make."""
+    call_id: str = field(init=False)
+    """An ID used for matching details about the call to its result. If present, defaults to the part's tool_call_id."""
+    event_kind: Literal['function_tool_call'] = 'function_tool_call'
+    """Event type identifier, used as a discriminator."""
+
+    def __post_init__(self):
+        self.call_id = self.part.tool_call_id or str(uuid.uuid4())
+```
+
+#### part
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+part: ToolCallPart
+```
+
+```
+part: ToolCallPart
+```
+
+[ToolCallPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolCallPart)
+
+The (function) tool call to make.
+
+#### call_id
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+call_id: str = field(init=False)
+```
+
+```
+call_id: str = field(init=False)
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+[field](https://docs.python.org/3/library/dataclasses.html#dataclasses.field)
+
+An ID used for matching details about the call to its result. If present, defaults to the part's tool_call_id.
+
+#### event_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+event_kind: Literal["function_tool_call"] = (
+    "function_tool_call"
+)
+```
+
+```
+event_kind: Literal["function_tool_call"] = (
+    "function_tool_call"
+)
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Event type identifier, used as a discriminator.
+
+### FunctionToolResultEvent
+
+dataclass
+
+```
+dataclass
+```
+
+An event indicating the result of a function tool call.
+
+```
+pydantic_ai_slim/pydantic_ai/messages.py
+```
+
+```
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+```
+
+```
+@dataclass
+class FunctionToolResultEvent:
+    """An event indicating the result of a function tool call."""
+
+    result: ToolReturnPart | RetryPromptPart
+    """The result of the call to the function tool."""
+    tool_call_id: str
+    """An ID used to match the result to its original call."""
+    event_kind: Literal['function_tool_result'] = 'function_tool_result'
+    """Event type identifier, used as a discriminator."""
+```
+
+```
+@dataclass
+class FunctionToolResultEvent:
+    """An event indicating the result of a function tool call."""
+
+    result: ToolReturnPart | RetryPromptPart
+    """The result of the call to the function tool."""
+    tool_call_id: str
+    """An ID used to match the result to its original call."""
+    event_kind: Literal['function_tool_result'] = 'function_tool_result'
+    """Event type identifier, used as a discriminator."""
+```
+
+#### result
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+result: ToolReturnPart | RetryPromptPart
+```
+
+```
+result: ToolReturnPart | RetryPromptPart
+```
+
+[ToolReturnPart](https://ai.pydantic.dev#pydantic_ai.messages.ToolReturnPart)
+
+[RetryPromptPart](https://ai.pydantic.dev#pydantic_ai.messages.RetryPromptPart)
+
+The result of the call to the function tool.
+
+#### tool_call_id
+
+instance-attribute
+
+```
+instance-attribute
+```
+
+```
+tool_call_id: str
+```
+
+```
+tool_call_id: str
+```
+
+[str](https://docs.python.org/3/library/stdtypes.html#str)
+
+An ID used to match the result to its original call.
+
+#### event_kind
+
+class-attribute
+instance-attribute
+
+```
+class-attribute
+```
+
+```
+instance-attribute
+```
+
+```
+event_kind: Literal["function_tool_result"] = (
+    "function_tool_result"
+)
+```
+
+```
+event_kind: Literal["function_tool_result"] = (
+    "function_tool_result"
+)
+```
+
+[Literal](https://docs.python.org/3/library/typing.html#typing.Literal)
+
+Event type identifier, used as a discriminator.
+
