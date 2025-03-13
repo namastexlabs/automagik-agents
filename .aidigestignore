@@ -173,6 +173,14 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+*.egg-info/
+
+logs/
+
+codebase.md 
+
+docs/examples/*
+docs/pydantic-ai/*
 
 temp_*/
 
