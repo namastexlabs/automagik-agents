@@ -26,26 +26,53 @@ class AgentFactory:
     def discover_agents(cls) -> None:
         """Discover all available agents in the agents directory."""
         agents_dir = Path(__file__).parent.parent
+        logger.info(f"Scanning for agents in directory: {agents_dir}")
 
         # Clear existing agents
         cls._agents.clear()
         cls._initialized_agents.clear()
         cls._agent_db_ids.clear()
 
-        # Track directories containing agents
+        # List of agent directories to scan (will include subdirectories of type directories)
+        agent_dirs_to_scan = []
+        
+        # First, identify type directories and direct agent directories
         type_dirs = []
         for item in agents_dir.iterdir():
             if item.is_dir() and item.name not in ["models", "__pycache__"]:
+                logger.info(f"Found potential agent directory: {item}")
                 if (item / "__init__.py").exists():
-                    cls._try_load_agent_from_dir(item)
-                else:
+                    logger.info(f"Detected directory with __init__.py: {item}")
+                    # For top-level directories with __init__.py, try to load directly
+                    if cls._try_load_agent_from_dir(item, item.name):
+                        logger.info(f"Successfully loaded agent from {item}")
+                    
+                    # Always check if it's also a type directory (like 'simple')
                     type_dirs.append(item)
-
+                else:
+                    # It's a type directory without an __init__.py
+                    type_dirs.append(item)
+                    logger.info(f"Added {item} to type directories list")
+        
+        # Then, scan all type directories for agents
         for type_dir in type_dirs:
             agent_type = type_dir.name
+            logger.info(f"Scanning type directory: {type_dir} (agent_type: {agent_type})")
+            
             for agent_dir in type_dir.iterdir():
                 if agent_dir.is_dir() and agent_dir.name not in ["__pycache__"]:
-                    cls._try_load_agent_from_dir(agent_dir, agent_type)
+                    if (agent_dir / "__init__.py").exists():
+                        logger.info(f"Found agent directory: {agent_dir}")
+                        if cls._try_load_agent_from_dir(agent_dir, agent_type):
+                            logger.info(f"Successfully loaded agent from {agent_dir} as type {agent_type}")
+                    else:
+                        logger.info(f"Skipping directory without __init__.py: {agent_dir}")
+        
+        # Report discovered agents
+        if cls._agents:
+            logger.info(f"Discovered {len(cls._agents)} agents: {', '.join(cls._agents.keys())}")
+        else:
+            logger.warning("No agents discovered!")
 
     @classmethod
     def _try_load_agent_from_dir(cls, agent_dir: Path, agent_type: str = None) -> bool:
@@ -59,9 +86,18 @@ class AgentFactory:
             bool: True if agent was successfully loaded, False otherwise
         """
         try:
-            # Generate relative module path
-            rel_path = agent_dir.relative_to(Path(__file__).parent.parent.parent)
-            module_path = f"src.{rel_path.as_posix().replace('/', '.')}"
+            # Generate module path directly from directory structure
+            # Instead of using relative_to which can cause issues with absolute paths
+            agent_dir_str = str(agent_dir)
+            src_index = agent_dir_str.find("src/agents")
+            if src_index == -1:
+                logger.error(f"Failed to find src/agents in path: {agent_dir_str}")
+                return False
+            
+            # Extract path relative to the src directory
+            rel_path = agent_dir_str[src_index:]
+            module_path = rel_path.replace("/", ".")
+            logger.info(f"Attempting to load agent from module path: {module_path}")
 
             # Try to import the agent module
             module = importlib.import_module(module_path)

@@ -59,7 +59,8 @@ TEST_USER_DATA = {"test": True, "timestamp": int(time.time())}
 
 RESOURCES_TO_CLEANUP = {
     "sessions": [],
-    "users": []
+    "users": [],
+    "memories": []
 }
 
 # Test results tracking
@@ -156,6 +157,8 @@ def make_request(method, url, expected_status=200, **kwargs):
         # For debugging in verbose mode
         if VERBOSE:
             log(f"Request headers: {kwargs.get('headers', {})}")
+            if 'json' in kwargs:
+                log(f"Request payload: {json.dumps(kwargs['json'], indent=2)}")
             
         response = requests.request(method, url, **kwargs)
         
@@ -165,7 +168,18 @@ def make_request(method, url, expected_status=200, **kwargs):
         if response.status_code != expected_status:
             # Always log errors
             error_msg = f"Expected status {expected_status}, got {response.status_code}"
-            log(f"Response: {response.text[:500]}", level="ERROR", always=True)
+            
+            # Try to parse error details from response
+            try:
+                error_data = response.json()
+                if isinstance(error_data, dict) and 'detail' in error_data:
+                    error_detail = error_data['detail']
+                    error_msg += f"\nError detail: \"{error_detail}\""
+            except:
+                # Fallback to raw text if can't parse JSON
+                error_msg += f"\nResponse: {response.text[:500]}"
+            
+            log(error_msg, level="ERROR", always=True)
             raise AssertionError(error_msg)
         
         # Parse JSON response if possible
@@ -174,7 +188,9 @@ def make_request(method, url, expected_status=200, **kwargs):
         except:
             return {"raw_text": response.text, "content_type": response.headers.get("content-type")}
     except requests.RequestException as e:
-        raise AssertionError(f"Request failed: {str(e)}")
+        error_msg = f"Request failed: {str(e)}"
+        log(error_msg, level="ERROR", always=True)
+        raise AssertionError(error_msg)
 
 # ==========================================
 # System Endpoint Tests
@@ -223,7 +239,7 @@ def test_redoc_docs():
 
 def test_create_user():
     """Test creating a new user"""
-    global TEST_USER_ID
+    global TEST_USER_ID, TEST_USER_EMAIL, TEST_USER_PHONE
     
     # Create payload with required fields
     payload = {
@@ -234,21 +250,55 @@ def test_create_user():
     
     log(f"Creating user with email: {TEST_USER_EMAIL}")
     
-    data = make_request(
-        "post",
-        f"{BASE_URL}/api/v1/users",
-        headers=HEADERS,
-        json=payload
-    )
-    
-    assert "id" in data, "No user ID in response"
-    assert data["email"] == TEST_USER_EMAIL, f"Email mismatch: {data.get('email')} != {TEST_USER_EMAIL}"
-    
-    # Store user ID for other tests
-    TEST_USER_ID = data["id"]
-    RESOURCES_TO_CLEANUP["users"].append(TEST_USER_ID)
-    
-    return data
+    try:
+        data = make_request(
+            "post",
+            f"{BASE_URL}/api/v1/users",
+            headers=HEADERS,
+            json=payload
+        )
+        
+        assert "id" in data, "No user ID in response"
+        assert data["email"] == TEST_USER_EMAIL, f"Email mismatch: {data.get('email')} != {TEST_USER_EMAIL}"
+        
+        # Store user ID for other tests
+        TEST_USER_ID = data["id"]
+        RESOURCES_TO_CLEANUP["users"].append(TEST_USER_ID)
+        
+        return data
+    except AssertionError as e:
+        # If we get a duplicate key error, try with a different email/phone
+        if "duplicate key value" in str(e):
+            # Update the email and phone with a new timestamp
+            TEST_USER_EMAIL = f"test-user-{int(time.time())}@example.com"
+            TEST_USER_PHONE = f"+1555{int(time.time())%1000000:06d}"
+            
+            # Try again with new values
+            payload = {
+                "email": TEST_USER_EMAIL,
+                "phone_number": TEST_USER_PHONE,
+                "user_data": TEST_USER_DATA
+            }
+            
+            log(f"Retrying with new email: {TEST_USER_EMAIL}")
+            
+            data = make_request(
+                "post",
+                f"{BASE_URL}/api/v1/users",
+                headers=HEADERS,
+                json=payload
+            )
+            
+            assert "id" in data, "No user ID in response"
+            assert data["email"] == TEST_USER_EMAIL, f"Email mismatch: {data.get('email')} != {TEST_USER_EMAIL}"
+            
+            # Store user ID for other tests
+            TEST_USER_ID = data["id"]
+            RESOURCES_TO_CLEANUP["users"].append(TEST_USER_ID)
+            
+            return data
+        else:
+            raise
 
 def test_get_user_by_id():
     """Test getting user by ID"""
@@ -269,6 +319,10 @@ def test_get_user_by_id():
 
 def test_get_user_by_email():
     """Test getting user by email"""
+    if not TEST_USER_EMAIL or not TEST_USER_ID:
+        TEST_RESULTS["skipped"] += 1
+        return {"skipped": "No test user available"}
+    
     data = make_request(
         "get",
         f"{BASE_URL}/api/v1/users/{TEST_USER_EMAIL}",
@@ -281,6 +335,10 @@ def test_get_user_by_email():
 
 def test_get_user_by_phone():
     """Test getting user by phone number"""
+    if not TEST_USER_PHONE or not TEST_USER_ID:
+        TEST_RESULTS["skipped"] += 1
+        return {"skipped": "No test user available"}
+    
     data = make_request(
         "get",
         f"{BASE_URL}/api/v1/users/{TEST_USER_PHONE}",
@@ -555,7 +613,6 @@ def test_create_memory():
     assert data["content"] == memory_data["content"], "Memory content doesn't match"
     
     # Store memory ID for later tests
-    RESOURCES_TO_CLEANUP["memories"] = RESOURCES_TO_CLEANUP.get("memories", [])
     RESOURCES_TO_CLEANUP["memories"].append(data["id"])
     
     return data
@@ -563,7 +620,7 @@ def test_create_memory():
 def test_get_memory_by_id():
     """Test getting a memory by ID"""
     # Create a memory first if none exists
-    if not RESOURCES_TO_CLEANUP.get("memories"):
+    if not RESOURCES_TO_CLEANUP["memories"]:
         memory_data = test_create_memory()
         memory_id = memory_data["id"]
     else:
@@ -581,7 +638,7 @@ def test_get_memory_by_id():
 def test_update_memory():
     """Test updating a memory"""
     # Create a memory first if none exists
-    if not RESOURCES_TO_CLEANUP.get("memories"):
+    if not RESOURCES_TO_CLEANUP["memories"]:
         memory_data = test_create_memory()
         memory_id = memory_data["id"]
     else:
@@ -608,7 +665,7 @@ def test_update_memory():
 def test_list_memories():
     """Test listing memories"""
     # Create a memory first if none exists
-    if not RESOURCES_TO_CLEANUP.get("memories"):
+    if not RESOURCES_TO_CLEANUP["memories"]:
         test_create_memory()
     
     # List all memories
@@ -629,7 +686,7 @@ def test_list_memories():
 def test_delete_memory():
     """Test deleting a memory"""
     # Create a memory first if none exists
-    if not RESOURCES_TO_CLEANUP.get("memories"):
+    if not RESOURCES_TO_CLEANUP["memories"]:
         memory_data = test_create_memory()
         memory_id = memory_data["id"]
     else:
@@ -727,15 +784,28 @@ def cleanup_resources():
     """Clean up all test resources created during testing"""
     log("Cleaning up test resources", always=True)
     
+    # Keep track of successful cleanups
+    cleanup_success = {
+        "memories": 0,
+        "sessions": 0,
+        "users": 0
+    }
+    
     # Clean up memories
     if "memories" in RESOURCES_TO_CLEANUP:
         for memory_id in RESOURCES_TO_CLEANUP["memories"]:
             try:
                 log(f"Deleting memory: {memory_id}")
-                requests.delete(
+                response = requests.delete(
                     f"{BASE_URL}/api/v1/memories/{memory_id}",
-                    headers=HEADERS
+                    headers=HEADERS,
+                    timeout=5  # Add timeout to prevent hanging
                 )
+                
+                if response.status_code in [200, 204]:
+                    cleanup_success["memories"] += 1
+                else:
+                    log(f"Failed to delete memory {memory_id}: Status {response.status_code}", level="WARNING")
             except Exception as e:
                 log(f"Error deleting memory {memory_id}: {str(e)}", level="ERROR")
     
@@ -743,10 +813,16 @@ def cleanup_resources():
     for session_id in RESOURCES_TO_CLEANUP["sessions"]:
         try:
             log(f"Deleting session: {session_id}")
-            requests.delete(
+            response = requests.delete(
                 f"{BASE_URL}/api/v1/sessions/{session_id}",
-                headers=HEADERS
+                headers=HEADERS,
+                timeout=5  # Add timeout to prevent hanging
             )
+            
+            if response.status_code in [200, 204]:
+                cleanup_success["sessions"] += 1
+            else:
+                log(f"Failed to delete session {session_id}: Status {response.status_code}", level="WARNING")
         except Exception as e:
             log(f"Error deleting session {session_id}: {str(e)}", level="ERROR")
     
@@ -754,16 +830,29 @@ def cleanup_resources():
     for user_id in RESOURCES_TO_CLEANUP["users"]:
         # Skip system user
         if user_id == 1:
+            log(f"Skipping deletion of system user (ID: 1)", level="INFO")
             continue
             
         try:
             log(f"Deleting user: {user_id}")
-            requests.delete(
+            response = requests.delete(
                 f"{BASE_URL}/api/v1/users/{user_id}",
-                headers=HEADERS
+                headers=HEADERS,
+                timeout=5  # Add timeout to prevent hanging
             )
+            
+            if response.status_code in [200, 204]:
+                cleanup_success["users"] += 1
+            else:
+                log(f"Failed to delete user {user_id}: Status {response.status_code}", level="WARNING")
         except Exception as e:
             log(f"Error deleting user {user_id}: {str(e)}", level="ERROR")
+    
+    # Log cleanup summary
+    log(f"Cleanup summary - Users: {cleanup_success['users']}/{len(RESOURCES_TO_CLEANUP['users'])}, " +
+        f"Sessions: {cleanup_success['sessions']}/{len(RESOURCES_TO_CLEANUP['sessions'])}, " +
+        f"Memories: {cleanup_success.get('memories', 0)}/{len(RESOURCES_TO_CLEANUP.get('memories', []))}", 
+        always=True)
 
 def print_summary():
     """Print a summary of test results"""
@@ -841,29 +930,51 @@ def main():
         test_delete_user
     ]
     
+    exit_code = 0
+    
     try:
         # Run all tests
         for test_func in all_tests:
-            run_test(test_func)
-            
+            try:
+                run_test(test_func)
+            except KeyboardInterrupt:
+                log("Test run interrupted by user!", level="WARNING", always=True)
+                break
+            except Exception as e:
+                log(f"Unexpected error running test {test_func.__name__}: {str(e)}", level="ERROR", always=True)
+                
         # Overall status message
         if TEST_RESULTS["failed"] == 0:
             log("All tests passed successfully!", level="INFO", always=True)
         else:
             log(f"{TEST_RESULTS['failed']} tests failed!", level="ERROR", always=True)
+            exit_code = 1
+    except KeyboardInterrupt:
+        log("Test suite interrupted by user! Cleaning up...", level="WARNING", always=True)
+        exit_code = 130  # Standard exit code for SIGINT
+    except Exception as e:
+        log(f"Unexpected error in test suite: {str(e)}", level="ERROR", always=True)
+        exit_code = 2
     finally:
         # Always clean up resources if auto cleanup is enabled
         if AUTO_CLEANUP:
-            cleanup_resources()
+            try:
+                cleanup_resources()
+            except Exception as e:
+                log(f"Error during cleanup: {str(e)}", level="ERROR", always=True)
         
         # Print summary
-        print_summary()
-    
-    # Return success/failure code for use by external callers
-    return 0 if TEST_RESULTS["failed"] == 0 else 1
+        try:
+            print_summary()
+        except Exception as e:
+            log(f"Error printing summary: {str(e)}", level="ERROR", always=True)
+        
+        # Return proper exit code for CI/CD
+        return exit_code
 
 # Make sure the main function is defined at the module level
 __all__ = ['main']
 
 if __name__ == "__main__":
+    # Call main and use its return value as exit code
     sys.exit(main()) 
