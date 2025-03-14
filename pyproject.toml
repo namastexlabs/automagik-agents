@@ -41,6 +41,7 @@ dependencies = [
     "pytest-json-report>=1.5.0",
     "pytest-xdist>=3.6.1",
     "requests>=2.32.3",
+    "ruff>=0.10.0",
 ]
 
 [project.urls]
@@ -59,3 +60,11 @@ version = {attr = "src.version.__version__"}
 
 [tool.logfire]
 ignore_no_config = true
+
+[tool.codeflash]
+# All paths are relative to this pyproject.toml's directory.
+module-root = "src"
+tests-root = "tests"
+test-framework = "pytest"
+ignore-paths = []
+formatter-cmds = ["ruff check --exit-zero --fix $file", "ruff format $file"]
