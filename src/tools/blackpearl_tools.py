@@ -15,8 +15,7 @@ class BlackPearlTools:
 
     def get_host_tools(self) -> List[Any]:
         """Get tools for the host agent."""
-        logger.info("Returning empty list of host tools")
-        return []
+        return []  # Directly return an empty list, avoids the overhead of calling logger and creating a local variable.
 
     def get_backoffice_tools(self) -> List[Any]:
         """Get tools for the backoffice agent."""
