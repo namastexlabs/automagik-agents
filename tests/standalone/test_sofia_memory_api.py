@@ -60,19 +60,31 @@ def create_session(agent_name="sofia_agent", session_name=None):
     """
     if not session_name:
         session_name = f"memory_test_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-    url = f"{API_BASE_URL}/api/v1/sessions"
+    
+    # Instead of directly creating a session, we'll run the agent with a simple message
+    # which will create a session as a side effect
+    url = f"{API_BASE_URL}/api/v1/agent/{agent_name}/run"
     payload = {
-        "agent_name": agent_name,
-        "name": session_name
+        "message_content": "Hello, this is a test message to create a session.",
+        "user_id": 1,  # Default user ID
+        "context": {
+            "debug": True
+        },
+        "session_origin": "cli",
+        "session_name": session_name
     }
     
     try:
+        logger.info(f"Creating session '{session_name}' via agent run endpoint")
         response = requests.post(url, headers=HEADERS, json=payload)
         response.raise_for_status()
         
-        session_data = response.json()
-        session_id = session_data.get("id")
+        result = response.json()
+        session_id = result.get("session_id")
+        
+        if not session_id:
+            logger.error("No session ID found in response")
+            return None
         
         logger.info(f"Created session '{session_name}' with ID: {session_id}")
         return session_id
@@ -104,6 +116,7 @@ def run_agent(agent_name, session_id, message):
             "session_origin": "cli"
         }
     else:
+        # If we have a session_id, use it to continue the session
         payload = {
             "message_content": message,
             "user_id": 1,  # Default user ID
@@ -111,7 +124,7 @@ def run_agent(agent_name, session_id, message):
                 "debug": True
             },
             "session_origin": "cli",
-            "session_name": session_id if isinstance(session_id, str) and not session_id.startswith("test-") else "test-sofia-memory"
+            "session_id": session_id  # Use the session_id directly
         }
     
     try:

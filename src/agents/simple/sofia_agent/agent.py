@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 class SofiaAgent(BaseAgent):
     """Simple agent implementation for basic chat functionality with memory tools."""
     
+    # Property to indicate this agent should be recreated on each request
+    needs_refresh = True
+    
     def __init__(self, config: Dict[str, str]):
         """Initialize the simple agent with configuration."""
         self.agent_id = config.get("agent_id", "sofia_agent")

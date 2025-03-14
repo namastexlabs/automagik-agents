@@ -61,6 +61,10 @@ def setup_args():
         "--url",
         help="Base URL for API (overrides .env)")
     
+    parser.add_argument(
+        "--initialize", "-i", action="store_true",
+        help="Initialize agents before running tests")
+    
     return parser.parse_args()
 
 
@@ -75,6 +79,19 @@ def ensure_output_dir(output_path):
 def run_pytest_tests(args):
     """Run API tests using pytest."""
     print("\n\033[1m==== Running API Tests (pytest) ====\033[0m\n")
+    
+    # First, check if we need to initialize agents
+    if args.initialize:
+        print("Initializing agents before running tests...")
+        try:
+            init_cmd = ["python", "-c", "from src.main import initialize_all_agents; initialize_all_agents()"]
+            result = subprocess.run(init_cmd, check=False)
+            if result.returncode != 0:
+                print("\033[33mWARNING: Agent initialization failed, tests may not work correctly\033[0m")
+            else:
+                print("\033[32mAgents initialized successfully\033[0m")
+        except Exception as e:
+            print(f"\033[33mWARNING: Error during agent initialization: {e}\033[0m")
     
     cmd = ["pytest", "tests/pytest/test_api_endpoints.py"]
     
@@ -101,6 +118,19 @@ def run_pytest_tests(args):
 def run_standalone_tests(args):
     """Run API tests using the standalone script."""
     print("\n\033[1m==== Running API Tests (standalone) ====\033[0m\n")
+    
+    # First, check if we need to initialize agents
+    if args.initialize:
+        print("Initializing agents before running tests...")
+        try:
+            init_cmd = ["python", "-c", "from src.main import initialize_all_agents; initialize_all_agents()"]
+            result = subprocess.run(init_cmd, check=False)
+            if result.returncode != 0:
+                print("\033[33mWARNING: Agent initialization failed, tests may not work correctly\033[0m")
+            else:
+                print("\033[32mAgents initialized successfully\033[0m")
+        except Exception as e:
+            print(f"\033[33mWARNING: Error during agent initialization: {e}\033[0m")
     
     cmd = ["python", "tests/standalone/api_test_script.py"]
     
