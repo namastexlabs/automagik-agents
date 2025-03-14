@@ -41,17 +41,16 @@ def run_callback(
 
 def get_api_endpoint(path: str) -> str:
     """Build a consistent API endpoint URL with the correct prefix."""
-    # Use slicing and string concatenation for more efficient operations
-    if path.startswith("/"):
+    # Combine conditions and use single slicing operation to reduce the number of checks
+    if path.startswith("/api/v1/"):
         path = path[1:]
+    elif path.startswith("/"):
+        path = "api/v1/" + path[1:]
+    elif not path.startswith("api/v1/"):
+        path = "api/v1/" + path
 
-    # Combine conditions to reduce the number of checks
-    path = f"api/v1/{path}" if not path.startswith("api/v1/") else path
-
-    # Efficiently build the server URL
-    server = f"http://{settings.AM_HOST}:{settings.AM_PORT}/"
-
-    return f"{server}{path}"
+    # Efficiently build the server URL and return the final endpoint
+    return f"http://{settings.AM_HOST}:{settings.AM_PORT}/{path}"
 
 
 def get_available_agents() -> List[Dict[str, Any]]:
