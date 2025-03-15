@@ -26,7 +26,8 @@ from src.api.models import (
 # Import memory router
 from src.api.memory_routes import memory_router
 from src.memory.pg_message_store import PostgresMessageStore
-from src.utils.db import execute_query
+from src.utils.db import execute_query, get_db_connection
+from psycopg2.extras import RealDictCursor
 
 # Create API router for v1 endpoints
 router = APIRouter()
@@ -573,37 +574,51 @@ async def list_users(
         # Build the query with sorting
         order_direction = "DESC" if sort_desc else "ASC"
         query = f"""
-            SELECT id, email, created_at, updated_at, user_data 
+            SELECT id, email, phone_number, created_at, updated_at, user_data 
             FROM users 
             ORDER BY created_at {order_direction} 
             LIMIT %s OFFSET %s
         """
         
+        logger.info(f"Fetching users with query: {query}")
+        
         # Execute the paginated query
         users_data = execute_query(query, (page_size, offset))
+        logger.info(f"Retrieved {len(users_data)} users from database")
         
         # Process the results
         users = []
         for user in users_data:
+            # Log raw user data for debugging
+            logger.info(f"Processing user ID {user['id']}")
+            logger.info(f"  Raw email: {repr(user.get('email'))}")
+            logger.info(f"  Raw phone_number: {repr(user.get('phone_number'))}")
+            logger.info(f"  Raw user_data type: {type(user.get('user_data'))}")
+            logger.info(f"  Raw user_data: {repr(user.get('user_data'))}")
+            
             # Parse user_data JSON if it exists
             user_data = {}
             if user.get('user_data'):
                 if isinstance(user['user_data'], str):
                     try:
                         user_data = json.loads(user['user_data'])
-                    except:
+                        logger.info(f"  Parsed user_data from string: {user_data}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"  Failed to parse user_data string: {str(e)}")
                         user_data = {}
                 else:
+                    # Already a dict or other object
                     user_data = user['user_data']
+                    logger.info(f"  Using user_data as is (not a string): {type(user_data)}")
             
             # Create UserInfo object
             user_info = UserInfo(
                 id=user['id'],
-                email=user['email'],
+                email=user.get('email'),
+                phone_number=user.get('phone_number'),
+                user_data=user_data,
                 created_at=user.get('created_at'),
-                updated_at=user.get('updated_at'),
-                name=user_data.get('name'),
-                channel_payload=user_data.get('channel_payload')
+                updated_at=user.get('updated_at')
             )
             users.append(user_info)
         
@@ -649,24 +664,74 @@ async def create_user(user: UserCreate):
         if existing and len(existing) > 0:
             raise HTTPException(status_code=409, detail=f"User already exists with the provided email or phone number")
         
+        # Debug logging for values being inserted
+        logger.info(f"Creating user with email: {user.email}, phone_number: {user.phone_number}")
+        if user.user_data:
+            logger.info(f"User data: {json.dumps(user.user_data)}")
+        
         # Construct the insert query
         now = datetime.now()
-        result = execute_query(
-            """
-            INSERT INTO users (email, phone_number, user_data, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id, email, phone_number, user_data, created_at, updated_at
-            """,
-            (user.email, user.phone_number, json.dumps(user.user_data) if user.user_data else None, now, now)
-        )
         
+        # Create user_data JSON string if provided
+        user_data_json = None
+        if user.user_data:
+            try:
+                user_data_json = json.dumps(user.user_data)
+                logger.info(f"Serialized user_data JSON: {user_data_json}")
+            except Exception as e:
+                logger.error(f"Error serializing user_data: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid user_data format: {str(e)}")
+        
+        # Execute insert with explicit transaction handling
+        result = None
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO users (email, phone_number, user_data, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id, email, phone_number, user_data, created_at, updated_at
+                        """,
+                        (user.email, user.phone_number, user_data_json, now, now)
+                    )
+                    
+                    # Fetch the result before committing
+                    result = cursor.fetchall()
+                    
+                    # Explicitly commit the transaction
+                    conn.commit()
+                    logger.info(f"User creation transaction committed successfully")
+                    
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Error in user creation transaction: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        if not result or len(result) == 0:
+            logger.error("No result returned from user creation query")
+            raise HTTPException(status_code=500, detail="Failed to create user: No result returned")
+            
         new_user = result[0]
+        logger.info(f"User created with ID: {new_user['id']}")
         
+        # Verify the returned data
+        logger.info(f"User created - phone_number: {new_user.get('phone_number')}, user_data type: {type(new_user.get('user_data'))}")
+        
+        # Parse user_data if it's a string
+        user_data_parsed = new_user.get("user_data")
+        if user_data_parsed and isinstance(user_data_parsed, str):
+            try:
+                user_data_parsed = json.loads(user_data_parsed)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse user_data from database: {user_data_parsed}")
+        
+        # Create and return the user with properly parsed data
         return UserInfo(
             id=new_user["id"],
             email=new_user.get("email"),
             phone_number=new_user.get("phone_number"),
-            user_data=new_user.get("user_data"),
+            user_data=user_data_parsed,
             created_at=new_user.get("created_at"),
             updated_at=new_user.get("updated_at")
         )
@@ -682,29 +747,58 @@ async def create_user(user: UserCreate):
             description="Returns details for a specific user by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
 async def get_user(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Get user details by ID, email, or phone number."""
-    # Check if user_identifier is an integer (ID)
-    if user_identifier.isdigit():
-        # It's an ID, use it directly
-        user_id = int(user_identifier)
-        user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
-    else:
-        # Try email or phone number
-        user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
-    
-    # Check if user exists
-    if not user or len(user) == 0:
-        raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
-    
-    # Convert the first user to a UserInfo model
-    user_data = user[0]
-    return UserInfo(
-        id=user_data["id"],
-        email=user_data.get("email"),
-        phone_number=user_data.get("phone_number"),
-        user_data=user_data.get("user_data"),
-        created_at=user_data.get("created_at"),
-        updated_at=user_data.get("updated_at")
-    )
+    try:
+        logger.info(f"Looking up user with identifier: {user_identifier}")
+        
+        # Check if user_identifier is an integer (ID)
+        if user_identifier.isdigit():
+            # It's an ID, use it directly
+            user_id = int(user_identifier)
+            logger.info(f"Identifier is numeric, treating as user ID: {user_id}")
+            user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
+        else:
+            # Try email or phone number
+            logger.info(f"Identifier is non-numeric, treating as email or phone number")
+            user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
+        
+        # Check if user exists
+        if not user or len(user) == 0:
+            logger.warning(f"User not found with identifier: {user_identifier}")
+            raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
+        
+        # Log the found user details
+        user_data = user[0]
+        logger.info(f"Found user with ID: {user_data['id']}")
+        logger.info(f"  Raw email: {repr(user_data.get('email'))}")
+        logger.info(f"  Raw phone_number: {repr(user_data.get('phone_number'))}")
+        logger.info(f"  Raw user_data type: {type(user_data.get('user_data'))}")
+        logger.info(f"  Raw user_data: {repr(user_data.get('user_data'))}")
+        
+        # Parse user_data if it's a string
+        parsed_user_data = user_data.get("user_data")
+        if parsed_user_data and isinstance(parsed_user_data, str):
+            try:
+                parsed_user_data = json.loads(parsed_user_data)
+                logger.info(f"  Parsed user_data from string: {parsed_user_data}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"  Failed to parse user_data string: {str(e)}")
+                parsed_user_data = {}
+        
+        # Convert the user to a UserInfo model with properly processed data
+        return UserInfo(
+            id=user_data["id"],
+            email=user_data.get("email"),
+            phone_number=user_data.get("phone_number"),
+            user_data=parsed_user_data,
+            created_at=user_data.get("created_at"),
+            updated_at=user_data.get("updated_at")
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.put("/users/{user_identifier}", response_model=UserInfo, tags=["Users"],
             summary="Update User",
@@ -712,22 +806,31 @@ async def get_user(user_identifier: str = Path(..., description="The user ID, em
 async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Update an existing user."""
     try:
+        logger.info(f"Updating user with identifier: {user_identifier}")
+        logger.info(f"Update data: email={user_update.email}, phone_number={user_update.phone_number}")
+        if user_update.user_data:
+            logger.info(f"user_data={json.dumps(user_update.user_data)}")
+        
         # First, find the user
         if user_identifier.isdigit():
             # It's an ID, use it directly
             user_id = int(user_identifier)
+            logger.info(f"Identifier is numeric, treating as user ID: {user_id}")
             user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
         else:
             # Try email or phone number
+            logger.info(f"Identifier is non-numeric, treating as email or phone number")
             user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", 
                               (user_identifier, user_identifier,))
         
         # Check if user exists
         if not user or len(user) == 0:
+            logger.warning(f"User not found with identifier: {user_identifier}")
             raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
         
         # Get the user ID from the query result
         user_id = user[0]["id"]
+        logger.info(f"Found user with ID: {user_id}")
         
         # Build the update query dynamically based on what fields are provided
         set_parts = []
@@ -743,7 +846,13 @@ async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., 
             
         if user_update.user_data is not None:
             set_parts.append("user_data = %s")
-            params.append(json.dumps(user_update.user_data))
+            try:
+                user_data_json = json.dumps(user_update.user_data)
+                logger.info(f"Serialized user_data JSON: {user_data_json}")
+                params.append(user_data_json)
+            except Exception as e:
+                logger.error(f"Error serializing user_data: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid user_data format: {str(e)}")
         
         # Always update the updated_at timestamp
         set_parts.append("updated_at = %s")
@@ -755,32 +864,80 @@ async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., 
         
         # If there's nothing to update, return the current user data
         if not set_parts:
+            logger.info("No fields to update, returning current user data")
             current_user = user[0]
+            
+            # Parse user_data if it's a string
+            current_user_data = current_user.get("user_data")
+            if current_user_data and isinstance(current_user_data, str):
+                try:
+                    current_user_data = json.loads(current_user_data)
+                except json.JSONDecodeError:
+                    current_user_data = {}
+            
             return UserInfo(
                 id=current_user["id"],
                 email=current_user.get("email"),
                 phone_number=current_user.get("phone_number"),
-                user_data=current_user.get("user_data"),
+                user_data=current_user_data,
                 created_at=current_user.get("created_at"),
                 updated_at=current_user.get("updated_at")
             )
         
-        # Execute the update query
-        query = f"""
-            UPDATE users
-            SET {", ".join(set_parts)}
-            WHERE id = %s
-            RETURNING id, email, phone_number, user_data, created_at, updated_at
-        """
+        # Execute the update query with explicit transaction handling
+        logger.info(f"Updating user with query: SET {', '.join(set_parts)}")
         
-        result = execute_query(query, tuple(params))
+        # Use explicit transaction handling for the update
+        result = None
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                try:
+                    # Build and execute the query
+                    query = f"""
+                        UPDATE users
+                        SET {", ".join(set_parts)}
+                        WHERE id = %s
+                        RETURNING id, email, phone_number, user_data, created_at, updated_at
+                    """
+                    
+                    cursor.execute(query, tuple(params))
+                    
+                    # Fetch the result before committing
+                    result = cursor.fetchall()
+                    
+                    # Explicitly commit the transaction
+                    conn.commit()
+                    logger.info(f"User update transaction committed successfully")
+                    
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Error in user update transaction: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        if not result or len(result) == 0:
+            logger.error("No result returned from user update query")
+            raise HTTPException(status_code=500, detail="Failed to update user: No result returned")
+            
         updated_user = result[0]
+        logger.info(f"User updated - ID: {updated_user['id']}")
+        logger.info(f"  Updated phone_number: {updated_user.get('phone_number')}")
+        logger.info(f"  Updated user_data type: {type(updated_user.get('user_data'))}")
+        
+        # Parse user_data if it's a string
+        user_data_parsed = updated_user.get("user_data")
+        if user_data_parsed and isinstance(user_data_parsed, str):
+            try:
+                user_data_parsed = json.loads(user_data_parsed)
+                logger.info(f"  Parsed updated user_data: {user_data_parsed}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"  Failed to parse updated user_data: {str(e)}")
+                user_data_parsed = {}
         
         return UserInfo(
             id=updated_user["id"],
             email=updated_user.get("email"),
             phone_number=updated_user.get("phone_number"),
-            user_data=updated_user.get("user_data"),
+            user_data=user_data_parsed,
             created_at=updated_user.get("created_at"),
             updated_at=updated_user.get("updated_at")
         )
