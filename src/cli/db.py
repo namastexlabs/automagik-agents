@@ -126,12 +126,33 @@ def create_required_tables(
         # Create users table if not exists
         if force:
             logger.info("Force mode enabled. Dropping existing tables...")
-            cursor.execute("DROP TABLE IF EXISTS user_session CASCADE")
-            cursor.execute("DROP TABLE IF EXISTS users CASCADE")
-            cursor.execute("DROP TABLE IF EXISTS agent_session CASCADE")
-            cursor.execute("DROP TABLE IF EXISTS conversations CASCADE")
+            # Drop tables in the correct order to respect foreign key constraints
+            cursor.execute("DROP TABLE IF EXISTS memories CASCADE")
             cursor.execute("DROP TABLE IF EXISTS messages CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS conversations CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS sessions CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS users CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS agents CASCADE")
             logger.info("Existing tables dropped.")
+        
+        # Create the agents table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255),
+                type VARCHAR(50),
+                model VARCHAR(255),
+                description TEXT,
+                version VARCHAR(50),
+                config JSONB,
+                active BOOLEAN DEFAULT TRUE,
+                run_id INTEGER DEFAULT 0,
+                system_prompt TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        logger.info("Created agents table")
         
         # Create the users table
         cursor.execute("""
@@ -144,32 +165,23 @@ def create_required_tables(
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        logger.info("Created users table")
         
-        # Create the user_session table for tracking user authentication
+        # Create the sessions table
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_session (
-                id SERIAL PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS sessions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 user_id INTEGER REFERENCES users(id),
-                session_id VARCHAR(100) UNIQUE NOT NULL,
+                agent_id INTEGER REFERENCES agents(id),
+                name VARCHAR(255),
+                platform VARCHAR(50),
+                metadata JSONB,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
-                expires_at TIMESTAMPTZ,
-                session_data JSONB
+                run_finished_at TIMESTAMPTZ
             )
         """)
-        
-        # Create the agent_session table for tracking agent conversations
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS agent_session (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id),
-                agent_id VARCHAR(100) NOT NULL,
-                session_id VARCHAR(100) UNIQUE NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                session_data JSONB
-            )
-        """)
+        logger.info("Created sessions table")
         
         # Create the conversations table
         cursor.execute("""
@@ -182,19 +194,51 @@ def create_required_tables(
                 metadata JSONB
             )
         """)
+        logger.info("Created conversations table")
         
-        # Create the messages table
+        # Create the messages table based on the actual schema
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                conversation_id INTEGER REFERENCES conversations(id),
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                session_id UUID REFERENCES sessions(id),
                 user_id INTEGER REFERENCES users(id),
+                agent_id INTEGER REFERENCES agents(id),
                 role VARCHAR(20) NOT NULL,
-                content TEXT NOT NULL,
+                text_content TEXT,
+                media_url TEXT,
+                mime_type TEXT,
+                message_type TEXT,
+                raw_payload JSONB,
+                tool_calls JSONB,
+                tool_outputs JSONB,
+                system_prompt TEXT,
+                user_feedback TEXT,
+                flagged TEXT,
+                context JSONB,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
-                metadata JSONB
+                updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        logger.info("Created messages table")
+        
+        # Create the memories table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                content TEXT,
+                session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+                read_mode VARCHAR(50),
+                access VARCHAR(20),
+                metadata JSONB,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        logger.info("Created memories table")
         
         # Create default user if needed
         cursor.execute("SELECT COUNT(*) FROM users")
@@ -305,9 +349,10 @@ def db_clear(
         table_order = [
             "memories",       # Clear first as it references sessions, users, and agents
             "messages",       # References sessions, users, and agents
+            "conversations",  # References users
             "sessions",       # References users and agents
-            "users",          # No foreign keys to other tables
-            "agents"          # No foreign keys to other tables
+            "users",          # Base table
+            "agents"          # Base table
         ]
         
         # Sort tables based on defined order
