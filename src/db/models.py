@@ -76,23 +76,6 @@ class Session(BaseDBModel):
         return cls(**row)
 
 
-class Conversation(BaseDBModel):
-    """Conversation model corresponding to the conversations table."""
-    id: Optional[int] = Field(None, description="Conversation ID")
-    user_id: Optional[int] = Field(None, description="User ID")
-    title: Optional[str] = Field(None, description="Conversation title")
-    created_at: Optional[datetime] = Field(None, description="Created at timestamp")
-    updated_at: Optional[datetime] = Field(None, description="Updated at timestamp")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
-
-    @classmethod
-    def from_db_row(cls, row: Dict[str, Any]) -> "Conversation":
-        """Create a Conversation instance from a database row dictionary."""
-        if not row:
-            return None
-        return cls(**row)
-
-
 class Message(BaseDBModel):
     """Message model corresponding to the messages table."""
     id: Optional[uuid.UUID] = Field(None, description="Message ID")

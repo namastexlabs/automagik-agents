@@ -132,7 +132,6 @@ def create_required_tables(
             # Drop tables in the correct order to respect foreign key constraints
             cursor.execute("DROP TABLE IF EXISTS memories CASCADE")
             cursor.execute("DROP TABLE IF EXISTS messages CASCADE")
-            cursor.execute("DROP TABLE IF EXISTS conversations CASCADE")
             cursor.execute("DROP TABLE IF EXISTS sessions CASCADE")
             cursor.execute("DROP TABLE IF EXISTS users CASCADE")
             cursor.execute("DROP TABLE IF EXISTS agents CASCADE")
@@ -200,24 +199,6 @@ def create_required_tables(
             logger.info("Verified sessions table exists")
         else:
             logger.info("Created sessions table")
-        
-        # Create the conversations table
-        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'conversations')")
-        table_exists = cursor.fetchone()[0]
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id),
-                title TEXT,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                metadata JSONB
-            )
-        """)
-        if table_exists:
-            logger.info("Verified conversations table exists")
-        else:
-            logger.info("Created conversations table")
         
         # Create the messages table based on the actual schema
         cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'messages')")
@@ -385,7 +366,6 @@ def db_clear(
         table_order = [
             "memories",       # Clear first as it references sessions, users, and agents
             "messages",       # References sessions, users, and agents
-            "conversations",  # References users
             "sessions",       # References users and agents
             "users",          # Base table
             "agents"          # Base table

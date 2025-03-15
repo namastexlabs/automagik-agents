@@ -7,7 +7,6 @@ from src.db.models import (
     Session,
     Message,
     Memory,
-    Conversation,
 )
 
 # Export connection functions
