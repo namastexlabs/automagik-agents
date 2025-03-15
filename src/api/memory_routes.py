@@ -13,7 +13,14 @@ from src.api.memory_models import (
     MemoryResponse,
     MemoryListResponse
 )
-from src.utils.db import execute_query
+from src.db import (
+    Memory, 
+    get_memory, 
+    create_memory as repo_create_memory,
+    update_memory as repo_update_memory,
+    list_memories as repo_list_memories,
+    delete_memory as repo_delete_memory
+)
 
 # Create API router for memory endpoints
 memory_router = APIRouter()
@@ -40,108 +47,112 @@ async def list_memories(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
     
-    # Build the query conditions
-    conditions = []
-    params = []
-    
-    if user_id is not None:
-        conditions.append("user_id = %s")
-        params.append(user_id)
-    
-    if agent_id is not None:
-        conditions.append("agent_id = %s")
-        params.append(agent_id)
-    
-    if session_uuid is not None:
-        conditions.append("session_id = %s")
-        params.append(str(session_uuid))
-    
-    # Construct the WHERE clause if conditions exist
-    where_clause = ""
-    if conditions:
-        where_clause = "WHERE " + " AND ".join(conditions)
-    
-    # Get the total count
-    count_query = f"SELECT COUNT(*) as count FROM memories {where_clause}"
-    count_result = execute_query(count_query, params)
-    total_count = count_result[0]["count"] if count_result else 0
-    
-    # Calculate pagination
-    pages = math.ceil(total_count / page_size) if total_count > 0 else 0
-    offset = (page - 1) * page_size
-    
-    # Order by clause
-    order_by = "updated_at DESC" if sort_desc else "updated_at ASC"
-    
-    # Fetch memories with pagination
-    query = f"SELECT * FROM memories {where_clause} ORDER BY {order_by} LIMIT %s OFFSET %s"
-    params.extend([page_size, offset])
-    memory_results = execute_query(query, params)
-    
-    # Convert to Pydantic models
-    memories = []
-    for memory in memory_results:
-        memories.append(MemoryResponse(**memory))
-    
-    return MemoryListResponse(
-        memories=memories,
-        count=total_count,
-        page=page,
-        page_size=page_size,
-        pages=pages
+    # Use the repository pattern to list memories
+    memories = repo_list_memories(
+        agent_id=agent_id,
+        user_id=user_id,
+        session_id=session_uuid
     )
+    
+    # Total number of memories
+    total_count = len(memories)
+    
+    # Calculate total pages
+    total_pages = math.ceil(total_count / page_size)
+    
+    # Apply sorting
+    if sort_desc:
+        memories.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+    else:
+        memories.sort(key=lambda x: x.created_at or datetime.min)
+    
+    # Apply pagination
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_memories = memories[start_idx:end_idx]
+    
+    # Convert to response format
+    memory_responses = []
+    for memory in paginated_memories:
+        memory_responses.append({
+            "id": str(memory.id),
+            "name": memory.name,
+            "description": memory.description,
+            "content": memory.content,
+            "session_id": str(memory.session_id) if memory.session_id else None,
+            "user_id": memory.user_id,
+            "agent_id": memory.agent_id,
+            "read_mode": memory.read_mode,
+            "access": memory.access,
+            "metadata": memory.metadata,
+            "created_at": memory.created_at,
+            "updated_at": memory.updated_at
+        })
+    
+    return {
+        "items": memory_responses,
+        "page": page,
+        "page_size": page_size,
+        "total_count": total_count,
+        "total_pages": total_pages
+    }
 
 @memory_router.post("/memories", response_model=MemoryResponse, tags=["Memories"],
              summary="Create Memory",
              description="Create a new memory with the provided details.")
 async def create_memory(memory: MemoryCreate):
     try:
-        # Generate a UUID for the memory if not provided
-        memory_id = uuid.uuid4()
-        
-        # Get current timestamp
-        now = datetime.utcnow()
-        
-        # Prepare metadata if provided, otherwise use an empty object
-        metadata = memory.metadata if memory.metadata is not None else {}
-        
-        # Insert the memory into the database
-        query = """
-        INSERT INTO memories (
-            id, name, description, content, session_id, user_id, agent_id,
-            read_mode, access, metadata, created_at, updated_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
-        """
-        
-        # Convert UUID objects to strings for PostgreSQL
-        memory_id_str = str(memory_id)
-        # Handle the session_id
-        session_id_str = None
+        # Convert session_id to UUID if provided
+        session_uuid = None
         if memory.session_id:
-            # Since we changed the model to use str type, we can use it directly
-            # However, we'll validate it's a proper UUID if possible
             try:
-                # Try to convert to UUID to validate format, then back to string
-                session_id_str = str(UUID(memory.session_id))
+                session_uuid = uuid.UUID(memory.session_id)
             except ValueError:
-                # If not a valid UUID, just use the original string value
-                session_id_str = memory.session_id
-                logging.warning(f"Non-UUID session_id received: {session_id_str}")
+                raise HTTPException(status_code=400, detail=f"Invalid session_id format: {memory.session_id}")
         
-        params = (
-            memory_id_str, memory.name, memory.description, memory.content,
-            session_id_str, memory.user_id, memory.agent_id, memory.read_mode,
-            memory.access, json.dumps(metadata) if metadata else None, now, now
+        # Create a Memory model for the repository
+        memory_model = Memory(
+            id=None,  # Will be generated
+            name=memory.name,
+            description=memory.description,
+            content=memory.content,
+            session_id=session_uuid,
+            user_id=memory.user_id,
+            agent_id=memory.agent_id,
+            read_mode=memory.read_mode,
+            access=memory.access,
+            metadata=memory.metadata,
+            created_at=None,  # Will be set by DB
+            updated_at=None   # Will be set by DB
         )
         
-        result = execute_query(query, params)
+        # Create the memory using the repository
+        memory_id = repo_create_memory(memory_model)
         
-        if not result:
+        if memory_id is None:
             raise HTTPException(status_code=500, detail="Failed to create memory")
         
-        # Return the created memory
-        return MemoryResponse(**result[0])
+        # Retrieve the created memory to get all fields
+        created_memory = get_memory(memory_id)
+        
+        if not created_memory:
+            raise HTTPException(status_code=404, detail=f"Memory created but not found with ID {memory_id}")
+        
+        # Convert to response format
+        return {
+            "id": str(created_memory.id),
+            "name": created_memory.name,
+            "description": created_memory.description,
+            "content": created_memory.content,
+            "session_id": str(created_memory.session_id) if created_memory.session_id else None,
+            "user_id": created_memory.user_id,
+            "agent_id": created_memory.agent_id,
+            "read_mode": created_memory.read_mode,
+            "access": created_memory.access,
+            "metadata": created_memory.metadata,
+            "created_at": created_memory.created_at,
+            "updated_at": created_memory.updated_at
+        }
     except Exception as e:
         logger.error(f"Error creating memory: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error creating memory: {str(e)}")

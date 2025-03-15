@@ -10,7 +10,12 @@ from pydantic import BaseModel
 from datetime import datetime
 from uuid import UUID
 from pydantic_ai import RunContext
-from src.utils.db import execute_query
+from src.db import (
+    Memory, 
+    get_memory, 
+    get_memory_by_name,
+    list_memories as repo_list_memories
+)
 from src.tools.memory_tools.common import clean_memory_object, map_agent_id
 
 logger = logging.getLogger(__name__)
@@ -83,17 +88,8 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
             elif agent_id_raw.isdigit():
                 agent_id = int(agent_id_raw)
             else:
-                # Look up the agent ID in the database
-                query = "SELECT id FROM agents WHERE name = %s"
-                result = execute_query(query, [agent_id_raw])
-                
-                if result and isinstance(result, dict) and 'rows' in result and len(result['rows']) > 0:
-                    agent_id = result['rows'][0].get('id')
-                elif isinstance(result, list) and len(result) > 0:
-                    agent_id = result[0].get('id')
-                else:
-                    logger.warning(f"Agent ID not found for name: {agent_id_raw}, using default ID 3")
-                    agent_id = 3  # Default to sofia_agent ID 3 as fallback
+                # Get agent ID via the map_agent_id helper
+                agent_id = map_agent_id(agent_id_raw)
             
             user_id = ctx.deps.get("user_id", 1)  # Default to user ID 1 if not provided
             session_id = ctx.deps.get("session_id")
@@ -136,47 +132,28 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
             try:
                 # Validate UUID format
                 memory_uuid = UUID(memory_id)
-                memory_id_str = str(memory_uuid)
             except ValueError:
                 return {"success": False, "message": f"Invalid memory ID format: {memory_id}"}
                 
-            # Use the direct SQL approach for more precise control
-            query = """
-                SELECT id, name, description, content, created_at, updated_at, 
-                       read_mode, access, session_id, user_id, agent_id, metadata
-                FROM memories 
-                WHERE id = %s 
-            """
-            params = [memory_id_str]
+            # Use the repository pattern to get memory by ID
+            memory_obj = get_memory(memory_uuid)
             
-            # Apply read_mode filter if provided
-            if read_mode is not None:
-                query += " AND read_mode = %s"
-                params.append(read_mode)
-            
-            # Execute the query with parameters
-            logger.info(f"Executing query with params: {params}")
-            result = execute_query(query, params)
-            
-            # Handle case where result is a list (DB rows) or dict with 'rows' key
-            if isinstance(result, list):
-                rows = result
-            else:
-                rows = result.get('rows', [])
-                
-            if not rows:
+            if not memory_obj:
                 if read_mode:
                     # Use the original read_mode for user-friendly messages
                     display_read_mode = original_read_mode or read_mode
                     return {"success": False, "message": f"Memory with ID {memory_id} and read_mode {display_read_mode} not found"}
                 else:
                     return {"success": False, "message": f"Memory with ID {memory_id} not found"}
-                
-            memory = rows[0]
             
+            # Check if read_mode matches (if specified)
+            if read_mode and memory_obj.read_mode != read_mode:
+                display_read_mode = original_read_mode or read_mode
+                return {"success": False, "message": f"Memory with ID {memory_id} exists but does not have read_mode {display_read_mode}"}
+                
             # Verify that the agent has permission to access this memory
-            memory_agent_id = memory.get("agent_id")
-            memory_user_id = memory.get("user_id")
+            memory_agent_id = memory_obj.agent_id
+            memory_user_id = memory_obj.user_id
             
             # Conditions for memory access (in order of hierarchy):
             # 1. Agent+User+Session memories - personalized to the current session
@@ -184,7 +161,7 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
             # 3. Agent-specific memories (global) - accessible to all users of a specific agent (user_id is NULL)
             # Note: Records where both agent_id and user_id are NULL are considered invalid
             
-            memory_session_id = memory.get("session_id")
+            memory_session_id = memory_obj.session_id
             can_access = False
             
             # Check if this is an Agent+User+Session memory
@@ -211,89 +188,54 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
                 return {"success": False, "message": f"Memory with ID {memory_id} is not accessible to this agent/user"}
             
             # Normalize read_mode in the response for consistency
-            if memory.get("read_mode") == "tool":
-                memory["read_mode"] = "tool_calling"
+            memory_obj_dict = memory_obj.model_dump()
+            if memory_obj_dict.get("read_mode") == "tool":
+                memory_obj_dict["read_mode"] = "tool_calling"
             
             # Clean and format the memory object for return
-            cleaned_memory = clean_memory_object(memory, include_content=True)
+            cleaned_memory = clean_memory_object(memory_obj_dict, include_content=True)
             
             return {
                 "success": True,
                 "memory": cleaned_memory
             }
-            
+
         # If name is provided, look up by name or partial match
         elif name:
-            # Construct a query with proper access controls
-            query = """
-                SELECT id, name, description, content, created_at, updated_at, 
-                       read_mode, access, session_id, user_id, agent_id, metadata
-                FROM memories 
-                WHERE name ILIKE %s 
-                  AND (
-                      -- Agent-specific global memories (accessible to all users of this agent)
-                      (agent_id = %s AND user_id IS NULL)
-                      
-                      -- Agent + User memories (personalized agent)
-                      OR (agent_id = %s AND user_id = %s AND session_id IS NULL)
-                      
-                      -- Agent + User + Session memories (personalized session)
-                      OR (agent_id = %s AND user_id = %s AND session_id = %s)
-                  )
-            """
-            params = [f"%{name}%", agent_id, agent_id, user_id, agent_id, user_id, session_id]
+            # Implement name lookup using the repository pattern
+            memories = repo_list_memories(
+                agent_id=agent_id,
+                user_id=user_id,
+                session_id=session_id,
+                read_mode=read_mode,
+                name_pattern=name
+            )
             
-            # Add read_mode filter if provided
-            if read_mode is not None:
-                query += " AND read_mode = %s"
-                params.append(read_mode)
-                
-            query += " ORDER BY name ASC"
-            
-            # Execute the query with parameters
-            logger.info(f"Executing query with params: {params}")
-            result = execute_query(query, params)
-            
-            # Handle case where result is a list (DB rows) or dict with 'rows' key
-            if isinstance(result, list):
-                rows = result
-            else:
-                rows = result.get('rows', [])
-                
-            if not rows:
-                if read_mode:
-                    # Display user-friendly read_mode value in error message
-                    display_read_mode = original_read_mode or read_mode
-                    return {"success": False, "message": f"No memories found matching name: {name} with read_mode {display_read_mode}"}
-                else:
-                    return {"success": False, "message": f"No memories found matching name: {name}"}
-            
-            # Normalize read_mode in all results for consistency
-            for memory in rows:
-                if memory.get("read_mode") == "tool":
-                    memory["read_mode"] = "tool_calling"
-                
-            # If there's exactly one match, return it with content
-            if len(rows) == 1:
-                memory = rows[0]
-                cleaned_memory = clean_memory_object(memory, include_content=True)
-                
+            if not memories:
                 return {
                     "success": True,
-                    "memory": cleaned_memory
+                    "memories": [],
+                    "count": 0,
+                    "message": f"No memories found matching name '{name}'"
                 }
-            
-            # Multiple matches - return a list of memories without content for selection
-            memories = []
-            for memory in rows:
-                cleaned_memory = clean_memory_object(memory, include_content=False)
-                memories.append(cleaned_memory)
-            
+                
+            # Convert memories to dictionary format
+            memory_list = []
+            for memory_obj in memories:
+                memory_dict = memory_obj.model_dump()
+                # Normalize read_mode for consistency
+                if memory_dict.get("read_mode") == "tool":
+                    memory_dict["read_mode"] = "tool_calling"
+                    
+                # Clean and format the memory
+                cleaned_memory = clean_memory_object(memory_dict, include_content=True)
+                memory_list.append(cleaned_memory)
+                
             return {
                 "success": True,
-                "message": f"Found {len(memories)} memories matching name: {name}",
-                "count": len(memories),
-                "memories": memories
+                "memories": memory_list,
+                "count": len(memory_list),
+                "message": f"Found {len(memory_list)} memories matching name '{name}'"
             }
             
         # If list_all is True, return all available memories for this agent/user
