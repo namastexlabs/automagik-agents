@@ -15,7 +15,7 @@ from src.api.routes import router as api_router
 from src.memory.message_history import MessageHistory
 from src.memory.pg_message_store import PostgresMessageStore
 from src.agents.models.agent_factory import AgentFactory
-from src.utils.db import execute_query
+from src.db import execute_query
 
 # Configure logging
 configure_logging()
@@ -108,7 +108,7 @@ def create_app() -> FastAPI:
         logger.info("🔧 Initializing PostgreSQL message store for persistent storage")
         
         # First test database connection
-        from src.utils.db import get_connection_pool, execute_query
+        from src.db import get_connection_pool, execute_query
         pool = get_connection_pool()
         
         # Test the connection with a simple query

@@ -22,7 +22,7 @@ from devtools import debug
 
 from pydantic_ai import Agent, RunContext
 from src.tools.memory_tools import read_memory, write_memory
-from src.utils.db import get_db_connection
+from src.db import get_db_connection
 
 # 'if-token-present' means nothing will be sent (and the example will work) if you don't have logfire configured
 logfire.configure(send_to_logfire='if-token-present')
@@ -140,33 +140,32 @@ async def main():
     # Initialize the database connection
     get_db_connection()
     
-    print("=== Memory Agent Example ===")
-    print("Session ID:", session_id)
-    print("Try asking the agent to remember facts and recall them later.\n")
+    # Test the memory tools with a simple conversation
+    print("\n=== Memory Tools Example ===\n")
     
-    # Example interaction
+    # First interaction - store information
     result = await memory_agent.run(
         "Remember that my favorite color is blue and I like hiking on weekends.", 
         deps=deps
     )
     print("User: Remember that my favorite color is blue and I like hiking on weekends.")
-    print("Agent:", result.data)
+    print(f"Agent: {result.data}")
     
-    # Another example - asking the agent to recall information
+    # Second interaction - retrieve information
     result = await memory_agent.run(
         "What do you remember about me?", 
         deps=deps
     )
     print("\nUser: What do you remember about me?")
-    print("Agent:", result.data)
+    print(f"Agent: {result.data}")
     
-    # A final example - updating information
+    # Third interaction - update information
     result = await memory_agent.run(
         "Actually, my favorite color is green now.", 
         deps=deps
     )
     print("\nUser: Actually, my favorite color is green now.")
-    print("Agent:", result.data)
+    print(f"Agent: {result.data}")
 
 
 if __name__ == '__main__':

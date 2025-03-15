@@ -26,7 +26,7 @@ from src.api.models import (
 # Import memory router
 from src.api.memory_routes import memory_router
 from src.memory.pg_message_store import PostgresMessageStore
-from src.utils.db import execute_query, get_db_connection
+from src.db import execute_query, get_db_connection
 from psycopg2.extras import RealDictCursor
 
 # Create API router for v1 endpoints

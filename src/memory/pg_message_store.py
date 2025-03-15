@@ -17,7 +17,7 @@ from pydantic_ai.messages import (
 )
 
 from src.memory.message_store import MessageStore
-from src.utils.db import execute_query, execute_batch
+from src.db import execute_query, execute_batch
 from src.memory.message_history import TextPart, ToolCall, ToolOutput, ToolCallPart, ToolOutputPart
 
 # Configure logger
@@ -31,7 +31,7 @@ class PostgresMessageStore(MessageStore):
         logger.info("🔍 Initializing PostgresMessageStore")
         # Test database connection immediately
         try:
-            from src.utils.db import get_connection_pool
+            from src.db import get_connection_pool
             pool = get_connection_pool()
             with pool.getconn() as conn:
                 with conn.cursor() as cur:

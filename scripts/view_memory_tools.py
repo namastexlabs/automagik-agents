@@ -25,14 +25,14 @@ logging.basicConfig(
 from src.agents.simple.simple_agent.agent import SimpleAgent
 from pydantic_ai import Agent
 from src.tools.memory_tools import read_memory, write_memory
-from src.utils.db import execute_query
+from src.db import execute_query
 
 
 def register_memory_tools():
     """Register memory tools and return their descriptions."""
     import logging
     import json
-    from src.utils.db import execute_query
+    from src.db import execute_query
     
     logger = logging.getLogger(__name__)
     

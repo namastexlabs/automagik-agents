@@ -41,7 +41,7 @@ def main():
     
     # To directly access tool descriptions, let's use the same code from agent.py
     from src.tools.memory_tools import read_memory, write_memory
-    from src.utils.db import execute_query
+    from src.db import execute_query
     import inspect
     
     # Query to get all available memories (same as in SimpleAgent)

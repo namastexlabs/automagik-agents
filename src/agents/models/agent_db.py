@@ -6,7 +6,7 @@ import uuid
 from typing import Dict, List, Optional, Any, Type, Union
 from datetime import datetime
 
-from src.utils.db import execute_query
+from src.db import execute_query
 from src.version import SERVICE_INFO
 
 # Configure logger

@@ -14,7 +14,7 @@ import sys
 import argparse
 import requests
 from datetime import datetime
-from src.utils.db import execute_query
+from src.db import execute_query
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Test memory operations through sofia_agent API')

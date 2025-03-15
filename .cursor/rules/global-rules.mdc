@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Keep a TODO.md file in the tasks folder, with detailed planning, necessary references to files and documentation about them, and task list. always refer to it in the middle of your work..
+- Each new task provided by the user will create a new file with datetime_task_name.md, when finished, you will replace the contents with a detailed report on which files were changed and detailed information that may help debugging, when bugs appear in the future!

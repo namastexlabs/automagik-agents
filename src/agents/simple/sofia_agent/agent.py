@@ -8,7 +8,7 @@ from src.agents.models.base_agent import BaseAgent
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
 from src.agents.simple.sofia_agent.prompts import SIMPLE_AGENT_PROMPT
-from src.utils.db import execute_query
+from src.db import execute_query
 
 logger = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ class SofiaAgent(BaseAgent):
         are limited to stay within OpenAI API's 1024 character limit for tool descriptions.
         """
         from src.tools.memory_tools import read_memory, create_memory, update_memory
-        from src.utils.db import execute_query
+        from src.db import execute_query
         import logging
         import json
         
