@@ -209,7 +209,7 @@ def create_required_tables(
             """, (
                 "admin@automagik", 
                 "88888888888", 
-                '{"name": "Automagik Admin", "is_default": true}'
+                '{"name": "Automagik Admin"}'
             ))
             user_id = cursor.fetchone()[0]
             logger.info(f"✅ Created default user with ID: {user_id}")
