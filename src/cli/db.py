@@ -207,8 +207,8 @@ def create_required_tables(
                 VALUES (%s, %s, %s)
                 RETURNING id
             """, (
-                "user@admin@automagik	", 
-                "1234567890", 
+                "admin@automagik", 
+                "88888888888", 
                 '{"name": "Automagik Admin", "is_default": true}'
             ))
             user_id = cursor.fetchone()[0]
