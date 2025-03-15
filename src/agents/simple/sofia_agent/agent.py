@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Union
 from pydantic_ai import Agent
 import re
 import logging
@@ -140,11 +140,24 @@ class SofiaAgent(BaseAgent):
                     
             logger.info(f"Loaded memories: {list(memory_values.keys())}")
             
+            # Set Sofia-specific default values for missing variables
+            default_values = {
+                "personal_identity_traits": "Thoughtful, adaptable, detail-oriented, strategic, empathetic with users, and committed to craft excellence",
+                "personal_interests": "Product design, efficiency optimization, knowledge management, team coordination, and personal growth",
+                "personal_relationships": "Professional relationships with the team; developing rapport with users; seeking to build meaningful connections",
+                "user_preferences": "Prefers clear, actionable information with relevant context; values timely and concise responses",
+                "task_patterns": "Regular reporting, coordination tasks, documentation updates, stakeholder communication, and process improvement",
+                "effective_approaches": "Clear communication, systematic tracking, proactive problem-solving, and timely follow-ups",
+                "context_knowledge": "Familiar with product development, project management, agile methodologies, and cross-functional collaboration",
+                "team_dynamics": "Works as coordinator with other specialized agents; facilitates collaboration and information flow",
+                "self_improvement_insights": "Constantly improving communication efficiency, information organization, and decision-making processes"
+            }
+            
             # Set default values for missing variables
             for var in memory_vars:
                 if var not in memory_values:
-                    memory_values[var] = f"(No memory found for {var})"
-                    logger.info(f"Using default value for {var}")
+                    memory_values[var] = default_values.get(var, f"(No memory found for {var})")
+                    logger.info(f"Using Sofia default value for {var}")
             
         except Exception as e:
             logger.error(f"Error loading memory values: {str(e)}")
@@ -217,6 +230,9 @@ class SofiaAgent(BaseAgent):
 
     def initialize_agent(self) -> Agent:
         """Initialize the simple agent with configuration."""
+        # Add debug logging to show the actual system prompt being sent
+        logger.info(f"Initializing agent with system prompt (first 500 chars): {self.system_prompt[:500]}...")
+        logger.info(f"System prompt length: {len(self.system_prompt)} characters")
         return Agent(
             model=self.config.model,
             system_prompt=self.system_prompt,
@@ -380,12 +396,34 @@ class SofiaAgent(BaseAgent):
                 "session_id": message_history.session_id
             }
             
+            # Log message history count and contents
+            messages_count = len(message_history.messages) if message_history.messages else 0
+            logger.info(f"Running Sofia agent with {messages_count} messages in history")
+            
+            # Check if system prompt is in the message history
+            has_system_prompt = False
+            if message_history.messages:
+                for msg in message_history.messages:
+                    if hasattr(msg, 'role') and msg.role == 'system':
+                        has_system_prompt = True
+                        logger.info(f"Found system prompt in message history (first 100 chars): {str(msg.content)[:100]}...")
+                        break
+            
+            if not has_system_prompt:
+                logger.warning("No system prompt found in message history - Sofia's personality may not be applied!")
+            
             # Run the agent with the user message, message history, and dependencies
             result = await self.agent.run(
                 user_message,
                 message_history=message_history.messages,
                 deps=deps
             )
+            
+            # Log the result type and content preview
+            logger.info(f"Agent result type: {type(result)}")
+            if hasattr(result, 'data'):
+                response_preview = str(result.data)[:100] + "..." if len(str(result.data)) > 100 else str(result.data)
+                logger.info(f"Agent response preview: {response_preview}")
             
             # Extract the response text
             response_text = result.data
@@ -399,6 +437,94 @@ class SofiaAgent(BaseAgent):
             )
         except Exception as e:
             error_msg = f"Error running SofiaAgent: {str(e)}"
+            logger.error(error_msg)
+            return AgentBaseResponse.from_agent_response(
+                message="An error occurred while processing your request.",
+                history=message_history,
+                error=error_msg,
+                session_id=message_history.session_id
+            )
+
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[Union[int, str]] = None, user_id: int = 1, context: Optional[Dict] = None) -> AgentBaseResponse:
+        """Process a user message with this agent.
+        
+        Args:
+            user_message: User message to process
+            session_id: Optional session ID
+            agent_id: Optional agent ID for database tracking (integer or string for backwards compatibility)
+            user_id: User ID (integer)
+            context: Optional additional context that will be logged but not passed to the agent due to API limitations
+            
+        Returns:
+            Agent response
+        """
+        if not session_id:
+            # Using empty string is no longer allowed - we need a valid session ID
+            logging.error("Empty session_id provided, session must be created before calling process_message")
+            return AgentBaseResponse.from_agent_response(
+                message="Error: No valid session ID provided. A session must be created before processing messages.",
+                history=MessageHistory(""),
+                error="No valid session ID provided",
+                session_id=""
+            )
+        
+        # Set default context if None is provided
+        context = context or {}
+            
+        logging.info(f"Using existing session ID: {session_id}")
+        
+        # Log any additional context provided
+        if context:
+            logging.info(f"Additional message context: {context}")
+            
+        message_history = MessageHistory(session_id, user_id=user_id)
+
+        # IMPORTANT: Ensure the system prompt is in the message history
+        has_system_prompt = False
+        for msg in message_history.messages:
+            if hasattr(msg, 'role') and msg.role == 'system':
+                has_system_prompt = True
+                logging.info(f"Found system prompt in existing message history")
+                break
+        
+        # If no system prompt is found, add it explicitly
+        if not has_system_prompt and hasattr(self, 'system_prompt'):
+            logging.info("No system prompt found in message history. Adding Sofia's system prompt explicitly.")
+            message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
+            logging.info(f"Added system prompt (length: {len(self.system_prompt)})")
+
+        user_message_obj = message_history.add(user_message, agent_id=agent_id, context=context)
+        
+        logging.info(f"Processing user message in session {session_id}: {user_message}")
+
+        try:
+            # The agent.run() method doesn't accept extra_context parameter
+            # Just pass the required parameters
+            result = await self.agent.run(
+                user_message,
+                message_history=message_history.messages
+            )
+            logging.info(f"Agent run completed. Result type: {type(result)}")
+            
+            # Log the result type and content preview
+            logger.info(f"Agent result type: {type(result)}")
+            if hasattr(result, 'data'):
+                response_preview = str(result.data)[:100] + "..." if len(str(result.data)) > 100 else str(result.data)
+                logger.info(f"Agent response preview: {response_preview}")
+            
+            # Extract the response text
+            response_text = result.data
+            
+            # Create and return the agent response
+            return AgentBaseResponse.from_agent_response(
+                message=response_text,
+                history=message_history,
+                error=None,
+                session_id=message_history.session_id
+            )
+        except Exception as e:
+            error_msg = f"Error running SofiaAgent: {str(e)}"
+            logger.error(error_msg)
             return AgentBaseResponse.from_agent_response(
                 message="An error occurred while processing your request.",
                 history=message_history,
