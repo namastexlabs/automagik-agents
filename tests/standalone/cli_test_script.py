@@ -209,25 +209,35 @@ def test_db_commands() -> List[Dict[str, Any]]:
         "description": "db init --force option exists"
     })
     
-    # Test db reset help
-    print_subheader("Testing db reset (help only)")
-    cmd = "automagik-agents db reset --help"
-    success, output = run_command(cmd, expected_output="Reset the database")
-    print_result(success, "db reset --help command")
+    # Test db clear help (replacing reset tests)
+    print_subheader("Testing db clear (help only)")
+    cmd = "automagik-agents db clear --help"
+    success, output = run_command(cmd, expected_output="Clear all data from the database")
+    print_result(success, "db clear --help command")
     results.append({
         "command": cmd,
         "success": success,
-        "description": "db reset --help command"
+        "description": "db clear --help command"
     })
     
-    # Test db reset yes option exists
-    cmd = "automagik-agents db reset --help"
+    # Test db clear yes option exists
+    cmd = "automagik-agents db clear --help"
     success, output = run_command(cmd, expected_output="--yes")
-    print_result(success, "db reset --yes option exists")
+    print_result(success, "db clear --yes option exists")
     results.append({
         "command": cmd,
         "success": success,
-        "description": "db reset --yes option exists"
+        "description": "db clear --yes option exists"
+    })
+    
+    # Test db clear no-default-user option exists
+    cmd = "automagik-agents db clear --help"
+    success, output = run_command(cmd, expected_output="--no-default-user")
+    print_result(success, "db clear --no-default-user option exists")
+    results.append({
+        "command": cmd,
+        "success": success,
+        "description": "db clear --no-default-user option exists"
     })
     
     return results
