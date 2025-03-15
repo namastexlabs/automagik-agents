@@ -7,13 +7,6 @@ import logging
 from dotenv import load_dotenv
 import psycopg2
 
-# Import our new DB layer
-from src.db import (
-    User,
-    execute_query,
-    create_user
-)
-
 # Create the database command group
 db_app = typer.Typer()
 
@@ -299,30 +292,68 @@ def db_clear(
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger = logging.getLogger("db_clear")
     
-    # Define table clearing order to respect foreign key constraints
-    table_order = [
-        "memories",       # Clear first as it references sessions, users, and agents
-        "messages",       # References sessions, users, and agents
-        "conversations",  # References users
-        "sessions",       # References users and agents
-        "users",          # Base table
-        "agents"          # Base table
-    ]
+    # Load environment variables
+    load_dotenv()
+    
+    # Get database connection parameters from environment
+    db_host = os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST", "localhost") 
+    db_port = os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("POSTGRES_DB") or os.getenv("DB_NAME", "automagik_agents")
+    db_user = os.getenv("POSTGRES_USER") or os.getenv("DB_USER", "postgres")
+    db_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD", "postgres")
+    
+    # Try to parse from DATABASE_URL if available
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(database_url)
+            db_host = parsed.hostname or db_host
+            db_port = str(parsed.port) if parsed.port else db_port
+            db_name = parsed.path.lstrip('/') or db_name
+            db_user = parsed.username or db_user
+            db_password = parsed.password or db_password
+        except Exception as e:
+            logger.warning(f"Error parsing DATABASE_URL: {str(e)}")
+    
+    typer.echo(f"Using database: {db_host}:{db_port}/{db_name}")
     
     try:
+        # Connect to the database
+        conn = psycopg2.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password
+        )
+        conn.autocommit = True
+        cursor = conn.cursor()
+        
         # Get all tables in the public schema
-        tables = execute_query("""
+        cursor.execute("""
             SELECT tablename FROM pg_tables 
             WHERE schemaname = 'public'
             ORDER BY tablename;
         """)
-        all_tables = [table["tablename"] for table in tables]
+        all_tables = [table[0] for table in cursor.fetchall()]
         
         if not all_tables:
             typer.echo("No tables found in database.")
             return
         
         typer.echo(f"Found {len(all_tables)} tables in the database")
+        
+        # Define table clearing order to respect foreign key constraints
+        # If a table is not in this list, it will be cleared after the ordered ones
+        table_order = [
+            "memories",       # Clear first as it references sessions, users, and agents
+            "messages",       # References sessions, users, and agents
+            "conversations",  # References users
+            "sessions",       # References users and agents
+            "users",          # Base table
+            "agents"          # Base table
+        ]
         
         # Sort tables based on defined order
         ordered_tables = []
@@ -345,42 +376,42 @@ def db_clear(
             typer.echo(f"  - Clearing table: {table_name}")
             try:
                 # Try with CASCADE first, which will handle foreign key constraints
-                execute_query(f'TRUNCATE TABLE "{table_name}" CASCADE;', fetch=False)
-                typer.echo(f"    ✓ Table {table_name} cleared successfully (with CASCADE)")
+                try:
+                    cursor.execute(f'TRUNCATE TABLE "{table_name}" CASCADE;')
+                    typer.echo(f"    ✓ Table {table_name} cleared successfully (with CASCADE)")
+                except Exception as e:
+                    # If CASCADE fails, try without it
+                    if "permission denied" in str(e):
+                        try:
+                            cursor.execute(f'TRUNCATE TABLE "{table_name}";')
+                            typer.echo(f"    ✓ Table {table_name} cleared successfully")
+                        except Exception as e2:
+                            # If regular TRUNCATE fails too, try DELETE as a last resort
+                            typer.echo(f"    ⚠️ TRUNCATE failed, trying DELETE FROM...")
+                            cursor.execute(f'DELETE FROM "{table_name}";')
+                            typer.echo(f"    ✓ Table {table_name} cleared using DELETE (might be slower)")
+                    else:
+                        raise e
             except Exception as e:
-                # If CASCADE fails, try without it
-                if "permission denied" in str(e):
-                    try:
-                        execute_query(f'TRUNCATE TABLE "{table_name}";', fetch=False)
-                        typer.echo(f"    ✓ Table {table_name} cleared successfully")
-                    except Exception as e2:
-                        # If regular TRUNCATE fails too, try DELETE as a last resort
-                        typer.echo(f"    ⚠️ TRUNCATE failed, trying DELETE FROM...")
-                        execute_query(f'DELETE FROM "{table_name}";', fetch=False)
-                        typer.echo(f"    ✓ Table {table_name} cleared using DELETE (might be slower)")
-                else:
-                    typer.echo(f"    ✗ Failed to clear table {table_name}: {str(e)}")
+                typer.echo(f"    ✗ Failed to clear table {table_name}: {str(e)}")
         
         # Create default user if not exists
         if not no_default_user:
-            # Check if user with ID 1 exists
-            user_exists = execute_query(
-                "SELECT COUNT(*) as count FROM users WHERE id = 1"
-            )
-            if user_exists and user_exists[0]["count"] == 0:
+            cursor.execute("SELECT COUNT(*) FROM users WHERE id = 1")
+            if cursor.fetchone()[0] == 0:
                 logger.info("Creating default user...")
-                # Create a default user using our repository function
-                default_user = User(
-                    id=1,
-                    email="admin@automagik",
-                    user_data={"name": "Automagik Admin"}
-                )
-                user_id = create_user(default_user)
-                typer.echo(f"✅ Created default user (ID: {user_id})")
-            else:
-                typer.echo("Default user already exists")
+                cursor.execute("""
+                    INSERT INTO users (id, email, created_at, updated_at)
+                    VALUES (1, 'admin@automagik', NOW(), NOW())
+                """)
+                conn.commit()
+                typer.echo("✅ Created default user (ID: 1)")
         else:
             typer.echo("Skipping default user creation as requested")
+        
+        # Close the connection
+        cursor.close()
+        conn.close()
         
         typer.echo("✅ All data has been cleared from the database!")
         
