@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from uuid import UUID
 from pydantic_ai import RunContext
-from src.utils.db import execute_query
+from src.db import execute_query
 from src.tools.memory_tools.common import map_agent_id
 
 logger = logging.getLogger(__name__)

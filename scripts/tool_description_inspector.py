@@ -101,7 +101,7 @@ def extract_memory_names_from_db() -> List[str]:
         List of memory names found in the database
     """
     try:
-        from src.utils.db import execute_query
+        from src.db import execute_query
         
         # Query to get all memory names
         query = "SELECT name FROM memories ORDER BY name ASC"

@@ -16,6 +16,7 @@ from src.db.connection import (
     get_db_connection,
     get_db_cursor,
     close_connection_pool,
+    get_connection_pool,
 )
 
 # Export repository functions

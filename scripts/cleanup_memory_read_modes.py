@@ -8,7 +8,7 @@ This script:
 
 import os
 import logging
-from src.utils.db import execute_query
+from src.db import execute_query
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
