@@ -23,6 +23,7 @@ _pool: Optional[ThreadedConnectionPool] = None
 def get_db_config() -> Dict[str, Any]:
     """Get database configuration from connection string or individual settings."""
     # Try to use DATABASE_URL first
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
     if settings.DATABASE_URL:
         try:
             # Parse the database URL
@@ -59,7 +60,8 @@ def get_db_config() -> Dict[str, Any]:
 def get_connection_pool() -> ThreadedConnectionPool:
     """Get or create a database connection pool."""
     global _pool
-
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
+    
     if _pool is None:
         config = get_db_config()
         max_retries = 5
@@ -144,6 +146,7 @@ def get_connection_pool() -> ThreadedConnectionPool:
 @contextmanager
 def get_db_connection() -> Generator:
     """Get a database connection from the pool."""
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
     pool = get_connection_pool()
     conn = None
     try:
@@ -161,6 +164,7 @@ def get_db_connection() -> Generator:
 @contextmanager
 def get_db_cursor(commit: bool = False) -> Generator:
     """Get a database cursor with automatic commit/rollback."""
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
     with get_db_connection() as conn:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         try:
@@ -189,6 +193,7 @@ def execute_query(
     Returns:
         List of records as dictionaries if fetch=True, otherwise empty list
     """
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
     with get_db_cursor(commit=commit) as cursor:
         cursor.execute(query, params)
 
@@ -205,13 +210,15 @@ def execute_batch(query: str, params_list: List[Tuple], commit: bool = True) -> 
         params_list: List of parameter tuples
         commit: Whether to commit the transaction
     """
-    with get_db_cursor(commit=commit) as cursor:
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
+    with get_db_cursor(commit=commit) as cursor:    
         execute_values(cursor, query, params_list)
 
 
 def close_connection_pool() -> None:
     """Close the database connection pool."""
     global _pool
+    logger.warning("🚨🚨🚨 DEPRECATED STOP USING src/utils/db.py and start using src/db/db.py instead!!")
     if _pool:
         _pool.closeall()
         _pool = None
