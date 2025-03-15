@@ -101,7 +101,10 @@ def db_init(
         logger=logger, force=force
     )
     
-    typer.echo("✅ Database initialization completed!")
+    if force:
+        typer.echo("✅ Database initialization completed!")
+    else:
+        typer.echo("✅ Database verification completed!")
 
 def create_required_tables(
     db_host, db_port, db_name, db_user, db_password,
@@ -136,6 +139,8 @@ def create_required_tables(
             logger.info("Existing tables dropped.")
         
         # Create the agents table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'agents')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 id SERIAL PRIMARY KEY,
@@ -152,9 +157,14 @@ def create_required_tables(
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        logger.info("Created agents table")
+        if table_exists:
+            logger.info("Verified agents table exists")
+        else:
+            logger.info("Created agents table")
         
         # Create the users table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -165,9 +175,14 @@ def create_required_tables(
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        logger.info("Created users table")
+        if table_exists:
+            logger.info("Verified users table exists")
+        else:
+            logger.info("Created users table")
         
         # Create the sessions table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sessions')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -181,9 +196,14 @@ def create_required_tables(
                 run_finished_at TIMESTAMPTZ
             )
         """)
-        logger.info("Created sessions table")
+        if table_exists:
+            logger.info("Verified sessions table exists")
+        else:
+            logger.info("Created sessions table")
         
         # Create the conversations table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'conversations')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id SERIAL PRIMARY KEY,
@@ -194,9 +214,14 @@ def create_required_tables(
                 metadata JSONB
             )
         """)
-        logger.info("Created conversations table")
+        if table_exists:
+            logger.info("Verified conversations table exists")
+        else:
+            logger.info("Created conversations table")
         
         # Create the messages table based on the actual schema
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'messages')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -219,9 +244,14 @@ def create_required_tables(
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
-        logger.info("Created messages table")
+        if table_exists:
+            logger.info("Verified messages table exists")
+        else:
+            logger.info("Created messages table")
         
         # Create the memories table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'memories')")
+        table_exists = cursor.fetchone()[0]
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -238,7 +268,10 @@ def create_required_tables(
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        logger.info("Created memories table")
+        if table_exists:
+            logger.info("Verified memories table exists")
+        else:
+            logger.info("Created memories table")
         
         # Create default user if needed
         cursor.execute("SELECT COUNT(*) FROM users")
@@ -261,7 +294,10 @@ def create_required_tables(
         cursor.close()
         conn.close()
         
-        logger.info("✅ All required tables created successfully!")
+        if force:
+            logger.info("✅ All required tables created successfully!")
+        else:
+            logger.info("✅ Database schema verified successfully!")
         return True
     except Exception as e:
         logger.error(f"❌ Failed to create tables: {e}")
