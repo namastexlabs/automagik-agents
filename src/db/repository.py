@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Union, Tuple
 
 from src.db.connection import execute_query, execute_batch
-from src.db.models import Agent, User, Session, Message, Memory, Conversation
+from src.db.models import Agent, User, Session, Message, Memory
 from src.version import SERVICE_INFO
 
 # Configure logger
