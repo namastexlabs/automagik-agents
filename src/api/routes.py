@@ -26,7 +26,7 @@ from src.api.models import (
 # Import memory router
 from src.api.memory_routes import memory_router
 from src.memory.pg_message_store import PostgresMessageStore
-from src.db import execute_query, get_db_connection
+from src.db import execute_query, get_db_connection, get_user_by_identifier, list_users, update_user, list_sessions, create_session
 from psycopg2.extras import RealDictCursor
 
 # Create API router for v1 endpoints
@@ -53,11 +53,11 @@ async def list_agents():
         description = None
         
         try:
-            from src.agents.models.agent_db import get_agent_by_name
-            db_agent = get_agent_by_name(name)
-            if db_agent:
-                model = db_agent.get("model", "unknown")
-                description = db_agent.get("description")
+            from src.db import get_agent_by_name
+            agent = get_agent_by_name(name)
+            if agent:
+                model = agent.model or "unknown"
+                description = agent.description
         except Exception as e:
             logger.warning(f"Error getting agent details from database: {str(e)}")
         
@@ -96,10 +96,10 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         
         # If agent_id is not set, try to get it from the database
         if agent_id is None:
-            from src.agents.models.agent_db import get_agent_by_name
-            db_agent = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
-            if db_agent:
-                agent_id = db_agent["id"]
+            from src.db import get_agent_by_name
+            agent_db = get_agent_by_name(f"{agent_name}_agent" if not agent_name.endswith('_agent') else agent_name)
+            if agent_db:
+                agent_id = agent_db.id
                 # Save it back to the agent instance for future use
                 agent.db_id = agent_id
                 logging.info(f"Found agent ID {agent_id} for agent {agent_name}")
@@ -132,14 +132,32 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             # If no session_id is provided or no session found with the provided name
             # Create a new session with the session_name if provided
             try:
-                new_session_id = store.create_session(
+                # Use the repository pattern to create a session
+                from src.db.models import Session
+                
+                # Create metadata with session_origin if provided
+                metadata = {}
+                if session_origin:
+                    metadata['session_origin'] = session_origin
+                
+                # Create a Session model
+                new_session = Session(
+                    id=uuid.uuid4(),  # Explicitly set a UUID
                     user_id=request.user_id,
-                    session_origin=session_origin,
-                    session_name=session_name,
-                    agent_id=agent_id
+                    agent_id=agent_id,
+                    name=session_name,
+                    platform=session_origin or 'web',
+                    metadata=metadata
                 )
-                request.session_id = new_session_id
-                logger.info(f"Created new session with ID: {new_session_id}, name: {session_name}, and origin: {session_origin}")
+                
+                # Create the session using the repository function
+                session_id = create_session(new_session)
+                if not session_id:
+                    logger.error("Failed to create session")
+                    raise HTTPException(status_code=500, detail="Failed to create session")
+                    
+                request.session_id = str(session_id)
+                logger.info(f"Created new session with ID: {session_id}, name: {session_name}, and origin: {session_origin}")
             except Exception as e:
                 # Check for unique constraint violation
                 if "duplicate key value violates unique constraint" in str(e) and "sessions_name_key" in str(e):
@@ -181,12 +199,31 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 else:
                     # Name doesn't exist yet, create a new session with this name
                     try:
-                        session_id = store.create_session(
-                            user_id=request.user_id, 
-                            session_origin=session_origin, 
-                            session_name=request.session_id,
-                            agent_id=agent_id
+                        # Use the repository pattern to create a session
+                        from src.db.models import Session
+                        
+                        # Create metadata with session_origin if provided
+                        metadata = {}
+                        if session_origin:
+                            metadata['session_origin'] = session_origin
+                        
+                        # Create a Session model
+                        new_session = Session(
+                            id=uuid.uuid4(),  # Explicitly set a UUID
+                            user_id=request.user_id,
+                            agent_id=agent_id,
+                            name=request.session_id,
+                            platform=session_origin or 'web',
+                            metadata=metadata
                         )
+                        
+                        # Create the session using the repository function
+                        session_id = create_session(new_session)
+                        if not session_id:
+                            logger.error("Failed to create session")
+                            raise HTTPException(status_code=500, detail="Failed to create session")
+                            
+                        session_id = str(session_id)
                         logger.info(f"Created new session with ID: {session_id} and name: {request.session_id}")
                     except Exception as e:
                         # Check for unique constraint violation
@@ -207,7 +244,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             if not store.session_exists(request.session_id):
                 # Create the session with the provided ID
                 try:
-                    store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name, agent_id)
+                    store._ensure_session_exists(request.session_id, request.user_id, agent_id, session_name, session_origin)
                     logger.info(f"Created session with provided ID: {request.session_id}, name: {session_name}, and origin: {session_origin}")
                 except ValueError as e:
                     # Handle agent ID mismatch error
@@ -219,7 +256,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             else:
                 # Session exists - update the session with the current session_origin and session_name if provided
                 try:
-                    store._ensure_session_exists(request.session_id, request.user_id, session_origin, session_name, agent_id)
+                    store._ensure_session_exists(request.session_id, request.user_id, agent_id, session_name, session_origin)
                     
                     # If a session name is provided but the session has no name, update it
                     if session_name:
@@ -240,35 +277,75 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                     
                     logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
                 except ValueError as e:
-                    # Handle agent ID mismatch error
-                    logger.error(f"Session agent mismatch error: {str(e)}")
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
-                    )
+                    # Handle agent ID mismatch error - look up the existing agent ID instead of failing
+                    if "already associated with agent ID" in str(e):
+                        # Get the actual agent ID associated with this session
+                        session_details = execute_query(
+                            "SELECT agent_id FROM sessions WHERE id = %s::uuid", 
+                            (request.session_id,)
+                        )
+                        if session_details and session_details[0].get('agent_id'):
+                            existing_agent_id = session_details[0].get('agent_id')
+                            logger.info(f"Using existing agent ID {existing_agent_id} for session {request.session_id} instead of {agent_id}")
+                            agent_id = existing_agent_id
+                        else:
+                            # If we can't find the agent ID for some reason, log and continue with original error
+                            logger.error(f"Session agent mismatch error: {str(e)}")
+                            raise HTTPException(
+                                status_code=409,
+                                detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
+                            )
+                    else:
+                        # For other ValueError exceptions, maintain the original behavior
+                        logger.error(f"Session error: {str(e)}")
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Session error: {str(e)}"
+                        )
         
         # Store channel_payload in the users table if provided
         if request.channel_payload:
             try:
                 # Use the user_id directly as an integer
-                numeric_user_id = request.user_id if request.user_id is not None else 1
-                
-                # Update the user record with the channel_payload
-                execute_query(
-                    """
-                    UPDATE users 
-                    SET channel_payload = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        json.dumps(request.channel_payload),
-                        numeric_user_id
-                    ),
-                    fetch=False
-                )
-                logger.info(f"Updated channel_payload for user {numeric_user_id}")
+                user_id_int = request.user_id
+                if user_id_int:
+                    # Look up or create user
+                    from src.db import User, get_user, create_user, update_user
+                    
+                    user = get_user(user_id_int)
+                    if not user:
+                        # Create a new user with this ID
+                        user = User(
+                            id=user_id_int,
+                            user_data={"channel_payload": request.channel_payload}
+                        )
+                        create_user(user)
+                    else:
+                        # Update existing user with channel_payload
+                        user_data = user.user_data or {}
+                        user_data["channel_payload"] = request.channel_payload
+                        user.user_data = user_data
+                        update_user(user)
+                    
+                    logger.info(f"Updated user {user_id_int} with channel_payload")
             except Exception as e:
-                logger.error(f"Error updating channel_payload for user {request.user_id}: {str(e)}")
+                logger.error(f"Error storing channel_payload for user {request.user_id}: {str(e)}")
+        
+        # Resolve the agent name to a numeric ID if needed
+        try:
+            # If agent_id is a string, try to look up the actual agent ID from the database
+            if isinstance(agent_id, str) and not agent_id.isdigit():
+                from src.db import get_agent_by_name
+                agent_db = get_agent_by_name(agent_id)
+                if agent_db and agent_db.id:
+                    resolved_agent_id = agent_db.id
+                    logger.info(f"Resolved agent name '{agent_id}' to numeric ID {resolved_agent_id}")
+                    agent_id = resolved_agent_id
+        except Exception as e:
+            logger.warning(f"Error resolving agent name to ID: {str(e)}")
+        
+        # Update agent_id in the request
+        request.agent_id = agent_id
         
         # Get message history with user_id
         message_history = MessageHistory(request.session_id, user_id=request.user_id)
@@ -331,10 +408,10 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
 @router.get("/sessions", response_model=SessionListResponse, tags=["Sessions"],
             summary="List All Sessions",
             description="Retrieve a list of all sessions with pagination options.")
-async def list_sessions(
-    page: int = 1, 
-    page_size: int = 50, 
-    sort_desc: bool = True
+async def list_sessions_route(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    sort_desc: bool = Query(True, description="Sort by most recent first")
 ):
     """List all sessions with pagination.
     
@@ -347,26 +424,43 @@ async def list_sessions(
         List of sessions with pagination info.
     """
     try:
-        # Get message store
-        message_store = PostgresMessageStore()
+        logger.info(f"Listing sessions - page={page}, page_size={page_size}, sort_desc={sort_desc}")
         
-        # Get all sessions
-        result = message_store.get_all_sessions(
+        # Use the enhanced repository function with pagination
+        sessions, total_count = list_sessions(
             page=page,
             page_size=page_size,
             sort_desc=sort_desc
         )
         
+        # Calculate total pages
+        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        
         # Convert to session info objects
-        sessions = [SessionInfo(**session) for session in result['sessions']]
+        session_info_list = [
+            SessionInfo(
+                id=str(session.id),
+                name=session.name,
+                user_id=session.user_id,
+                agent_id=session.agent_id,
+                platform=session.platform,
+                metadata=session.metadata,
+                created_at=session.created_at,
+                updated_at=session.updated_at,
+                run_finished_at=session.run_finished_at
+            ) 
+            for session in sessions
+        ]
+        
+        logger.info(f"Found {len(session_info_list)} sessions (total {total_count})")
         
         # Create response
         response = SessionListResponse(
-            sessions=sessions,
-            total_count=result['total_count'],
-            page=result['page'],
-            page_size=result['page_size'],
-            total_pages=result['total_pages']
+            sessions=session_info_list,
+            total_count=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
         )
         
         return response
@@ -381,12 +475,12 @@ async def list_sessions(
            tags=["Sessions"],
            summary="Get Session History",
            description="Retrieve a session's message history with pagination options. You can use either the session ID (UUID) or a session name.")
-async def get_session(
+async def get_session_route(
     session_id_or_name: str,
-    page: int = 1,
-    page_size: int = 50,
-    sort_desc: bool = True,
-    hide_tools: bool = False
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=100, description="Items per page"),
+    sort_desc: bool = Query(True, description="Sort by most recent first"),
+    hide_tools: bool = Query(False, description="Exclude tool calls and outputs")
 ):
     """Get a session's message history with pagination.
     
@@ -401,43 +495,27 @@ async def get_session(
         The session's message history with pagination info.
     """
     try:
-        # Get the message store
-        message_store = PostgresMessageStore()
+        logger.info(f"Retrieving session with identifier: {session_id_or_name}")
+        
+        # Use repository functions to get the session
+        from src.db import get_session, get_session_by_name
         
         # Determine if the input is a UUID or session name
-        session_id = session_id_or_name
+        session = None
         try:
-            # Validate if it's a UUID
-            uuid.UUID(session_id_or_name)
+            # Try to parse as UUID
+            session_id = uuid.UUID(session_id_or_name)
+            logger.info(f"Looking up session by ID: {session_id}")
+            session = get_session(session_id)
         except ValueError:
             # Not a UUID, try to look up by name
             logger.info(f"Looking up session by name: {session_id_or_name}")
-            
-            # Use the PostgresMessageStore method to get session by name
-            session_info = message_store.get_session_by_name(session_id_or_name)
-            
-            if not session_info:
-                return SessionResponse(
-                    session_id=session_id_or_name,
-                    messages=[],
-                    exists=False,
-                    total_messages=0,
-                    current_page=1,
-                    total_pages=0
-                )
-            
-            # Found a session with matching name
-            session_id = session_info["id"]
-            logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
-
-        # Get message history with the resolved ID
-        message_history = MessageHistory(session_id)
+            session = get_session_by_name(session_id_or_name)
         
         # Check if session exists
-        exists = message_history._store.session_exists(session_id)
-        
-        if not exists:
-            session_response = SessionResponse(
+        if not session:
+            logger.warning(f"Session not found with identifier: {session_id_or_name}")
+            return SessionResponse(
                 session_id=session_id_or_name,
                 messages=[],
                 exists=False,
@@ -445,34 +523,40 @@ async def get_session(
                 current_page=1,
                 total_pages=0
             )
-        else:
-            # Get paginated messages
-            paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
-                page=page,
-                page_size=page_size,
-                sort_desc=sort_desc
+        
+        session_id = session.id
+        logger.info(f"Found session with ID: {session_id}")
+        
+        # Get message history
+        message_history = MessageHistory(str(session_id))
+        
+        # Get paginated messages
+        paginated_messages, total_messages, current_page, total_pages = message_history.get_paginated_messages(
+            page=page,
+            page_size=page_size,
+            sort_desc=sort_desc
+        )
+        
+        # Format messages for API response
+        formatted_messages = [
+            message for message in (
+                message_history.format_message_for_api(msg, hide_tools=hide_tools)
+                for msg in paginated_messages
             )
-            
-            # Format messages for API response
-            formatted_messages = [
-                message for message in (
-                    message_history.format_message_for_api(msg, hide_tools=hide_tools)
-                    for msg in paginated_messages
-                )
-                if message is not None
-            ]
-            
-            # Wrap each formatted message dict into a MessageModel to ensure Pydantic processing
-            clean_messages = [MessageModel(**msg) for msg in formatted_messages]
-            
-            session_response = SessionResponse(
-                session_id=session_id,
-                messages=clean_messages,
-                exists=True,
-                total_messages=total_messages,
-                current_page=current_page,
-                total_pages=total_pages
-            )
+            if message is not None
+        ]
+        
+        # Wrap each formatted message dict into a MessageModel to ensure Pydantic processing
+        clean_messages = [MessageModel(**msg) for msg in formatted_messages]
+        
+        session_response = SessionResponse(
+            session_id=str(session_id),
+            messages=clean_messages,
+            exists=True,
+            total_messages=total_messages,
+            current_page=current_page,
+            total_pages=total_pages
+        )
         
         return session_response
     except Exception as e:
@@ -485,7 +569,7 @@ async def get_session(
 @router.delete("/sessions/{session_id_or_name}", tags=["Sessions"],
               summary="Delete Session",
               description="Delete a session's message history by its ID or name.")
-async def delete_session(session_id_or_name: str):
+async def delete_session_route(session_id_or_name: str):
     """Delete a session's message history.
     
     Args:
@@ -495,54 +579,59 @@ async def delete_session(session_id_or_name: str):
         Status of the deletion operation.
     """
     try:
-        # Get the message store
-        message_store = PostgresMessageStore()
+        logger.info(f"Attempting to delete session with identifier: {session_id_or_name}")
+        
+        # Use repository functions to get and delete the session
+        from src.db import get_session, get_session_by_name, delete_session
         
         # Determine if the input is a UUID or session name
-        session_id = session_id_or_name
+        session = None
         try:
-            # Validate if it's a UUID
-            uuid.UUID(session_id_or_name)
+            # Try to parse as UUID
+            session_id = uuid.UUID(session_id_or_name)
+            logger.info(f"Looking up session by ID: {session_id}")
+            session = get_session(session_id)
         except ValueError:
             # Not a UUID, try to look up by name
             logger.info(f"Looking up session by name: {session_id_or_name}")
-            
-            # Use the PostgresMessageStore method to get session by name
-            session_info = message_store.get_session_by_name(session_id_or_name)
-            
-            if not session_info:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Session with name '{session_id_or_name}' not found"
-                )
-            
-            # Found a session with matching name
-            session_id = session_info["id"]
-            logger.info(f"Found session ID {session_id} for name {session_id_or_name}")
+            session = get_session_by_name(session_id_or_name)
         
         # Check if session exists
-        if not message_store.session_exists(session_id):
+        if not session:
+            logger.warning(f"Session not found with identifier: {session_id_or_name}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Session {session_id_or_name} not found"
+                detail=f"Session with identifier '{session_id_or_name}' not found"
             )
         
-        # Clear the session messages
-        message_store.clear_session(session_id)
+        session_id = session.id
+        logger.info(f"Found session with ID: {session_id}")
         
-        # Also delete the session from the sessions table
-        execute_query(
-            "DELETE FROM sessions WHERE id = %s",
-            (session_id,),
-            fetch=False
-        )
+        # Use the repository function to delete the session
+        success = delete_session(session_id)
+        
+        if not success:
+            logger.error(f"Failed to delete session with ID: {session_id}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete session: {session_id}"
+            )
+        
+        # Also clear the session messages from the message store
+        # This is still needed because repository functions don't handle messages yet
+        message_store = PostgresMessageStore()
+        try:
+            message_store.clear_session(str(session_id))
+            logger.info(f"Cleared messages for session: {session_id}")
+        except Exception as e:
+            logger.warning(f"Could not clear messages for session {session_id}: {str(e)}")
         
         logger.info(f"Successfully deleted session: {session_id_or_name}")
         
         return DeleteSessionResponse(
             status="success",
-            session_id=session_id,
-            message="Session history deleted successfully"
+            session_id=str(session_id),
+            message="Session deleted successfully"
         )
     except HTTPException:
         raise
@@ -555,82 +644,47 @@ async def delete_session(session_id_or_name: str):
 
 # User management endpoints
 @router.get("/users", response_model=UserListResponse, tags=["Users"],
-            summary="List Users",
-            description="Returns a list of all users with pagination options.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def list_users(
-    page: int = Query(1, description="Page number (1-based)"),
-    page_size: int = Query(50, description="Number of users per page"),
-    sort_desc: bool = Query(True, description="Sort by most recent first if True")
+           summary="List Users",
+           description="Returns a paginated list of users.\n\n**Requires Authentication**: This endpoint requires an API key.")
+async def list_users_route(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page")
 ):
     """List all users with pagination."""
     try:
-        # Get total count first for pagination
-        count_result = execute_query("SELECT COUNT(*) as count FROM users")
-        total_count = count_result[0]['count'] if count_result else 0
+        logger.info(f"Listing users - page={page}, page_size={page_size}")
         
-        # Calculate offset based on page and page_size
-        offset = (page - 1) * page_size
+        # Use the repository function
+        users, total_count = list_users(page=page, page_size=page_size)
         
-        # Build the query with sorting
-        order_direction = "DESC" if sort_desc else "ASC"
-        query = f"""
-            SELECT id, email, phone_number, created_at, updated_at, user_data 
-            FROM users 
-            ORDER BY created_at {order_direction} 
-            LIMIT %s OFFSET %s
-        """
-        
-        logger.info(f"Fetching users with query: {query}")
-        
-        # Execute the paginated query
-        users_data = execute_query(query, (page_size, offset))
-        logger.info(f"Retrieved {len(users_data)} users from database")
-        
-        # Process the results
-        users = []
-        for user in users_data:
-            # Log raw user data for debugging
-            logger.info(f"Processing user ID {user['id']}")
-            logger.info(f"  Raw email: {repr(user.get('email'))}")
-            logger.info(f"  Raw phone_number: {repr(user.get('phone_number'))}")
-            logger.info(f"  Raw user_data type: {type(user.get('user_data'))}")
-            logger.info(f"  Raw user_data: {repr(user.get('user_data'))}")
-            
-            # Parse user_data JSON if it exists
-            user_data = {}
-            if user.get('user_data'):
-                if isinstance(user['user_data'], str):
-                    try:
-                        user_data = json.loads(user['user_data'])
-                        logger.info(f"  Parsed user_data from string: {user_data}")
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"  Failed to parse user_data string: {str(e)}")
-                        user_data = {}
-                else:
-                    # Already a dict or other object
-                    user_data = user['user_data']
-                    logger.info(f"  Using user_data as is (not a string): {type(user_data)}")
-            
-            # Create UserInfo object
-            user_info = UserInfo(
-                id=user['id'],
-                email=user.get('email'),
-                phone_number=user.get('phone_number'),
-                user_data=user_data,
-                created_at=user.get('created_at'),
-                updated_at=user.get('updated_at')
+        # Create the response
+        user_list = [
+            UserInfo(
+                id=user.id,
+                email=user.email,
+                phone_number=user.phone_number,
+                user_data=user.user_data,
+                created_at=user.created_at,
+                updated_at=user.updated_at
             )
-            users.append(user_info)
+            for user in users
+        ]
         
-        # Calculate total pages
+        # Calculate pagination metadata
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+        has_next = page < total_pages
+        has_prev = page > 1
         
+        logger.info(f"Found {len(user_list)} users (total {total_count})")
+        
+        # Return paginated response
         return UserListResponse(
-            users=users,
-            total_count=total_count,
+            users=user_list,
+            total=total_count,
             page=page,
             page_size=page_size,
-            total_pages=total_pages
+            has_next=has_next,
+            has_prev=has_prev
         )
     except Exception as e:
         logger.error(f"Error listing users: {str(e)}")
@@ -639,101 +693,52 @@ async def list_users(
 @router.post("/users", response_model=UserInfo, tags=["Users"],
             summary="Create User",
             description="Creates a new user with email, phone_number, and/or user_data fields.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def create_user(user: UserCreate):
+async def create_user_route(user_create: UserCreate):
     """Create a new user."""
     try:
         # Need at least one identifier - email or phone_number
-        if not user.email and not user.phone_number:
+        if not user_create.email and not user_create.phone_number:
             raise HTTPException(status_code=400, detail="At least one of email or phone_number must be provided")
 
-        # Check if user already exists
-        existing_conditions = []
-        existing_params = []
+        logger.info(f"Creating user with email: {user_create.email}, phone_number: {user_create.phone_number}")
+        if user_create.user_data:
+            logger.info(f"User data: {json.dumps(user_create.user_data)}")
         
-        if user.email:
-            existing_conditions.append("email = %s")
-            existing_params.append(user.email)
-            
-        if user.phone_number:
-            existing_conditions.append("phone_number = %s")
-            existing_params.append(user.phone_number)
-            
-        query = f"SELECT id FROM users WHERE {' OR '.join(existing_conditions)}"
-        existing = execute_query(query, tuple(existing_params))
+        # Create a User model from the UserCreate data
+        from src.db.models import User
+        from src.db import create_user
         
-        if existing and len(existing) > 0:
-            raise HTTPException(status_code=409, detail=f"User already exists with the provided email or phone number")
+        user = User(
+            email=user_create.email,
+            phone_number=user_create.phone_number,
+            user_data=user_create.user_data
+        )
         
-        # Debug logging for values being inserted
-        logger.info(f"Creating user with email: {user.email}, phone_number: {user.phone_number}")
-        if user.user_data:
-            logger.info(f"User data: {json.dumps(user.user_data)}")
+        # Use the repository function to create the user
+        user_id = create_user(user)
         
-        # Construct the insert query
-        now = datetime.now()
+        if not user_id:
+            logger.error("Failed to create user")
+            raise HTTPException(status_code=500, detail="Failed to create user")
         
-        # Create user_data JSON string if provided
-        user_data_json = None
-        if user.user_data:
-            try:
-                user_data_json = json.dumps(user.user_data)
-                logger.info(f"Serialized user_data JSON: {user_data_json}")
-            except Exception as e:
-                logger.error(f"Error serializing user_data: {str(e)}")
-                raise HTTPException(status_code=400, detail=f"Invalid user_data format: {str(e)}")
+        # Get the created user
+        from src.db import get_user
+        created_user = get_user(user_id)
         
-        # Execute insert with explicit transaction handling
-        result = None
-        with get_db_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                try:
-                    cursor.execute(
-                        """
-                        INSERT INTO users (email, phone_number, user_data, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                        RETURNING id, email, phone_number, user_data, created_at, updated_at
-                        """,
-                        (user.email, user.phone_number, user_data_json, now, now)
-                    )
-                    
-                    # Fetch the result before committing
-                    result = cursor.fetchall()
-                    
-                    # Explicitly commit the transaction
-                    conn.commit()
-                    logger.info(f"User creation transaction committed successfully")
-                    
-                except Exception as e:
-                    conn.rollback()
-                    logger.error(f"Error in user creation transaction: {str(e)}")
-                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        if not created_user:
+            logger.error(f"Could not retrieve created user with ID: {user_id}")
+            raise HTTPException(status_code=500, detail="User was created but could not be retrieved")
         
-        if not result or len(result) == 0:
-            logger.error("No result returned from user creation query")
-            raise HTTPException(status_code=500, detail="Failed to create user: No result returned")
-            
-        new_user = result[0]
-        logger.info(f"User created with ID: {new_user['id']}")
+        logger.info(f"User created with ID: {created_user.id}")
         
-        # Verify the returned data
-        logger.info(f"User created - phone_number: {new_user.get('phone_number')}, user_data type: {type(new_user.get('user_data'))}")
-        
-        # Parse user_data if it's a string
-        user_data_parsed = new_user.get("user_data")
-        if user_data_parsed and isinstance(user_data_parsed, str):
-            try:
-                user_data_parsed = json.loads(user_data_parsed)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse user_data from database: {user_data_parsed}")
-        
-        # Create and return the user with properly parsed data
+        # Return user info
         return UserInfo(
-            id=new_user["id"],
-            email=new_user.get("email"),
-            phone_number=new_user.get("phone_number"),
-            user_data=user_data_parsed,
-            created_at=new_user.get("created_at"),
-            updated_at=new_user.get("updated_at")
+            id=created_user.id,
+            email=created_user.email,
+            phone_number=created_user.phone_number,
+            user_data=created_user.user_data,
+            created_at=created_user.created_at,
+            updated_at=created_user.updated_at
         )
     except HTTPException as e:
         # Re-raise HTTP exceptions
@@ -745,53 +750,32 @@ async def create_user(user: UserCreate):
 @router.get("/users/{user_identifier}", response_model=UserInfo, tags=["Users"],
             summary="Get User",
             description="Returns details for a specific user by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def get_user(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
+async def get_user_route(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Get user details by ID, email, or phone number."""
     try:
         logger.info(f"Looking up user with identifier: {user_identifier}")
         
-        # Check if user_identifier is an integer (ID)
-        if user_identifier.isdigit():
-            # It's an ID, use it directly
-            user_id = int(user_identifier)
-            logger.info(f"Identifier is numeric, treating as user ID: {user_id}")
-            user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
-        else:
-            # Try email or phone number
-            logger.info(f"Identifier is non-numeric, treating as email or phone number")
-            user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
+        # Use the repository function instead of direct SQL
+        user = get_user_by_identifier(user_identifier)
         
         # Check if user exists
-        if not user or len(user) == 0:
+        if not user:
             logger.warning(f"User not found with identifier: {user_identifier}")
             raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
         
         # Log the found user details
-        user_data = user[0]
-        logger.info(f"Found user with ID: {user_data['id']}")
-        logger.info(f"  Raw email: {repr(user_data.get('email'))}")
-        logger.info(f"  Raw phone_number: {repr(user_data.get('phone_number'))}")
-        logger.info(f"  Raw user_data type: {type(user_data.get('user_data'))}")
-        logger.info(f"  Raw user_data: {repr(user_data.get('user_data'))}")
+        logger.info(f"Found user with ID: {user.id}")
+        logger.info(f"  Email: {user.email}")
+        logger.info(f"  Phone number: {user.phone_number}")
         
-        # Parse user_data if it's a string
-        parsed_user_data = user_data.get("user_data")
-        if parsed_user_data and isinstance(parsed_user_data, str):
-            try:
-                parsed_user_data = json.loads(parsed_user_data)
-                logger.info(f"  Parsed user_data from string: {parsed_user_data}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"  Failed to parse user_data string: {str(e)}")
-                parsed_user_data = {}
-        
-        # Convert the user to a UserInfo model with properly processed data
+        # Return user info
         return UserInfo(
-            id=user_data["id"],
-            email=user_data.get("email"),
-            phone_number=user_data.get("phone_number"),
-            user_data=parsed_user_data,
-            created_at=user_data.get("created_at"),
-            updated_at=user_data.get("updated_at")
+            id=user.id,
+            email=user.email,
+            phone_number=user.phone_number,
+            user_data=user.user_data,
+            created_at=user.created_at,
+            updated_at=user.updated_at
         )
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -803,7 +787,7 @@ async def get_user(user_identifier: str = Path(..., description="The user ID, em
 @router.put("/users/{user_identifier}", response_model=UserInfo, tags=["Users"],
             summary="Update User",
             description="Updates an existing user identified by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., description="The user ID, email, or phone number")):
+async def update_user_route(user_update: UserUpdate, user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Update an existing user."""
     try:
         logger.info(f"Updating user with identifier: {user_identifier}")
@@ -811,135 +795,52 @@ async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., 
         if user_update.user_data:
             logger.info(f"user_data={json.dumps(user_update.user_data)}")
         
-        # First, find the user
-        if user_identifier.isdigit():
-            # It's an ID, use it directly
-            user_id = int(user_identifier)
-            logger.info(f"Identifier is numeric, treating as user ID: {user_id}")
-            user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,))
-        else:
-            # Try email or phone number
-            logger.info(f"Identifier is non-numeric, treating as email or phone number")
-            user = execute_query("SELECT * FROM users WHERE email = %s OR phone_number = %s", 
-                              (user_identifier, user_identifier,))
+        # Find the user using the repository function
+        from src.db import get_user_by_identifier, update_user, get_user
+        
+        # Get the existing user
+        user = get_user_by_identifier(user_identifier)
         
         # Check if user exists
-        if not user or len(user) == 0:
+        if not user:
             logger.warning(f"User not found with identifier: {user_identifier}")
             raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
         
-        # Get the user ID from the query result
-        user_id = user[0]["id"]
-        logger.info(f"Found user with ID: {user_id}")
+        logger.info(f"Found user with ID: {user.id}")
         
-        # Build the update query dynamically based on what fields are provided
-        set_parts = []
-        params = []
-        
+        # Update the user fields with new data if provided
         if user_update.email is not None:
-            set_parts.append("email = %s")
-            params.append(user_update.email)
+            user.email = user_update.email
             
         if user_update.phone_number is not None:
-            set_parts.append("phone_number = %s")
-            params.append(user_update.phone_number)
+            user.phone_number = user_update.phone_number
             
         if user_update.user_data is not None:
-            set_parts.append("user_data = %s")
-            try:
-                user_data_json = json.dumps(user_update.user_data)
-                logger.info(f"Serialized user_data JSON: {user_data_json}")
-                params.append(user_data_json)
-            except Exception as e:
-                logger.error(f"Error serializing user_data: {str(e)}")
-                raise HTTPException(status_code=400, detail=f"Invalid user_data format: {str(e)}")
+            user.user_data = user_update.user_data
         
-        # Always update the updated_at timestamp
-        set_parts.append("updated_at = %s")
-        now = datetime.now()
-        params.append(now)
+        # Use the repository function to update the user
+        updated_user_id = update_user(user)
         
-        # Add the user_id as the last parameter
-        params.append(user_id)
+        if not updated_user_id:
+            logger.error(f"Failed to update user with ID: {user.id}")
+            raise HTTPException(status_code=500, detail="Failed to update user")
         
-        # If there's nothing to update, return the current user data
-        if not set_parts:
-            logger.info("No fields to update, returning current user data")
-            current_user = user[0]
-            
-            # Parse user_data if it's a string
-            current_user_data = current_user.get("user_data")
-            if current_user_data and isinstance(current_user_data, str):
-                try:
-                    current_user_data = json.loads(current_user_data)
-                except json.JSONDecodeError:
-                    current_user_data = {}
-            
-            return UserInfo(
-                id=current_user["id"],
-                email=current_user.get("email"),
-                phone_number=current_user.get("phone_number"),
-                user_data=current_user_data,
-                created_at=current_user.get("created_at"),
-                updated_at=current_user.get("updated_at")
-            )
+        # Get the updated user
+        updated_user = get_user(updated_user_id)
         
-        # Execute the update query with explicit transaction handling
-        logger.info(f"Updating user with query: SET {', '.join(set_parts)}")
+        if not updated_user:
+            logger.error(f"Could not retrieve updated user with ID: {updated_user_id}")
+            raise HTTPException(status_code=500, detail="User was updated but could not be retrieved")
         
-        # Use explicit transaction handling for the update
-        result = None
-        with get_db_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                try:
-                    # Build and execute the query
-                    query = f"""
-                        UPDATE users
-                        SET {", ".join(set_parts)}
-                        WHERE id = %s
-                        RETURNING id, email, phone_number, user_data, created_at, updated_at
-                    """
-                    
-                    cursor.execute(query, tuple(params))
-                    
-                    # Fetch the result before committing
-                    result = cursor.fetchall()
-                    
-                    # Explicitly commit the transaction
-                    conn.commit()
-                    logger.info(f"User update transaction committed successfully")
-                    
-                except Exception as e:
-                    conn.rollback()
-                    logger.error(f"Error in user update transaction: {str(e)}")
-                    raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-        
-        if not result or len(result) == 0:
-            logger.error("No result returned from user update query")
-            raise HTTPException(status_code=500, detail="Failed to update user: No result returned")
-            
-        updated_user = result[0]
-        logger.info(f"User updated - ID: {updated_user['id']}")
-        logger.info(f"  Updated phone_number: {updated_user.get('phone_number')}")
-        logger.info(f"  Updated user_data type: {type(updated_user.get('user_data'))}")
-        
-        # Parse user_data if it's a string
-        user_data_parsed = updated_user.get("user_data")
-        if user_data_parsed and isinstance(user_data_parsed, str):
-            try:
-                user_data_parsed = json.loads(user_data_parsed)
-                logger.info(f"  Parsed updated user_data: {user_data_parsed}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"  Failed to parse updated user_data: {str(e)}")
-                user_data_parsed = {}
+        logger.info(f"User updated - ID: {updated_user.id}")
         
         return UserInfo(
-            id=updated_user["id"],
-            email=updated_user.get("email"),
-            phone_number=updated_user.get("phone_number"),
-            user_data=user_data_parsed,
-            created_at=updated_user.get("created_at"),
-            updated_at=updated_user.get("updated_at")
+            id=updated_user.id,
+            email=updated_user.email,
+            phone_number=updated_user.phone_number,
+            user_data=updated_user.user_data,
+            created_at=updated_user.created_at,
+            updated_at=updated_user.updated_at
         )
     except HTTPException as e:
         # Re-raise HTTP exceptions
@@ -951,30 +852,40 @@ async def update_user(user_update: UserUpdate, user_identifier: str = Path(..., 
 @router.delete("/users/{user_identifier}", response_model=DeleteSessionResponse, tags=["Users"],
                summary="Delete User",
                description="Deletes a user account by ID, email, or phone number.\n\n**Requires Authentication**: This endpoint requires an API key.")
-async def delete_user(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
+async def delete_user_route(user_identifier: str = Path(..., description="The user ID, email, or phone number")):
     """Delete a user account by ID, email, or phone number."""
-    # Check if user_identifier is an integer (ID)
-    if user_identifier.isdigit():
-        # It's an ID, use it directly
-        user_id = int(user_identifier)
-        user = execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
-    else:
-        # Try email or phone number
-        user = execute_query("SELECT id FROM users WHERE email = %s OR phone_number = %s", (user_identifier, user_identifier,))
-    
-    # Check if user exists
-    if not user or len(user) == 0:
-        raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
-    
-    # Get the user ID from the query result
-    user_id = user[0]["id"]
-    
-    # Now delete the user
-    execute_query("DELETE FROM users WHERE id = %s", (user_id,), fetch=False)
-    
-    # Return a successful response
-    return DeleteSessionResponse(
-        status="success",
-        session_id=str(user_id),  # Use the session_id field to return the user_id
-        message=f"User with ID {user_id} deleted successfully"
-    ) 
+    try:
+        logger.info(f"Attempting to delete user with identifier: {user_identifier}")
+        
+        # Find the user using the repository function
+        from src.db import get_user_by_identifier, delete_user
+        
+        # Get the user to delete
+        user = get_user_by_identifier(user_identifier)
+        
+        # Check if user exists
+        if not user:
+            logger.warning(f"User not found with identifier: {user_identifier}")
+            raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
+        
+        user_id = user.id
+        logger.info(f"Found user with ID: {user_id}")
+        
+        # Use the repository function to delete the user
+        success = delete_user(user_id)
+        
+        if not success:
+            logger.error(f"Failed to delete user with ID: {user_id}")
+            raise HTTPException(status_code=500, detail=f"Failed to delete user with ID: {user_id}")
+        
+        logger.info(f"Successfully deleted user with ID: {user_id}")
+        
+        # Return a successful response
+        return DeleteSessionResponse(
+            status="success",
+            session_id=str(user_id),  # Use the session_id field to return the user_id
+            message=f"User with ID {user_id} deleted successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error deleting user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") 

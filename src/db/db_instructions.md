@@ -109,7 +109,7 @@ Repository functions provide a clean interface for database operations. They han
 ### Agents
 
 ```python
-from src.db import create_agent, get_agent, list_agents, update_agent, delete_agent
+from src.db import create_agent, get_agent, get_agent_by_name, list_agents, update_agent, delete_agent, link_session_to_agent, increment_agent_run_id
 
 # Create or update an agent
 agent_id = create_agent(agent)
@@ -132,12 +132,30 @@ updated_id = update_agent(agent)
 
 # Delete an agent
 success = delete_agent(agent_id)
+
+# Increment an agent's run ID
+success = increment_agent_run_id(agent_id)
+
+# Link a session to an agent
+success = link_session_to_agent(session_id, agent_id)
+
+# Link a session to an agent with error handling
+try:
+    import uuid
+    session_id_uuid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+    success = link_session_to_agent(session_id_uuid, agent_id)
+    if success:
+        print(f"Successfully linked session {session_id} to agent {agent_id}")
+    else:
+        print(f"Failed to link session {session_id} to agent {agent_id}")
+except Exception as e:
+    print(f"Error linking session to agent: {str(e)}")
 ```
 
 ### Users
 
 ```python
-from src.db import create_user, get_user, get_user_by_email, list_users, update_user, delete_user
+from src.db import create_user, get_user, get_user_by_email, get_user_by_identifier, list_users, update_user, delete_user
 
 # Create a user
 user_id = create_user(user)
@@ -148,8 +166,16 @@ user = get_user(user_id)
 # Get a user by email
 user = get_user_by_email("user@example.com")
 
+# Get a user by ID, email, or phone number
+user = get_user_by_identifier("user@example.com")  # Using email
+user = get_user_by_identifier("123456789")         # Using phone number
+user = get_user_by_identifier("42")                # Using ID
+
 # List all users
 users = list_users()
+
+# List users with pagination
+users, total_count = list_users(page=1, page_size=20)
 
 # Update a user
 user.email = "updated@example.com"
@@ -175,6 +201,20 @@ user_sessions = list_sessions(user_id=user_id)
 
 # List sessions for an agent
 agent_sessions = list_sessions(agent_id=agent_id)
+
+# List sessions with pagination
+sessions, total_count = list_sessions(page=1, page_size=20)
+
+# List sessions with custom sorting
+sessions, total_count = list_sessions(page=1, page_size=20, sort_desc=False)
+
+# List sessions with filtering and pagination
+sessions, total_count = list_sessions(
+    user_id=user_id,
+    agent_id=agent_id,
+    page=1, 
+    page_size=20
+)
 
 # Update a session
 session.name = "Updated Session Name"

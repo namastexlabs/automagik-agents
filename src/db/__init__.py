@@ -29,10 +29,12 @@ from src.db.repository import (
     update_agent,
     delete_agent,
     increment_agent_run_id,
+    link_session_to_agent,
     
     # User operations
     get_user,
     get_user_by_email,
+    get_user_by_identifier,
     list_users,
     create_user,
     update_user,
@@ -54,4 +56,12 @@ from src.db.repository import (
     create_memory,
     update_memory,
     delete_memory,
+    
+    # Message operations
+    create_message,
+    get_message,
+    list_messages,
+    update_message,
+    delete_message,
+    get_system_prompt,
 )

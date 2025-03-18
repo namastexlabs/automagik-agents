@@ -238,6 +238,77 @@ def increment_agent_run_id(agent_id: int) -> bool:
         return False
 
 
+def link_session_to_agent(session_id: uuid.UUID, agent_id: int) -> bool:
+    """Link a session to an agent in the database.
+    
+    Args:
+        session_id: The session ID
+        agent_id: The agent ID
+        
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        # Check if agent exists
+        agent = get_agent(agent_id)
+        if not agent:
+            logger.error(f"Cannot link session to non-existent agent {agent_id}")
+            return False
+        
+        # First, check if this session is already linked to this agent in the session table
+        # This avoids unnecessary updates to messages
+        session = get_session(session_id)
+        
+        # If session is already linked to this agent, no need to update anything
+        if session and session.agent_id == agent_id:
+            logger.debug(f"Session {session_id} already associated with agent {agent_id}, skipping updates")
+            return True
+            
+        # Check if any messages in this session need updating
+        message_count = execute_query(
+            """
+            SELECT COUNT(*) as count FROM messages 
+            WHERE session_id = %s AND (agent_id IS NULL OR agent_id != %s)
+            """,
+            (str(session_id), agent_id)
+        )
+        
+        needs_update = message_count and message_count[0]["count"] > 0
+        
+        if needs_update:
+            # Only update messages that don't already have the correct agent_id
+            execute_query(
+                """
+                UPDATE messages
+                SET agent_id = %s
+                WHERE session_id = %s AND (agent_id IS NULL OR agent_id != %s)
+                """,
+                (agent_id, str(session_id), agent_id),
+                fetch=False
+            )
+            logger.debug(f"Updated {message_count[0]['count']} messages to associate with agent {agent_id}")
+        else:
+            logger.debug(f"No messages need updating for session {session_id}")
+        
+        # Update the sessions table with the agent_id
+        execute_query(
+            """
+            UPDATE sessions
+            SET agent_id = %s, updated_at = NOW()
+            WHERE id = %s AND (agent_id IS NULL OR agent_id != %s)
+            """,
+            (agent_id, str(session_id), agent_id),
+            fetch=False
+        )
+        logger.debug(f"Updated sessions table with agent_id {agent_id} for session {session_id}")
+        
+        logger.info(f"Session {session_id} associated with agent {agent_id} in database")
+        return True
+    except Exception as e:
+        logger.error(f"Error linking session {session_id} to agent {agent_id}: {str(e)}")
+        return False
+
+
 #
 # User Repository Functions
 #
@@ -282,18 +353,65 @@ def get_user_by_email(email: str) -> Optional[User]:
         return None
 
 
-def list_users() -> List[User]:
-    """List all users.
+def get_user_by_identifier(identifier: str) -> Optional[User]:
+    """Get a user by ID, email, or phone number.
     
+    Args:
+        identifier: The user ID, email, or phone number
+        
     Returns:
-        List of User objects
+        User object if found, None otherwise
     """
     try:
-        result = execute_query("SELECT * FROM users ORDER BY id")
-        return [User.from_db_row(row) for row in result]
+        # First check if it's an ID
+        if identifier.isdigit():
+            return get_user(int(identifier))
+        
+        # Try email
+        user = get_user_by_email(identifier)
+        if user:
+            return user
+        
+        # Try phone number
+        result = execute_query(
+            "SELECT * FROM users WHERE phone_number = %s",
+            (identifier,)
+        )
+        return User.from_db_row(result[0]) if result else None
+    except Exception as e:
+        logger.error(f"Error getting user by identifier {identifier}: {str(e)}")
+        return None
+
+
+def list_users(page: int = 1, page_size: int = 100) -> Tuple[List[User], int]:
+    """List users with pagination.
+    
+    Args:
+        page: Page number (1-indexed)
+        page_size: Number of items per page
+        
+    Returns:
+        Tuple of (list of User objects, total count)
+    """
+    try:
+        # Calculate offset
+        offset = (page - 1) * page_size
+        
+        # Get total count
+        count_result = execute_query("SELECT COUNT(*) as count FROM users")
+        total_count = count_result[0]["count"]
+        
+        # Get paginated results
+        result = execute_query(
+            "SELECT * FROM users ORDER BY id LIMIT %s OFFSET %s",
+            (page_size, offset)
+        )
+        
+        users = [User.from_db_row(row) for row in result]
+        return users, total_count
     except Exception as e:
         logger.error(f"Error listing users: {str(e)}")
-        return []
+        return [], 0
 
 
 def create_user(user: User) -> Optional[int]:
@@ -454,17 +572,30 @@ def get_session_by_name(name: str) -> Optional[Session]:
         return None
 
 
-def list_sessions(user_id: Optional[int] = None, agent_id: Optional[int] = None) -> List[Session]:
-    """List sessions with optional filtering.
+def list_sessions(
+    user_id: Optional[int] = None, 
+    agent_id: Optional[int] = None,
+    page: Optional[int] = None,
+    page_size: Optional[int] = None,
+    sort_desc: bool = True
+) -> Union[List[Session], Tuple[List[Session], int]]:
+    """List sessions with optional filtering and pagination.
     
     Args:
         user_id: Filter by user ID
         agent_id: Filter by agent ID
+        page: Page number (1-based, optional)
+        page_size: Number of items per page (optional)
+        sort_desc: Sort by most recent first if True
         
     Returns:
-        List of Session objects
+        If pagination is requested (page and page_size provided):
+            Tuple of (list of Session objects, total count)
+        Otherwise:
+            List of Session objects
     """
     try:
+        count_query = "SELECT COUNT(*) as count FROM sessions"
         query = "SELECT * FROM sessions"
         params = []
         conditions = []
@@ -479,13 +610,34 @@ def list_sessions(user_id: Optional[int] = None, agent_id: Optional[int] = None)
         
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
+            count_query += " WHERE " + " AND ".join(conditions)
         
-        query += " ORDER BY updated_at DESC"
+        # Add sorting
+        sort_direction = "DESC" if sort_desc else "ASC"
+        query += f" ORDER BY updated_at {sort_direction}, created_at {sort_direction}"
+        
+        # Get total count for pagination
+        count_result = execute_query(count_query, tuple(params) if params else None)
+        total_count = count_result[0]['count'] if count_result else 0
+        
+        # Add pagination if requested
+        if page is not None and page_size is not None:
+            offset = (page - 1) * page_size
+            query += f" LIMIT %s OFFSET %s"
+            params.append(page_size)
+            params.append(offset)
         
         result = execute_query(query, tuple(params) if params else None)
-        return [Session.from_db_row(row) for row in result]
+        sessions = [Session.from_db_row(row) for row in result]
+        
+        # Return with count for pagination or just the list
+        if page is not None and page_size is not None:
+            return sessions, total_count
+        return sessions
     except Exception as e:
         logger.error(f"Error listing sessions: {str(e)}")
+        if page is not None and page_size is not None:
+            return [], 0
         return []
 
 
@@ -506,6 +658,11 @@ def create_session(session: Session) -> Optional[uuid.UUID]:
                 # Update existing session
                 session.id = existing.id
                 return update_session(session)
+        
+        # Ensure session has an ID
+        if session.id is None:
+            session.id = uuid.uuid4()
+            logger.info(f"Generated new UUID for session: {session.id}")
         
         # Prepare session data
         metadata_json = json.dumps(session.metadata) if session.metadata else None
@@ -930,3 +1087,284 @@ def delete_memory(memory_id: uuid.UUID) -> bool:
     except Exception as e:
         logger.error(f"Error deleting memory {memory_id}: {str(e)}")
         return False
+
+
+#
+# Message Repository Functions
+#
+
+def create_message(message: Message) -> Optional[uuid.UUID]:
+    """Create a new message.
+    
+    Args:
+        message: The message to create
+        
+    Returns:
+        The created message ID if successful, None otherwise
+    """
+    try:
+        # Generate ID if not provided
+        if not message.id:
+            message.id = uuid.uuid4()
+            
+        # Handle JSON fields
+        raw_payload_json = json.dumps(message.raw_payload) if message.raw_payload else None
+        tool_calls_json = json.dumps(message.tool_calls) if message.tool_calls else None
+        tool_outputs_json = json.dumps(message.tool_outputs) if message.tool_outputs else None
+        context_json = json.dumps(message.context) if message.context else None
+        
+        execute_query(
+            """
+            INSERT INTO messages (
+                id, session_id, user_id, agent_id, role, 
+                text_content, media_url, mime_type, message_type,
+                raw_payload, tool_calls, tool_outputs, 
+                system_prompt, user_feedback, flagged, context,
+                created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, 
+                %s, %s, %s, %s,
+                %s, %s, %s, 
+                %s, %s, %s, %s,
+                NOW(), NOW()
+            )
+            """,
+            (
+                str(message.id), 
+                str(message.session_id) if message.session_id else None,
+                message.user_id,
+                message.agent_id,
+                message.role,
+                message.text_content,
+                message.media_url,
+                message.mime_type,
+                message.message_type,
+                raw_payload_json,
+                tool_calls_json,
+                tool_outputs_json,
+                message.system_prompt,
+                message.user_feedback,
+                message.flagged,
+                context_json,
+            ),
+            fetch=False
+        )
+        
+        logger.info(f"Created message with ID {message.id}")
+        return message.id
+    except Exception as e:
+        logger.error(f"Error creating message: {str(e)}")
+        return None
+
+
+def get_message(message_id: uuid.UUID) -> Optional[Message]:
+    """Get a message by ID.
+    
+    Args:
+        message_id: The message ID
+        
+    Returns:
+        Message object if found, None otherwise
+    """
+    try:
+        result = execute_query(
+            "SELECT * FROM messages WHERE id = %s",
+            (str(message_id),)
+        )
+        return Message.from_db_row(result[0]) if result else None
+    except Exception as e:
+        logger.error(f"Error getting message {message_id}: {str(e)}")
+        return None
+
+
+def list_messages(session_id: uuid.UUID, limit: int = 100, offset: int = 0) -> List[Message]:
+    """List messages for a session with pagination.
+    
+    Args:
+        session_id: The session ID
+        limit: Maximum number of messages to retrieve (default: 100)
+        offset: Number of messages to skip (default: 0)
+        
+    Returns:
+        List of Message objects
+    """
+    try:
+        result = execute_query(
+            """
+            SELECT * FROM messages 
+            WHERE session_id = %s
+            ORDER BY created_at ASC, updated_at ASC
+            LIMIT %s OFFSET %s
+            """,
+            (str(session_id), limit, offset)
+        )
+        
+        messages = []
+        for row in result:
+            message = Message.from_db_row(row)
+            if message:
+                messages.append(message)
+                
+        return messages
+    except Exception as e:
+        logger.error(f"Error listing messages for session {session_id}: {str(e)}")
+        return []
+
+
+def update_message(message: Message) -> Optional[uuid.UUID]:
+    """Update a message.
+    
+    Args:
+        message: The message to update
+        
+    Returns:
+        The updated message ID if successful, None otherwise
+    """
+    try:
+        if not message.id:
+            return create_message(message)
+            
+        # Handle JSON fields
+        raw_payload_json = json.dumps(message.raw_payload) if message.raw_payload else None
+        tool_calls_json = json.dumps(message.tool_calls) if message.tool_calls else None
+        tool_outputs_json = json.dumps(message.tool_outputs) if message.tool_outputs else None
+        context_json = json.dumps(message.context) if message.context else None
+        
+        execute_query(
+            """
+            UPDATE messages SET 
+                session_id = %s,
+                user_id = %s,
+                agent_id = %s,
+                role = %s,
+                text_content = %s,
+                media_url = %s,
+                mime_type = %s,
+                message_type = %s,
+                raw_payload = %s,
+                tool_calls = %s,
+                tool_outputs = %s,
+                system_prompt = %s,
+                user_feedback = %s,
+                flagged = %s,
+                context = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (
+                str(message.session_id) if message.session_id else None,
+                message.user_id,
+                message.agent_id,
+                message.role,
+                message.text_content,
+                message.media_url,
+                message.mime_type,
+                message.message_type,
+                raw_payload_json,
+                tool_calls_json,
+                tool_outputs_json,
+                message.system_prompt,
+                message.user_feedback,
+                message.flagged,
+                context_json,
+                str(message.id)
+            ),
+            fetch=False
+        )
+        
+        logger.info(f"Updated message with ID {message.id}")
+        return message.id
+    except Exception as e:
+        logger.error(f"Error updating message {message.id}: {str(e)}")
+        return None
+
+
+def delete_message(message_id: uuid.UUID) -> bool:
+    """Delete a message.
+    
+    Args:
+        message_id: The message ID to delete
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        execute_query(
+            "DELETE FROM messages WHERE id = %s",
+            (str(message_id),),
+            fetch=False
+        )
+        logger.info(f"Deleted message with ID {message_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting message {message_id}: {str(e)}")
+        return False
+
+
+def get_system_prompt(session_id: uuid.UUID) -> Optional[str]:
+    """Get the system prompt for a session.
+    
+    Args:
+        session_id: The session ID
+        
+    Returns:
+        The system prompt if found, None otherwise
+    """
+    try:
+        # First check if system prompt is stored in session metadata
+        session_result = execute_query(
+            """
+            SELECT metadata FROM sessions 
+            WHERE id = %s
+            """,
+            (str(session_id),)
+        )
+        
+        if session_result and session_result[0]["metadata"]:
+            metadata = session_result[0]["metadata"]
+            
+            # Log metadata format for debugging
+            logger.debug(f"Session metadata type: {type(metadata)}")
+            
+            if isinstance(metadata, dict) and "system_prompt" in metadata:
+                system_prompt = metadata["system_prompt"]
+                logger.debug(f"Found system prompt in session metadata (dict): {system_prompt[:50]}...")
+                return system_prompt
+            elif isinstance(metadata, str):
+                try:
+                    metadata_dict = json.loads(metadata)
+                    if "system_prompt" in metadata_dict:
+                        system_prompt = metadata_dict["system_prompt"]
+                        logger.debug(f"Found system prompt in session metadata (string->dict): {system_prompt[:50]}...")
+                        return system_prompt
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse session metadata as JSON: {metadata[:100]}...")
+                    # Continue to fallback
+            
+            # If we got here but couldn't find a system prompt, log the metadata for debugging
+            logger.debug(f"No system_prompt found in metadata: {str(metadata)[:100]}...")
+        
+        # Fallback: look for a system role message
+        logger.debug("Falling back to system role message search")
+        result = execute_query(
+            """
+            SELECT text_content FROM messages 
+            WHERE session_id = %s AND role = 'system'
+            ORDER BY created_at DESC, updated_at DESC
+            LIMIT 1
+            """,
+            (str(session_id),)
+        )
+        
+        if result and result[0]["text_content"]:
+            system_prompt = result[0]["text_content"]
+            logger.debug(f"Found system prompt in system role message: {system_prompt[:50]}...")
+            return system_prompt
+        
+        logger.warning(f"No system prompt found for session {session_id}")
+        return None
+    except Exception as e:
+        logger.error(f"Error getting system prompt for session {session_id}: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return None

@@ -161,7 +161,14 @@ class MessageHistory:
         Returns:
             The created user message.
         """
-        message = ModelRequest(parts=[UserPromptPart(content=content)])
+        # Create the user prompt part with content
+        user_part = UserPromptPart(content=content)
+        
+        # Create the message request with the user part
+        message = ModelRequest(parts=[user_part])
+        
+        # Ensure content is also set directly on the message object for better extraction
+        message.content = content
         
         # Add agent ID if provided
         if agent_id:
@@ -173,6 +180,9 @@ class MessageHistory:
         # Add context if provided
         if context:
             message.context = context
+        
+        # Log the message content before storing
+        logger.debug(f"Adding user message with content: {content[:100]}...")
         
         # Don't try to create a session if it doesn't exist - the API should handle this
         if not self.session_id:
@@ -192,10 +202,10 @@ class MessageHistory:
         agent_id: Optional[Union[int, str]] = None,
         system_prompt: Optional[str] = None
     ) -> ModelMessage:
-        """Add an assistant response to the history.
+        """Add an assistant (AI) response message to the session history.
         
         Args:
-            content: The response content.
+            content: The text content of the assistant's response.
             assistant_name: Optional name of the assistant.
             tool_calls: Optional list of tool calls made during processing.
             tool_outputs: Optional list of outputs from tool calls.
@@ -246,9 +256,23 @@ class MessageHistory:
         if agent_id:
             message.agent_id = agent_id
             
-        # Add system prompt if provided
+        # If system_prompt is not provided, try to get it from session metadata
+        if not system_prompt:
+            try:
+                from src.db import get_system_prompt
+                # Get system prompt from session metadata
+                system_prompt = get_system_prompt(uuid.UUID(self.session_id))
+                logger.debug(f"Retrieved system_prompt from session metadata: {system_prompt[:50] if system_prompt else 'None'}")
+            except Exception as e:
+                logger.error(f"Error retrieving system prompt from metadata: {str(e)}")
+        
+        # Add system prompt if available
         if system_prompt:
             message.system_prompt = system_prompt
+            logger.debug(f"Added system_prompt to assistant message: {system_prompt[:50]}...")
+        
+        # Ensure content is set directly on the message object for better extraction
+        message.content = content
         
         # Add the message to the store
         self._store.add_message(self.session_id, message)
