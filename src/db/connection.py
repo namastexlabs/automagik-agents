@@ -4,10 +4,12 @@ import logging
 import os
 import time
 import urllib.parse
+import uuid
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import psycopg2
+import psycopg2.extensions
 from psycopg2.extras import RealDictCursor, execute_values
 from psycopg2.pool import ThreadedConnectionPool
 
@@ -18,6 +20,27 @@ logger = logging.getLogger(__name__)
 
 # Connection pool for database connections
 _pool: Optional[ThreadedConnectionPool] = None
+
+# Register UUID adapter for psycopg2
+psycopg2.extensions.register_adapter(uuid.UUID, lambda u: psycopg2.extensions.AsIs(f"'{u}'"))
+
+
+def safe_uuid(value: Any) -> Any:
+    """Convert UUID objects to strings for safe database use.
+    
+    This is a utility function for cases where direct SQL queries are used
+    instead of repository functions. It ensures UUID objects are properly
+    converted to strings to prevent adaptation errors.
+    
+    Args:
+        value: The value to convert if it's a UUID
+        
+    Returns:
+        String representation of UUID or the original value
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
 
 
 def get_db_config() -> Dict[str, Any]:

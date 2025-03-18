@@ -180,13 +180,16 @@ def create_app() -> FastAPI:
                 
                 # Create the session and message within the transaction
                 with conn.cursor() as cur:
+                    # Import safe_uuid to handle UUID objects
+                    from src.db.connection import safe_uuid
+                    
                     # Insert test session
                     cur.execute(
                         """
                         INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (test_session_id, test_user_id, "verification_test", datetime.utcnow(), datetime.utcnow())
+                        (safe_uuid(test_session_id), test_user_id, "verification_test", datetime.utcnow(), datetime.utcnow())
                     )
                     
                     # Insert test message
@@ -197,8 +200,8 @@ def create_app() -> FastAPI:
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
-                            test_message_id,
-                            test_session_id,
+                            safe_uuid(test_message_id),
+                            safe_uuid(test_session_id),
                             "user",
                             "Test database connection",
                             json.dumps({"content": "Test database connection"}),
@@ -208,10 +211,10 @@ def create_app() -> FastAPI:
                     )
                     
                     # Verify we can read the data back
-                    cur.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (test_session_id,))
+                    cur.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (safe_uuid(test_session_id),))
                     session_count = cur.fetchone()[0]
                     
-                    cur.execute("SELECT COUNT(*) FROM messages WHERE id = %s", (test_message_id,))
+                    cur.execute("SELECT COUNT(*) FROM messages WHERE id = %s", (safe_uuid(test_message_id),))
                     message_count = cur.fetchone()[0]
                     
                     if session_count > 0 and message_count > 0:
