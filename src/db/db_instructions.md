@@ -436,4 +436,34 @@ When updating scripts, focus on these patterns:
 3. Replace `UPDATE` queries with `update_*` functions
 4. Replace `DELETE` queries with `delete_*` functions
 
-For complex queries that don't have a direct repository function equivalent, you may still need to use `execute_query`, but try to encapsulate these in a repository function for future use. 
+For complex queries that don't have a direct repository function equivalent, you may still need to use `execute_query`, but try to encapsulate these in a repository function for future use.
+
+## UUID Handling in Database Operations
+
+When working with UUIDs in database operations, ensure proper type adaptation:
+
+1. **Repository Functions**: These handle UUID conversion automatically
+2. **Direct SQL Queries**: Use one of the following:
+   - Convert UUID to string explicitly: `str(uuid_value)`
+   - Use the `safe_uuid()` utility function from `src.db.connection`
+   - Rely on the registered UUID adapter (added in connection.py)
+
+### Example:
+
+```python
+# Using safe_uuid utility for direct SQL
+from src.db.connection import safe_uuid, execute_query
+result = execute_query("SELECT * FROM sessions WHERE id = %s", (safe_uuid(session_id),))
+```
+
+The `safe_uuid()` function converts UUID objects to strings to prevent adaptation errors while maintaining compatibility with string values:
+
+```python
+def safe_uuid(value):
+    """Convert UUID objects to strings for safe database use."""
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
+```
+
+Using repository functions is always preferred as they handle UUID conversion automatically..
