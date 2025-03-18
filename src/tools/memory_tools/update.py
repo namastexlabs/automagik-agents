@@ -8,11 +8,14 @@ import json
 import logging
 import os
 import requests
-from pydantic import BaseModel
-from datetime import datetime
+import uuid
 from uuid import UUID
+from datetime import datetime
+import re
+from pydantic import BaseModel
 from pydantic_ai import RunContext
 from src.db import execute_query
+from src.db import get_agent_by_name, get_memory, create_memory, update_memory as update_memory_in_db
 from src.tools.memory_tools.common import map_agent_id
 
 logger = logging.getLogger(__name__)
@@ -28,20 +31,14 @@ def get_agent_id_from_db(agent_name):
         The agent ID if found, None otherwise.
     """
     try:
-        query = "SELECT id FROM agents WHERE name = %s"
-        result = execute_query(query, [agent_name])
+        # Use repository function instead of direct SQL query
+        agent = get_agent_by_name(agent_name)
         
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            rows = result
-        else:
-            rows = result.get('rows', [])
-            
-        if not rows:
+        if not agent:
             logger.warning(f"Agent '{agent_name}' not found in database")
             return None
             
-        agent_id = rows[0].get('id')
+        agent_id = agent.id
         if not agent_id:
             logger.warning(f"Agent '{agent_name}' has no ID")
             return None
@@ -96,42 +93,41 @@ def _perform_update(agent_id, user_id, session_id, content, memory_id=None, name
         logger.info(f"Context: agent_id={agent_id}, user_id={user_id}, session_id={session_id}")
         logger.info(f"Additional fields: description={description is not None}, metadata={metadata is not None}, read_mode={read_mode}")
         
-        # If a name was provided but no memory_id, we need to find the memory ID
+        # If a name was provided but no memory_id, we need to find the memory 
         # with proper access control to ensure only appropriate memories are updated
         if name and not memory_id:
-            # Construct a query with proper access controls based on name lookup
-            query = """
-                SELECT id, name, agent_id, user_id, session_id
-                FROM memories 
-                WHERE name = %s 
-                  AND (
-                      -- Agent-specific global memories (accessible to all users of this agent)
-                      (agent_id = %s AND user_id IS NULL)
-                      
-                      -- Agent + User memories (personalized agent)
-                      OR (agent_id = %s AND user_id = %s AND session_id IS NULL)
-                      
-                      -- Agent + User + Session memories (personalized session)
-                      OR (agent_id = %s AND user_id = %s AND session_id = %s)
-                  )
-                LIMIT 1
-            """
-            params = [name, agent_id, agent_id, user_id, agent_id, user_id, session_id]
+            # Use the get_memory function to find the memory by name with filtering
+            from src.db import get_memory_by_name
+            memory = get_memory_by_name(name)
             
-            # Execute the query with parameters
-            result = execute_query(query, params)
+            if not memory:
+                return {"success": False, "message": f"No memory found with name '{name}'"}
             
-            # Handle case where result is a list (DB rows) or dict with 'rows' key
-            if isinstance(result, list):
-                rows = result
-            else:
-                rows = result.get('rows', [])
+            # Check access control based on agent_id, user_id, and session_id
+            memory_agent_id = memory.agent_id
+            memory_user_id = memory.user_id
+            memory_session_id = memory.session_id
+            
+            # Check if this agent has access to this memory
+            has_access = False
+            
+            # Case 1: Agent-specific global memories (accessible to all users of this agent)
+            if memory_agent_id == agent_id and memory_user_id is None:
+                has_access = True
                 
-            if not rows:
-                return {"success": False, "message": f"No memory found with name '{name}' accessible to this agent/user"}
+            # Case 2: Agent + User memories (personalized agent)
+            elif memory_agent_id == agent_id and memory_user_id == user_id and memory_session_id is None:
+                has_access = True
+                
+            # Case 3: Agent + User + Session memories (personalized session)
+            elif memory_agent_id == agent_id and memory_user_id == user_id and memory_session_id == session_id:
+                has_access = True
+                
+            if not has_access:
+                return {"success": False, "message": f"Memory '{name}' is not accessible to this agent/user"}
             
             # Use the found memory ID
-            memory_id = rows[0].get('id')
+            memory_id = memory.id
             if not memory_id:
                 return {"success": False, "message": "Found memory has no ID"}
                 
@@ -161,95 +157,82 @@ def _perform_update(agent_id, user_id, session_id, content, memory_id=None, name
                 
         if read_mode is not None:
             # Validate read_mode
-            if read_mode not in ["system_prompt", "tool_calling"]:
-                return {"success": False, "message": f"Invalid read_mode: {read_mode}. Must be 'system_prompt' or 'tool_calling'"}
+            if read_mode not in ["system_prompt", "tool", "tool_calling"]:
+                return {"success": False, "message": f"Invalid read_mode: {read_mode}. Must be 'system_prompt', 'tool', or 'tool_calling'"}
+            
+            # Map tool_calling to tool for consistency
+            if read_mode == "tool_calling":
+                read_mode = "tool"
+                
             memory_data["read_mode"] = read_mode
         
-        # Set up API request basics
-        host = os.environ.get("AM_HOST", "127.0.0.1")
-        port = os.environ.get("AM_PORT", "8881")
-        base_url = f"http://{host}:{port}"
-        api_key = os.environ.get("AM_API_KEY", "namastex-888")  # Default to test key if not set
+        # Convert memory_id to UUID if needed
+        if isinstance(memory_id, str):
+            try:
+                memory_id = UUID(memory_id)
+            except ValueError:
+                return {"success": False, "message": f"Invalid memory ID format: {memory_id}"}
         
-        headers = {
-            "accept": "application/json",
-            "Content-Type": "application/json",
-            "x-api-key": api_key
-        }
+        # Use repository function to update the memory
+        result = update_memory_in_db(memory_id, memory_data)
         
-        try:
-            # Validate UUID format
-            memory_uuid = UUID(str(memory_id))
-            memory_id_str = str(memory_uuid)
-                
-            # Call the update API endpoint
-            api_url = f"{base_url}/api/v1/memories/{memory_id_str}"
+        if result:
+            # Get the updated memory to return complete information
+            updated_memory = get_memory(memory_id)
+            if updated_memory:
+                return {
+                    "success": True,
+                    "message": f"Memory updated successfully",
+                    "id": str(updated_memory.id),
+                    "name": updated_memory.name
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": f"Memory updated successfully but could not retrieve details",
+                    "id": str(memory_id),
+                    "name": name or "Unknown"
+                }
+        else:
+            return {"success": False, "message": "Failed to update memory"}
             
-            response = requests.put(api_url, headers=headers, json=memory_data)
-            
-            # Handle common error cases
-            if response.status_code == 404:
-                return {"success": False, "message": f"Memory with ID {memory_id} not found"}
-                
-            if response.status_code == 403:
-                return {"success": False, "message": f"Memory with ID {memory_id} is not writable or not accessible to this agent/user"}
-            
-            # Raise for other HTTP errors
-            response.raise_for_status()
-            
-            # Process successful response
-            updated_memory = response.json()
-            
-            return {
-                "success": True,
-                "message": "Memory updated successfully",
-                "id": updated_memory["id"],
-                "name": updated_memory["name"]
-            }
-            
-        except ValueError:
-            return {"success": False, "message": f"Invalid memory ID format: {memory_id}"}
-            
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP error when accessing memory API: {str(e)}")
-            return {"success": False, "message": f"API error: {str(e)}"}
-            
-        except Exception as e:
-            logger.error(f"Error updating memory: {str(e)}")
-            return {"success": False, "message": f"Error: {str(e)}"}
-    
     except Exception as e:
-        logger.error(f"Error in _perform_update: {str(e)}")
-        return {"success": False, "message": f"Error: {str(e)}"}
+        logger.error(f"Error updating memory: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {"success": False, "message": f"Error updating memory: {str(e)}"}
 
 
 def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], memory_id: Optional[str] = None, 
                  name: Optional[str] = None, description: Optional[str] = None, 
                  read_mode: Optional[str] = None, session_specific: bool = False,
                  metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Update an existing memory in the database with new content and optional fields.
+    """Update a memory in the database.
     
     Args:
-        ctx: The run context.
-        content: The new content to store in the memory.
-        memory_id: Optional ID of the memory to update.
-        name: Optional name of the memory to update.
-        description: Optional new description for the memory.
-        read_mode: Optional new read_mode for the memory (system_prompt or tool_calling).
-        session_specific: If True, the memory will be associated with the current session.
-        metadata: Optional new metadata for the memory.
+        ctx: The context of the current run
+        content: The new content to store
+        memory_id: Optional ID of the memory to update
+        name: Optional name of the memory to update
+        description: Optional new description for the memory
+        read_mode: Optional new read_mode for the memory (system_prompt or tool_calling)
+        session_specific: Whether to include the session_id in the memory
+        metadata: Optional new metadata for the memory
         
     Returns:
-        Dictionary with the result of the operation.
+        Dictionary with the result of the operation
     """
     try:
-        # Validate that either memory_id or name is provided
+        # Validate required parameters
+        if not content:
+            return {"success": False, "message": "Content is required"}
+            
         if not memory_id and not name:
             return {"success": False, "message": "Either memory_id or name must be provided"}
         
         # Validate read_mode if provided
-        if read_mode is not None and read_mode not in ["system_prompt", "tool_calling"]:
-            return {"success": False, "message": f"Invalid read_mode: {read_mode}. Must be 'system_prompt' or 'tool_calling'"}
+        if read_mode is not None and read_mode not in ["system_prompt", "tool", "tool_calling"]:
+            return {"success": False, "message": f"Invalid read_mode: {read_mode}. Must be 'system_prompt', 'tool', or 'tool_calling'"}
         
         # Log context for debugging
         logger.info(f"Update memory context: {ctx}")
@@ -262,10 +245,13 @@ def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], me
         if ctx is None or (not hasattr(ctx, 'deps') or ctx.deps is None or not ctx.deps):
             logger.warning("Context is None or empty, using default values")
             # Try to get the agent ID from the database
-            agent_id = get_agent_id_from_db("sofia_agent")
-            if agent_id is None:
+            agent = get_agent_by_name("sofia_agent")
+            if agent is None:
                 agent_id = 3  # Default to sofia_agent ID 3 as fallback
                 logger.warning(f"⚠️ Agent ID not found for name: sofia_agent, using default ID {agent_id}")
+            else:
+                agent_id = agent.id
+                
             agent_id_raw = "sofia_agent"
             user_id = 1  # Default to user ID 1 if not provided
             session_id = None if not session_specific else None  # No session ID available in this case
@@ -283,20 +269,13 @@ def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], me
             logger.warning("No agent_id found in context, using default value")
             agent_id_raw = "sofia_agent"
         
-        # Get the numeric agent ID from the agent name
-        query = "SELECT id FROM agents WHERE name = %s"
-        result = execute_query(query, [agent_id_raw])
+        # Get the numeric agent ID from the agent name using repository function
+        agent = get_agent_by_name(agent_id_raw)
         
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            rows = result
-        else:
-            rows = result.get('rows', [])
-            
-        if not rows:
+        if not agent:
             return {"success": False, "message": f"Agent '{agent_id_raw}' not found"}
             
-        agent_id = rows[0].get('id')
+        agent_id = agent.id
         if not agent_id:
             return {"success": False, "message": f"Agent '{agent_id_raw}' has no ID"}
             

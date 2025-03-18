@@ -8,7 +8,10 @@ from src.agents.models.base_agent import BaseAgent
 from src.agents.models.agent import AgentBaseResponse
 from src.memory.message_history import MessageHistory
 from src.agents.simple.sofia_agent.prompts import SIMPLE_AGENT_PROMPT
-from src.db import execute_query
+from src.db import (
+    get_agent, get_agent_by_name, list_memories, 
+    increment_agent_run_id
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,22 +91,15 @@ class SofiaAgent(BaseAgent):
         
         if "run_id" in template_vars:
             try:
-                # Get run_id from agent table
-                run_id_query = "SELECT run_id FROM agents WHERE id = %s"
-                run_id_result = execute_query(run_id_query, [agent_id_numeric])
+                # Get agent from repository to access run_id
+                agent = get_agent(agent_id_numeric)
                 
-                if run_id_result:
-                    if isinstance(run_id_result, dict) and 'rows' in run_id_result and len(run_id_result['rows']) > 0:
-                        run_id = run_id_result['rows'][0].get('run_id', "1")
-                    elif isinstance(run_id_result, list) and len(run_id_result) > 0:
-                        run_id = run_id_result[0].get('run_id', "1")
-                    else:
-                        run_id = "1"  # Default if not found
-                    
+                if agent and hasattr(agent, 'run_id'):
+                    run_id = agent.run_id or 1
                     memory_values["run_id"] = str(run_id)
                     logger.info(f"Loaded run_id={run_id} from agent table")
                 else:
-                    memory_values["run_id"] = "1"  # Default if query fails
+                    memory_values["run_id"] = "1"  # Default if not found
             except Exception as e:
                 logger.error(f"Error loading run_id from agent table: {str(e)}")
                 memory_values["run_id"] = "1"  # Default on error
@@ -115,27 +111,17 @@ class SofiaAgent(BaseAgent):
             return memory_values  # Return early if we only had run_id
         
         try:
-            # Query to get memories for this agent
-            query = """
-                SELECT name, content 
-                FROM memories 
-                WHERE agent_id = %s AND name = ANY(%s)
-            """
+            # Use repository function to get list of memories for this agent
+            memories = list_memories(agent_id=agent_id_numeric)
             
-            result = execute_query(query, [agent_id_numeric, memory_vars])
-            
-            # Process the result
-            if result and isinstance(result, dict) and 'rows' in result:
-                memories = result['rows']
-            elif isinstance(result, list):
-                memories = result
-            else:
-                memories = []
-                
-            # Add each memory to the values dict
+            # Filter memories by name to match the requested variables
+            memory_dict = {}
             for memory in memories:
-                memory_name = memory.get('name')
-                memory_content = memory.get('content', '')
+                if hasattr(memory, 'name') and memory.name in memory_vars:
+                    memory_dict[memory.name] = memory.content
+            
+            # Add each memory to the values dict
+            for memory_name, memory_content in memory_dict.items():
                 memory_values[memory_name] = memory_content
                     
             logger.info(f"Loaded memories: {list(memory_values.keys())}")
@@ -216,14 +202,11 @@ class SofiaAgent(BaseAgent):
             # Try to convert to int if it's a string number
             return int(self.agent_id)
         except ValueError:
-            # If it's a name, query the database to get the ID
-            query = "SELECT id FROM agents WHERE name = %s"
-            result = execute_query(query, [self.agent_id])
+            # If it's a name, use repository function to get the agent by name
+            agent = get_agent_by_name(self.agent_id)
             
-            if result and isinstance(result, dict) and 'rows' in result and len(result['rows']) > 0:
-                return result['rows'][0].get('id')
-            elif isinstance(result, list) and len(result) > 0:
-                return result[0].get('id')
+            if agent and hasattr(agent, 'id'):
+                return agent.id
             else:
                 logger.warning(f"Agent ID not found for name: {self.agent_id}, using default ID 1")
                 return 1  # Default ID
@@ -247,27 +230,42 @@ class SofiaAgent(BaseAgent):
         are limited to stay within OpenAI API's 1024 character limit for tool descriptions.
         """
         from src.tools.memory_tools import read_memory, create_memory, update_memory
-        from src.db import execute_query
+        from src.db import list_memories
         import logging
         import json
         
         logger = logging.getLogger(__name__)
         
-        # Direct database approach - fetch memories directly from DB
+        # Repository pattern approach - fetch memories using repository function
         try:
-            logger.info("Directly fetching memories from database for tool descriptions")
+            logger.info("Fetching memories from database for tool descriptions using repository function")
             
-            # Query to get all available memories
-            query = "SELECT id, name, description FROM memories ORDER BY name ASC"
-            result = execute_query(query)
-            # Handle case where result is a list (DB rows) or dict with 'rows' key
-            if isinstance(result, list):
-                memories = result
-            else:
-                memories = result.get('rows', [])
+            # Use repository function to get all available memories
+            memories_objects = list_memories()
+            
+            # Convert memory models to dictionaries for consistent access
+            memories = []
+            for memory in memories_objects:
+                if hasattr(memory, 'model_dump'):
+                    # For Pydantic v2 models
+                    memories.append(memory.model_dump())
+                elif hasattr(memory, 'dict'):
+                    # For Pydantic v1 models
+                    memories.append(memory.dict())
+                elif isinstance(memory, dict):
+                    # Already a dict
+                    memories.append(memory)
+                else:
+                    # Extract attributes directly
+                    memories.append({
+                        'id': getattr(memory, 'id', None),
+                        'name': getattr(memory, 'name', 'Unknown'),
+                        'description': getattr(memory, 'description', None)
+                    })
+            
             memory_count = len(memories)
             
-            logger.info(f"Found {memory_count} memories directly from database")
+            logger.info(f"Found {memory_count} memories using repository function")
             
             # Create read_memory description with available memory names for this agent/user
             read_desc = "This tool allows retrieving memories stored in the database.\n\n"

@@ -8,7 +8,7 @@ This script:
 
 import os
 import logging
-from src.db import execute_query
+from src.db import execute_query, list_memories, update_memory
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -20,24 +20,40 @@ def cleanup_database():
     try:
         # 1. First check what we have
         logger.info("Checking current read_mode distribution:")
-        check_query = "SELECT read_mode, COUNT(*) as count FROM memories WHERE agent_id = 3 GROUP BY read_mode"
-        result = execute_query(check_query)
         
-        if isinstance(result, list):
-            for row in result:
-                logger.info(f"  - {row.get('read_mode')}: {row.get('count')} memories")
-        else:
-            rows = result.get('rows', [])
-            for row in rows:
-                logger.info(f"  - {row.get('read_mode')}: {row.get('count')} memories")
+        # Use repository function to get all memories
+        memories = list_memories()
+        
+        # Count memories by read_mode
+        read_mode_counts = {}
+        for memory in memories:
+            if getattr(memory, 'agent_id', None) == 3:
+                read_mode = getattr(memory, 'read_mode', None)
+                if read_mode not in read_mode_counts:
+                    read_mode_counts[read_mode] = 0
+                read_mode_counts[read_mode] += 1
+        
+        for read_mode, count in read_mode_counts.items():
+            logger.info(f"  - {read_mode}: {count} memories")
         
         # 2. Update 'tool_calling' to 'tool'
         logger.info("Converting 'tool_calling' read_mode to 'tool'...")
-        update_query = "UPDATE memories SET read_mode = 'tool' WHERE read_mode = 'tool_calling'"
-        update_result = execute_query(update_query)
-        logger.info(f"Updated read_mode values: {update_result}")
+        updated_count = 0
+        
+        for memory in memories:
+            if getattr(memory, 'read_mode', None) == 'tool_calling':
+                # Update the memory with new read_mode
+                memory_dict = memory.dict() if hasattr(memory, 'dict') else memory.__dict__
+                memory_dict['read_mode'] = 'tool'
+                update_result = update_memory(memory.id, memory_dict)
+                if update_result:
+                    updated_count += 1
+        
+        logger.info(f"Updated {updated_count} memories from 'tool_calling' to 'tool'")
         
         # 3. Delete test memories
+        # For deletion, we still need to use execute_query since we don't have a 
+        # repository function that supports complex WHERE clauses
         logger.info("Deleting test memories...")
         delete_query = "DELETE FROM memories WHERE name LIKE 'api\_test\_%' ESCAPE '\\'"
         delete_result = execute_query(delete_query)
@@ -45,16 +61,21 @@ def cleanup_database():
         
         # 4. Verify the cleanup
         logger.info("Verifying cleanup:")
-        verify_query = "SELECT read_mode, COUNT(*) as count FROM memories WHERE agent_id = 3 GROUP BY read_mode"
-        verify_result = execute_query(verify_query)
         
-        if isinstance(verify_result, list):
-            for row in verify_result:
-                logger.info(f"  - {row.get('read_mode')}: {row.get('count')} memories")
-        else:
-            rows = verify_result.get('rows', [])
-            for row in rows:
-                logger.info(f"  - {row.get('read_mode')}: {row.get('count')} memories")
+        # Use repository function to get updated list of memories
+        updated_memories = list_memories()
+        
+        # Count memories by read_mode after updates
+        updated_read_mode_counts = {}
+        for memory in updated_memories:
+            if getattr(memory, 'agent_id', None) == 3:
+                read_mode = getattr(memory, 'read_mode', None)
+                if read_mode not in updated_read_mode_counts:
+                    updated_read_mode_counts[read_mode] = 0
+                updated_read_mode_counts[read_mode] += 1
+        
+        for read_mode, count in updated_read_mode_counts.items():
+            logger.info(f"  - {read_mode}: {count} memories")
         
         # 5. Make sure there are no test memories left
         test_query = "SELECT COUNT(*) as count FROM memories WHERE name LIKE 'api\_test\_%' ESCAPE '\\'"
