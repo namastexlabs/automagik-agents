@@ -101,23 +101,22 @@ def extract_memory_names_from_db() -> List[str]:
         List of memory names found in the database
     """
     try:
-        from src.db import execute_query
+        from src.db import list_memories
         
-        # Query to get all memory names
-        query = "SELECT name FROM memories ORDER BY name ASC"
-        result = execute_query(query)
+        # Use repository function to get all memories
+        memories = list_memories()
         
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            memories = result
-        else:
-            memories = result.get('rows', [])
-        
-        # Extract names
+        # Extract memory names
         memory_names = []
         for memory in memories:
-            if isinstance(memory, dict) and 'name' in memory:
+            # Handle case where memory object might be a Pydantic model or a dict
+            if hasattr(memory, 'name'):
+                memory_names.append(memory.name)
+            elif isinstance(memory, dict) and 'name' in memory:
                 memory_names.append(memory['name'])
+        
+        # Sort memory names alphabetically
+        memory_names.sort()
         
         return memory_names
     

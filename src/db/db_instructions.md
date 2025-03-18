@@ -10,7 +10,13 @@ This directory contains the database access layer for Automagik Agents, implemen
 - `__init__.py`: Exports all models and functions for easier imports
 - `connection.py`: Database connection management and query execution
 - `models.py`: Pydantic models representing database tables
-- `repository.py`: CRUD operations for all database entities
+- `repository/`: Directory containing repository modules for each entity type:
+  - `__init__.py`: Aggregates and exports all repository functions
+  - `agent.py`: Agent-related database operations
+  - `user.py`: User-related database operations
+  - `session.py`: Session-related database operations
+  - `message.py`: Message-related database operations
+  - `memory.py`: Memory-related database operations
 - `db_instructions.md`: Detailed documentation and examples
 
 ## Quick Start
@@ -31,7 +37,7 @@ from src.db import (
 agent = Agent(
     name="my_agent",
     type="simple",
-    model="gpt-4",
+    model="gpt-4o-mini",
     description="A simple test agent"
 )
 
@@ -45,6 +51,7 @@ agent_id = create_agent(agent)
 2. **Type Safety**: Pydantic models ensure type-checked database operations
 3. **Consistent API**: Repository functions follow a consistent pattern
 4. **Error Handling**: All functions include error handling and logging 
+5. **Modularity**: Each entity type has its own repository module for better organization
 
 
 This document provides a comprehensive guide to using the database components in the Automagik Agents system. It's designed to be useful for both new developers and AI assistants like Claude.
@@ -56,7 +63,13 @@ The `src/db` directory contains the following components:
 - `__init__.py`: Exports all important models and functions for easier imports
 - `connection.py`: Handles database connection management and query execution
 - `models.py`: Contains Pydantic models representing database tables
-- `repository.py`: Provides CRUD operations for all database entities
+- `repository/`: Directory containing specialized repository modules:
+  - `__init__.py`: Aggregates all repository functions for backward compatibility
+  - `agent.py`: Functions for agent operations
+  - `user.py`: Functions for user operations
+  - `session.py`: Functions for session operations
+  - `message.py`: Functions for message operations
+  - `memory.py`: Functions for memory operations
 
 ## Overview
 
@@ -65,6 +78,21 @@ We use a clean repository pattern to abstract database operations:
 1. **Models** represent the database tables as Pydantic classes
 2. **Repository functions** handle CRUD operations for each entity type
 3. **Connection utilities** manage the database pool and query execution
+
+## Repository Pattern
+
+Each entity type (Agent, User, Session, etc.) has its own repository module that contains all database operations related to that entity. This provides several benefits:
+
+1. **Better organization**: Related functions are grouped together
+2. **Easier maintenance**: Changes to one entity don't affect others
+3. **Improved readability**: Smaller files are easier to understand
+4. **Enhanced testability**: Each module can be tested independently
+
+All repository functions are re-exported from the main `src.db` module, so you can import them directly:
+
+```python
+from src.db import create_agent, get_user, list_sessions
+```
 
 ## Models
 
@@ -345,4 +373,67 @@ When working with this codebase, here are some tips:
 5. Be aware of the difference between `None`, `[]`, and empty result sets
 6. Look at the model definitions in `models.py` to understand the data structure
 
-By following these guidelines, you'll help maintain a clean and consistent codebase. 
+## Advanced Development
+
+If you need to extend or modify the database layer:
+
+1. **Adding a new entity type**: Create a new file in `src/db/repository/` and update `src/db/repository/__init__.py`
+2. **Adding new functions to an entity**: Add the function to the appropriate file in `src/db/repository/`
+3. **Fixing a bug**: Update the function in its repository file
+
+By following these guidelines, you'll help maintain a clean and consistent codebase.
+
+## Migrating from Direct SQL to Repository Pattern
+
+If you're refactoring existing code that uses direct SQL queries via `execute_query`, follow these steps to convert to the repository pattern:
+
+### Before: Direct SQL Query
+
+```python
+from src.db import execute_query
+
+# Get agent by ID with direct SQL
+def get_agent_by_id(agent_id):
+    query = "SELECT * FROM agents WHERE id = %s"
+    result = execute_query(query, [agent_id])
+    if isinstance(result, list) and len(result) > 0:
+        return result[0]
+    elif 'rows' in result and len(result['rows']) > 0:
+        return result['rows'][0]
+    return None
+
+# Update agent with direct SQL
+def update_agent_status(agent_id, active):
+    query = "UPDATE agents SET active = %s WHERE id = %s"
+    result = execute_query(query, [active, agent_id])
+    return result
+```
+
+### After: Repository Pattern
+
+```python
+from src.db import get_agent, update_agent
+
+# Get agent by ID using repository function
+def get_agent_by_id(agent_id):
+    return get_agent(agent_id)
+
+# Update agent using repository function
+def update_agent_status(agent_id, active):
+    agent = get_agent(agent_id)
+    if agent:
+        agent.active = active
+        return update_agent(agent_id, {"active": active})
+    return False
+```
+
+### Example: Converting Scripts
+
+When updating scripts, focus on these patterns:
+
+1. Replace `SELECT` queries with appropriate `get_*` or `list_*` functions
+2. Replace `INSERT` queries with `create_*` functions
+3. Replace `UPDATE` queries with `update_*` functions
+4. Replace `DELETE` queries with `delete_*` functions
+
+For complex queries that don't have a direct repository function equivalent, you may still need to use `execute_query`, but try to encapsulate these in a repository function for future use. 

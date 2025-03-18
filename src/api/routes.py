@@ -260,32 +260,20 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                     
                     # If a session name is provided but the session has no name, update it
                     if session_name:
-                        # Get the current session details to check if it has a name
-                        session_details = execute_query(
-                            "SELECT name FROM sessions WHERE id = %s::uuid", 
-                            (request.session_id,)
-                        )
-                        
-                        if session_details and (session_details[0].get('name') is None or session_details[0].get('name') == ''):
-                            # Session has no name, update it
-                            execute_query(
-                                "UPDATE sessions SET name = %s WHERE id = %s::uuid",
-                                (session_name, request.session_id),
-                                fetch=False
-                            )
-                            logger.info(f"Updated existing session {request.session_id} with name: {session_name}")
+                        # Use our repository function to update session name if empty
+                        from src.db import update_session_name_if_empty
+                        update_session_name_if_empty(uuid.UUID(request.session_id), session_name)
                     
                     logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
                 except ValueError as e:
                     # Handle agent ID mismatch error - look up the existing agent ID instead of failing
                     if "already associated with agent ID" in str(e):
-                        # Get the actual agent ID associated with this session
-                        session_details = execute_query(
-                            "SELECT agent_id FROM sessions WHERE id = %s::uuid", 
-                            (request.session_id,)
-                        )
-                        if session_details and session_details[0].get('agent_id'):
-                            existing_agent_id = session_details[0].get('agent_id')
+                        # Get the actual agent ID associated with this session using repository function
+                        from src.db import get_session
+                        import uuid
+                        session = get_session(uuid.UUID(request.session_id))
+                        if session and session.agent_id:
+                            existing_agent_id = session.agent_id
                             logger.info(f"Using existing agent ID {existing_agent_id} for session {request.session_id} instead of {agent_id}")
                             agent_id = existing_agent_id
                         else:
@@ -570,76 +558,69 @@ async def get_session_route(
               summary="Delete Session",
               description="Delete a session's message history by its ID or name.")
 async def delete_session_route(session_id_or_name: str):
-    """Delete a session's message history.
-    
-    Args:
-        session_id_or_name: The ID or name of the session to delete.
-        
-    Returns:
-        Status of the deletion operation.
-    """
+    """Delete a session by ID or name."""
     try:
-        logger.info(f"Attempting to delete session with identifier: {session_id_or_name}")
-        
-        # Use repository functions to get and delete the session
-        from src.db import get_session, get_session_by_name, delete_session
-        
-        # Determine if the input is a UUID or session name
-        session = None
+        # First determine if the input is a UUID or a name
         try:
             # Try to parse as UUID
             session_id = uuid.UUID(session_id_or_name)
-            logger.info(f"Looking up session by ID: {session_id}")
+            # It's a valid UUID, use it directly
+            from src.db import get_session, delete_session, delete_session_messages
+            
+            # Get the session to verify it exists
             session = get_session(session_id)
+            if not session:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"Session with ID {session_id_or_name} not found"}
+                )
+                
+            # Delete all messages first
+            delete_session_messages(session_id)
+            
+            # Then delete the session itself
+            success = delete_session(session_id)
+            
+            if success:
+                return {"status": "success", "message": f"Session {session_id_or_name} deleted successfully"}
+            else:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Failed to delete session {session_id_or_name}"}
+                )
+                
         except ValueError:
-            # Not a UUID, try to look up by name
-            logger.info(f"Looking up session by name: {session_id_or_name}")
+            # Not a valid UUID, try to find by name
+            from src.db import get_session_by_name, delete_session, delete_session_messages
+            
+            # Get the session to verify it exists and get its ID
             session = get_session_by_name(session_id_or_name)
-        
-        # Check if session exists
-        if not session:
-            logger.warning(f"Session not found with identifier: {session_id_or_name}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session with identifier '{session_id_or_name}' not found"
-            )
-        
-        session_id = session.id
-        logger.info(f"Found session with ID: {session_id}")
-        
-        # Use the repository function to delete the session
-        success = delete_session(session_id)
-        
-        if not success:
-            logger.error(f"Failed to delete session with ID: {session_id}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to delete session: {session_id}"
-            )
-        
-        # Also clear the session messages from the message store
-        # This is still needed because repository functions don't handle messages yet
-        message_store = PostgresMessageStore()
-        try:
-            message_store.clear_session(str(session_id))
-            logger.info(f"Cleared messages for session: {session_id}")
-        except Exception as e:
-            logger.warning(f"Could not clear messages for session {session_id}: {str(e)}")
-        
-        logger.info(f"Successfully deleted session: {session_id_or_name}")
-        
-        return DeleteSessionResponse(
-            status="success",
-            session_id=str(session_id),
-            message="Session deleted successfully"
-        )
-    except HTTPException:
-        raise
+            if not session:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"Session with name '{session_id_or_name}' not found"}
+                )
+                
+            session_id = session.id
+                
+            # Delete all messages first
+            delete_session_messages(session_id)
+            
+            # Then delete the session itself
+            success = delete_session(session_id)
+            
+            if success:
+                return {"status": "success", "message": f"Session '{session_id_or_name}' deleted successfully"}
+            else:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"Failed to delete session '{session_id_or_name}'"}
+                )
     except Exception as e:
         logger.error(f"Error deleting session {session_id_or_name}: {str(e)}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail=f"Failed to delete session: {str(e)}"
+            content={"error": f"Failed to delete session: {str(e)}"}
         )
 
 # User management endpoints

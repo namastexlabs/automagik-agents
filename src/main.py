@@ -15,7 +15,7 @@ from src.api.routes import router as api_router
 from src.memory.message_history import MessageHistory
 from src.memory.pg_message_store import PostgresMessageStore
 from src.agents.models.agent_factory import AgentFactory
-from src.db import execute_query
+from src.db import execute_query, get_connection_pool, ensure_default_user_exists, create_session, Session
 
 # Configure logging
 configure_logging()
@@ -109,7 +109,6 @@ def create_app() -> FastAPI:
         
         # First test database connection
         from src.db.connection import get_connection_pool
-        from src.db import execute_query
         pool = get_connection_pool()
         
         # Test the connection with a simple query
@@ -142,25 +141,8 @@ def create_app() -> FastAPI:
         logger.info("🔍 Performing verification test of PostgresMessageStore without creating persistent sessions...")
         test_user_id = 1  # Use numeric ID instead of string
         
-        # First ensure the default user exists
-        default_user_exists = execute_query(
-            "SELECT COUNT(*) as count FROM users WHERE id = %s",
-            (test_user_id,)
-        )
-        
-        if not default_user_exists or default_user_exists[0]["count"] == 0:
-            logger.warning(f"⚠️ Default user '{test_user_id}' not found, creating it...")
-            execute_query(
-                """
-                INSERT INTO users (id, email, created_at, updated_at) 
-                VALUES (%s, %s, %s, %s)
-                """,
-                (test_user_id, "admin@automagik", datetime.utcnow(), datetime.utcnow()),
-                fetch=False
-            )
-            logger.info(f"✅ Created default user '{test_user_id}'")
-        else:
-            logger.info(f"✅ Default user '{test_user_id}' already exists")
+        # First ensure the default user exists using repository function
+        ensure_default_user_exists(user_id=test_user_id, email="admin@automagik")
         
         # Verify message store functionality without creating test sessions
         # Use a transaction that we'll roll back to avoid persisting test data
@@ -170,10 +152,33 @@ def create_app() -> FastAPI:
                 conn.autocommit = False  # Start a transaction
                 
                 # Generate test UUIDs
-                test_session_id = str(uuid.uuid4())
-                test_message_id = str(uuid.uuid4())
+                test_session_id = uuid.uuid4()
+                test_message_id = uuid.uuid4()
                 
-                # Test inserting temporary session and message
+                # Test inserting temporary session
+                from src.db import create_session, Session, create_message, Message
+                
+                # Create a test session
+                test_session = Session(
+                    id=test_session_id,
+                    user_id=test_user_id,
+                    platform="verification_test",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                
+                # Test inserting a test message
+                test_message = Message(
+                    id=test_message_id,
+                    session_id=test_session_id,
+                    role="user",
+                    text_content="Test database connection",
+                    raw_payload={"content": "Test database connection"},
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                
+                # Create the session and message within the transaction
                 with conn.cursor() as cur:
                     # Insert test session
                     cur.execute(

@@ -19,6 +19,11 @@ from pydantic_ai.messages import (
 from src.memory.message_store import MessageStore
 from src.db import execute_query, execute_batch
 from src.memory.message_history import TextPart, ToolCall, ToolOutput, ToolCallPart, ToolOutputPart
+from src.db import (
+    get_session, get_session_by_name, create_session, update_session, 
+    Session, create_message, get_message, list_messages, Message,
+    delete_session_messages
+)
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -67,44 +72,38 @@ class PostgresMessageStore(MessageStore):
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def get_messages(self, session_id: str) -> List[ModelMessage]:
+    def get_messages(self, session_id: str, sort_desc: bool = True) -> List[Dict[str, Any]]:
         """Get all messages for a session.
         
         Args:
-            session_id: The session ID to get messages for.
+            session_id: The session ID to get messages for
+            sort_desc: Sort by created_at in descending order if True
             
         Returns:
-            List of ModelMessage objects.
+            List of message dictionaries
         """
         try:
-            # Import necessary functions
-            from src.db import list_messages
+            # Convert session_id to UUID if it's a string
+            if isinstance(session_id, str):
+                session_id_uuid = uuid.UUID(session_id)
+            else:
+                session_id_uuid = session_id
+                
+            # Use repository function to list messages
+            messages = list_messages(session_id_uuid, sort_desc=sort_desc)
             
-            try:
-                # Try to parse the session_id
-                session_id_uuid = uuid.UUID(session_id) if session_id else None
-            except ValueError:
-                logger.error(f"Invalid session ID format: {session_id}")
-                return []
+            # Convert each message to a dictionary
+            message_dicts = []
+            for message in messages:
+                message_id = str(message.id)
+                # Use the get_message method to format the message
+                message_dict = self.get_message(message_id)
+                if message_dict:
+                    message_dicts.append(message_dict)
             
-            # Retrieve messages from the database
-            messages = list_messages(session_id_uuid)
-            
-            # Convert database messages to ModelMessage objects
-            result = []
-            for msg in messages:
-                # Convert from Model to Dict for processing
-                message_dict = msg.dict()
-                model_message = self._db_to_model_message(message_dict)
-                if model_message:
-                    result.append(model_message)
-            
-            logger.debug(f"Retrieved {len(result)} messages for session {session_id}")
-            return result
+            return message_dicts
         except Exception as e:
-            logger.error(f"Error getting messages for session {session_id}: {str(e)}")
-            import traceback
-            logger.error(f"Detailed error: {traceback.format_exc()}")
+            logger.error(f"Error retrieving messages for session {session_id}: {str(e)}")
             return []
     
     def add_message(self, session_id: str, message: ModelMessage) -> None:
@@ -364,130 +363,127 @@ class PostgresMessageStore(MessageStore):
             True if the session exists, False otherwise
         """
         try:
-            from src.db import get_session
-            
-            # Try to parse the session_id
-            try:
-                session_id_uuid = uuid.UUID(session_id) if session_id else None
-            except ValueError:
-                return False
-            
-            # Check if the session exists
+            # Convert session_id to UUID if it's a string
+            if isinstance(session_id, str):
+                session_id_uuid = uuid.UUID(session_id)
+            else:
+                session_id_uuid = session_id
+                
+            # Use repository function to get the session
             session = get_session(session_id_uuid)
+            
             return session is not None
         except Exception as e:
-            logger.error(f"Error checking session existence: {str(e)}")
+            logger.error(f"Error checking if session {session_id} exists: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: int = 1, agent_id: Optional[int] = None, session_name: Optional[str] = None, session_origin: Optional[str] = None) -> str:
-        """Ensure a session exists, creating it if necessary.
+    def _ensure_session_exists(self, session_id: str, user_id: Optional[int] = None, agent_id: Optional[int] = None,
+                              session_name: Optional[str] = None, session_origin: Optional[str] = None) -> bool:
+        """Ensure a session exists with the given ID, creating it if necessary.
+        
+        If the session exists and has an agent_id, but a different one is provided, raises ValueError.
         
         Args:
             session_id: The session ID to check/create
-            user_id: User ID associated with the session
-            agent_id: Optional agent ID associated with the session
-            session_name: Optional name for the session
-            session_origin: Optional origin platform for the session
+            user_id: The user ID to associate with the session
+            agent_id: The agent ID to associate with the session
+            session_name: Optional session name
+            session_origin: Optional session origin platform
             
         Returns:
-            The session ID (could be different if original was invalid)
+            True if the session exists or was created, False on error
+            
+        Raises:
+            ValueError: If the session exists but with a different agent_id
         """
-        from src.db import get_session, create_session, Session, get_agent, get_agent_by_name
-        
-        # If agent_id is a string name, try to look up the actual agent ID
-        if agent_id is not None and not isinstance(agent_id, int) and not str(agent_id).isdigit():
-            # This might be an agent name, try to find the ID
-            agent_name = str(agent_id)
-            agent = get_agent_by_name(agent_name)
-            if agent:
-                logger.debug(f"Resolved agent name '{agent_name}' to ID {agent.id}")
-                agent_id = agent.id
-            else:
-                logger.warning(f"Could not find agent with name '{agent_name}', using as-is")
-        
-        # Try to get the session first
         try:
-            session_id_uuid = uuid.UUID(session_id) if session_id else None
-            session = get_session(session_id_uuid)
-        except ValueError:
-            # Invalid UUID format, we'll need to create a new session
-            session = None
-            logger.warning(f"Provided session ID '{session_id}' is not a valid UUID, creating a new session")
-            new_session_id = create_session(Session(
-                user_id=user_id,
-                agent_id=agent_id,
-                name=session_name,
-                platform=session_origin or 'web',
-                metadata={"session_origin": session_origin} if session_origin else {}
-            ))
-            return str(new_session_id)
-        
-        if not session:
-            # Valid UUID but doesn't exist, create it with the specified ID
-            try:
-                # Prepare metadata with session_origin if provided
-                metadata = {"session_origin": session_origin} if session_origin else {}
+            # Convert session_id to UUID if it's a string
+            if isinstance(session_id, str):
+                session_id_uuid = uuid.UUID(session_id)
+            else:
+                session_id_uuid = session_id
                 
-                # Create a new session object
+            # Check if session exists
+            existing_session = get_session(session_id_uuid)
+            
+            if existing_session:
+                # Session exists
+                logger.debug(f"Session {session_id} already exists")
+                
+                # Check if agent_id matches if both are provided
+                if agent_id is not None and existing_session.agent_id is not None and existing_session.agent_id != agent_id:
+                    # Different agent - this is usually not allowed
+                    logger.error(f"Session {session_id} is already associated with agent ID {existing_session.agent_id}, "
+                               f"cannot use with agent ID {agent_id}")
+                    raise ValueError(f"Session {session_id} is already associated with agent ID {existing_session.agent_id}")
+                
+                # Update the session with new data if provided
+                should_update = False
+                if agent_id is not None and existing_session.agent_id is None:
+                    existing_session.agent_id = agent_id
+                    should_update = True
+                    
+                if user_id is not None and existing_session.user_id is None:
+                    existing_session.user_id = user_id
+                    should_update = True
+                    
+                if session_name is not None and not existing_session.name:
+                    existing_session.name = session_name
+                    should_update = True
+                
+                if session_origin is not None:
+                    # Handle metadata for origin
+                    metadata = existing_session.metadata or {}
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = {}
+                    
+                    # Set the session_origin
+                    metadata['session_origin'] = session_origin
+                    existing_session.metadata = metadata
+                    should_update = True
+                
+                # Update the session if needed
+                if should_update:
+                    logger.debug(f"Updating session {session_id} with new data")
+                    update_session(existing_session)
+                
+                return True
+            else:
+                # Session doesn't exist, create it
+                logger.debug(f"Creating new session with ID {session_id}")
+                
+                # Prepare metadata
+                metadata = {}
+                if session_origin:
+                    metadata['session_origin'] = session_origin
+                
+                # Create a new Session object
                 new_session = Session(
-                    id=uuid.UUID(session_id),
+                    id=session_id_uuid,
                     user_id=user_id,
                     agent_id=agent_id,
                     name=session_name,
-                    platform=session_origin or 'web',
+                    platform=session_origin or 'api',
                     metadata=metadata,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
                 )
                 
-                create_session(new_session)
-                logger.info(f"Created new session with provided ID {session_id} for user {user_id}")
-                return session_id
-            except Exception as e:
-                logger.error(f"Error creating session: {str(e)}")
-                # Try to create with a new ID if there was an error
-                new_session_id = create_session(Session(
-                    user_id=user_id,
-                    agent_id=agent_id,
-                    name=session_name,
-                    platform=session_origin or 'web',
-                    metadata={"session_origin": session_origin} if session_origin else {}
-                ))
-                return str(new_session_id)
-        else:
-            # Session exists, check if agent_id matches (if provided)
-            if agent_id is not None and session.agent_id is not None:
-                # FIX: If a session already exists with an agent_id, we prefer to keep that agent_id
-                # This solves the issue where CLI might first use numeric ID and then string ID
-                logger.debug(f"Session already exists with agent_id {session.agent_id}, keeping it instead of {agent_id}")
-                return session_id
+                # Create the session using repository function
+                created_id = create_session(new_session)
                 
-                # The following code is kept commented out as reference of what we're replacing
-                # Try to make sure we're comparing the same types
-                # try:
-                #     session_agent_id = int(session.agent_id) if str(session.agent_id).isdigit() else str(session.agent_id)
-                #     new_agent_id = int(agent_id) if str(agent_id).isdigit() else str(agent_id)
-                #     
-                #     if session_agent_id != new_agent_id:
-                #         error_msg = f"Session {session_id} is already associated with agent ID {session.agent_id}, cannot reassign to agent ID {agent_id}"
-                #         logger.error(error_msg)
-                #         raise ValueError(error_msg)
-                # except (ValueError, TypeError):
-                #     # If we can't convert to the same types, do a string comparison
-                #     if str(session.agent_id) != str(agent_id):
-                #         error_msg = f"Session {session_id} is already associated with agent ID {session.agent_id}, cannot reassign to agent ID {agent_id}"
-                #         logger.error(error_msg)
-                #         raise ValueError(error_msg)
-            
-            # If agent_id is provided and session doesn't have one, update it
-            if agent_id is not None and session.agent_id is None:
-                session.agent_id = agent_id
-                session.updated_at = datetime.utcnow()
-                
-                # Update session
-                from src.db import update_session
-                update_session(session)
-                logger.debug(f"Updated session {session_id} with agent ID {agent_id}")
-            
-            return session_id
+                if created_id:
+                    logger.info(f"Created new session with ID {session_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to create session {session_id}")
+                    return False
+        except Exception as e:
+            logger.error(f"Error ensuring session exists: {str(e)}")
+            return False
     
     def _determine_message_role(self, message: ModelMessage) -> str:
         """Determine the role of a message.
@@ -507,27 +503,21 @@ class PostgresMessageStore(MessageStore):
         return "assistant"
     
     def clear_session(self, session_id: str) -> None:
-        """Clear all messages from a session.
+        """Clear all messages for a session.
         
         Args:
-            session_id: The session ID to clear messages from
+            session_id: The session ID to clear messages for
         """
         try:
-            from src.db import execute_query
-            
-            # Try to parse the session_id
+            # Convert session_id to UUID if it's a string
             try:
                 session_id_uuid = uuid.UUID(session_id) if session_id else None
             except ValueError:
                 logger.error(f"Invalid session ID format: {session_id}")
                 return
             
-            # Delete all messages for the session
-            execute_query(
-                "DELETE FROM messages WHERE session_id = %s",
-                (str(session_id_uuid),),
-                fetch=False
-            )
+            # Delete all messages for the session using repository function
+            delete_session_messages(session_id_uuid)
             logger.info(f"Cleared all messages for session {session_id}")
         except Exception as e:
             logger.error(f"Error clearing session: {str(e)}")
@@ -552,56 +542,62 @@ class PostgresMessageStore(MessageStore):
             if session and user_id is not None and session.user_id != user_id:
                 logger.warning(f"Session with name '{session_name}' found but belongs to a different user")
                 return None
-            
+                
+            # Return a dictionary with the session information
             if session:
-                # Return a dictionary with the expected format
                 return {
                     "id": str(session.id),
-                    "agent_id": session.agent_id
+                    "agent_id": session.agent_id,
+                    "user_id": session.user_id,
+                    "name": session.name,
+                    "platform": session.platform,
+                    "created_at": session.created_at,
+                    "updated_at": session.updated_at
                 }
-            
+                
             return None
         except Exception as e:
-            logger.error(f"Error getting session by name '{session_name}': {str(e)}")
-            import traceback
-            logger.debug(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error retrieving session by name '{session_name}': {str(e)}")
             return None
     
-    def _db_to_model_message(self, db_message: Dict[str, Any]) -> ModelMessage:
-        """Convert a database message to a ModelMessage.
+    def get_message(self, message_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific message by ID.
         
         Args:
-            db_message: The database message to convert.
+            message_id: The message ID to retrieve
             
         Returns:
-            The converted ModelMessage.
+            Message data if found, None otherwise
         """
         try:
-            # Check if db_message is None
-            if db_message is None:
-                logger.error("Received None db_message in _db_to_model_message")
-                return ModelResponse(parts=[TextPart(content="Error: Missing message data")])
+            # Convert to UUID if needed
+            if isinstance(message_id, str):
+                message_id_uuid = uuid.UUID(message_id)
+            else:
+                message_id_uuid = message_id
                 
-            role = db_message.get("role", "")
-            content = db_message.get("text_content", "")
+            # Use repository function to get the message
+            message = get_message(message_id_uuid)
             
-            # Safely parse raw_payload
-            raw_payload = {}
-            if db_message.get("raw_payload"):
-                if isinstance(db_message["raw_payload"], str):
-                    try:
-                        # Handle potential Unicode issues by using utf-8 encoding/decoding
-                        payload_str = db_message["raw_payload"].encode('utf-8').decode('utf-8')
-                        raw_payload = json.loads(payload_str)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Error parsing raw_payload JSON: {db_message['raw_payload']} - Error: {str(e)}")
-                        raw_payload = {}
-                elif isinstance(db_message["raw_payload"], dict):
-                    # It's already a dict, no need to parse
-                    raw_payload = db_message["raw_payload"]
-                else:
-                    logger.error(f"Unexpected raw_payload type: {type(db_message['raw_payload'])}")
-                    raw_payload = {}
+            if not message:
+                return None
+                
+            # Convert the message to a dictionary
+            if hasattr(message, 'model_dump'):
+                # Pydantic v2
+                db_message = message.model_dump()
+            elif hasattr(message, 'dict'):
+                # Pydantic v1
+                db_message = message.dict()
+            else:
+                # Handle other types of objects
+                db_message = {attr: getattr(message, attr) for attr in dir(message) 
+                             if not attr.startswith('_') and not callable(getattr(message, attr))}
+            
+            # Ensure ID is a string
+            db_message["id"] = str(db_message["id"])
+            if db_message.get("session_id"):
+                db_message["session_id"] = str(db_message["session_id"])
             
             # Parse tool_calls from dedicated column if available
             tool_calls = []
@@ -644,71 +640,47 @@ class PostgresMessageStore(MessageStore):
                     tool_outputs = list(db_message["tool_outputs"].values())
                 else:
                     tool_outputs = db_message["tool_outputs"]
+                    
+            # Get the raw_payload data
+            raw_payload = db_message.get("raw_payload", {})
+            if isinstance(raw_payload, str):
+                try:
+                    raw_payload = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    raw_payload = {}
             
-            # Use tool data from dedicated columns if available, otherwise try to get from raw_payload
-            if not tool_calls and "tool_calls" in raw_payload and raw_payload["tool_calls"]:
-                tool_calls = raw_payload["tool_calls"]
+            # Get context data
+            context = db_message.get("context", {})
+            if isinstance(context, str):
+                try:
+                    context = json.loads(context)
+                except json.JSONDecodeError:
+                    context = {}
             
-            if not tool_outputs and "tool_outputs" in raw_payload and raw_payload["tool_outputs"]:
-                tool_outputs = raw_payload["tool_outputs"]
+            # Get system_prompt if available
+            system_prompt = db_message.get("system_prompt")
+            if not system_prompt and raw_payload and isinstance(raw_payload, dict):
+                system_prompt = raw_payload.get("system_prompt")
             
-            # Create appropriate message type based on role
-            if role == "user":
-                message = ModelRequest(parts=[
-                    UserPromptPart(content=content)
-                ])
-            elif role == "system":
-                message = ModelRequest(parts=[
-                    SystemPromptPart(content=content)
-                ])
-            else:  # Assistant message
-                # Create a text part for the main content
-                parts = [TextPart(content=content)]
-                
-                # Create tool call parts
-                for tc in tool_calls:
-                    try:
-                        if isinstance(tc, dict) and "tool_name" in tc:
-                            tool_call = ToolCall(
-                                tool_name=tc.get("tool_name", ""),
-                                args=tc.get("args", {}),
-                                tool_call_id=tc.get("tool_call_id", "")
-                            )
-                            parts.append(ToolCallPart(tool_call=tool_call))
-                    except Exception as e:
-                        logger.error(f"Error creating tool call part: {str(e)}")
-                
-                # Create tool output parts
-                for to in tool_outputs:
-                    try:
-                        if isinstance(to, dict) and "tool_name" in to:
-                            tool_output = ToolOutput(
-                                tool_name=to.get("tool_name", ""),
-                                tool_call_id=to.get("tool_call_id", ""),
-                                content=to.get("content", "")
-                            )
-                            parts.append(ToolOutputPart(tool_output=tool_output))
-                    except Exception as e:
-                        logger.error(f"Error creating tool output part: {str(e)}")
-                
-                # Create the response message with all parts
-                message = ModelResponse(parts=parts)
-                
-                # Add system_prompt from the database if available
-                if db_message.get("system_prompt"):
-                    message.system_prompt = db_message["system_prompt"]
+            # Build the message dictionary with all the data
+            message_dict = {
+                "id": db_message["id"],
+                "session_id": db_message.get("session_id"),
+                "role": db_message.get("role"),
+                "content": db_message.get("text_content"),
+                "tool_calls": tool_calls,
+                "tool_outputs": tool_outputs,
+                "created_at": db_message.get("created_at"),
+                "user_id": db_message.get("user_id"),
+                "agent_id": db_message.get("agent_id"),
+                "raw_payload": raw_payload,
+                "context": context,
+                "system_prompt": system_prompt
+            }
             
-            # Add agent_id and user_id if available
-            if db_message.get("agent_id") is not None:
-                message.agent_id = db_message["agent_id"]
-                
-            if db_message.get("user_id") is not None:
-                message.user_id = db_message["user_id"]
-            
-            return message
+            return message_dict
         except Exception as e:
-            logger.error(f"Error converting database message to ModelMessage: {str(e)}")
+            logger.error(f"Error retrieving message {message_id}: {str(e)}")
             import traceback
-            logger.error(f"Detailed error: {traceback.format_exc()}")
-            # Fallback to a simple error message
-            return ModelResponse(parts=[TextPart(content=f"Error processing message: {str(e)}")])
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None

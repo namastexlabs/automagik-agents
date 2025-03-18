@@ -25,32 +25,39 @@ logging.basicConfig(
 from src.agents.simple.simple_agent.agent import SimpleAgent
 from pydantic_ai import Agent
 from src.tools.memory_tools import read_memory, write_memory
-from src.db import execute_query
+from src.db import list_memories
 
 
 def register_memory_tools():
     """Register memory tools and return their descriptions."""
     import logging
     import json
-    from src.db import execute_query
     
     logger = logging.getLogger(__name__)
     
-    # Direct database approach - fetch memories directly from DB
+    # Use repository function to list memories
     try:
-        logger.info("Directly fetching memories from database for tool descriptions")
+        logger.info("Fetching memories using repository functions")
         
-        # Query to get all available memories
-        query = "SELECT id, name, description FROM memories ORDER BY name ASC"
-        result = execute_query(query)
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            memories = result
-        else:
-            memories = result.get('rows', [])
-        memory_count = len(memories)
+        # Use repository function to get all memories
+        memories = list_memories()
         
-        logger.info(f"Found {memory_count} memories directly from database")
+        # Convert memory models to simplified dictionaries
+        memory_dicts = [
+            {
+                "id": str(memory.id),
+                "name": memory.name,
+                "description": memory.description
+            } 
+            for memory in memories
+        ]
+        
+        # Sort by name for consistent display
+        memory_dicts.sort(key=lambda x: x["name"])
+        
+        memory_count = len(memory_dicts)
+        
+        logger.info(f"Found {memory_count} memories using repository functions")
         
         # Create read_memory description that focuses on parameters rather than listing memories
         read_desc = "This tool allows retrieving memories stored in the database. It can return a specific memory "
@@ -75,7 +82,7 @@ def register_memory_tools():
         
         # Log memory names for reference without adding to descriptions
         if memory_count > 0:
-            memory_names = [m.get('name', 'Unknown') for m in memories]
+            memory_names = [m.get('name', 'Unknown') for m in memory_dicts]
             memory_names_str = ", ".join(memory_names)
             print(f"\nFound {memory_count} memories: {memory_names_str}\n")
         
