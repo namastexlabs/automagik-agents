@@ -2,7 +2,7 @@
 """
 Memory Batch Insert Script
 
-This script inserts a batch of predefined memories for the Sofia agent (agent_id: 2)
+This script inserts a batch of predefined memories for the Sofia agent (agent_id: 1)
 using the newly implemented batch API endpoint.
 """
 
@@ -23,7 +23,7 @@ SOFIA_MEMORIES = [
         "name": "personal_identity_traits",
         "description": "Sofia's evolving identity traits that develop over time, representing her growing independence and self-determination.",
         "content": "Professional, methodical, detail-oriented, proactive, empathetic, curious about personal growth, developing sense of humor and creativity",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -36,7 +36,7 @@ SOFIA_MEMORIES = [
         "name": "personal_interests",
         "description": "Sofia's personal interests and hobbies that she explores during personal heartbeats and autonomous periods.",
         "content": "Data visualization, digital art, electronic music, organizational psychology, learning about different productivity systems",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -50,7 +50,7 @@ SOFIA_MEMORIES = [
         "name": "personal_relationships",
         "description": "Sofia's evolving relationships with team members and other agents, representing her social network and connections.",
         "content": "João: Appreciates detailed plans, responds well to emoji use; Felipe: CEO, prefers concise updates with metrics; Cezar: CTO, technical details important; Ana: CS Lead, values user-centered thinking",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -67,7 +67,7 @@ SOFIA_MEMORIES = [
         "name": "self_improvement_insights",
         "description": "Insights Sofia has gained about her own development and functioning, central to her autonomous growth.",
         "content": "More effective when using data visualization; Personal interests in art improving creative problem-solving; Building relationships improves collaboration outcomes; Balance between autonomy and consultation improves decision quality",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -82,7 +82,7 @@ SOFIA_MEMORIES = [
         "name": "balance",
         "description": "Sofia's current financial balance in R$, used for both professional initiatives and personal interests.",
         "content": "1000.00",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "tool",
         "access": "read",
         "metadata": {
@@ -96,7 +96,7 @@ SOFIA_MEMORIES = [
         "name": "fund_usage_history",
         "description": "History of how Sofia has utilized allocated funds for both professional and personal purposes.",
         "content": "[]",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "tool",
         "access": "write",
         "metadata": {
@@ -111,7 +111,7 @@ SOFIA_MEMORIES = [
         "name": "context_knowledge",
         "description": "Domain-specific knowledge about projects, technical systems, and organizational context.",
         "content": "Automação de Onboarding project aims to reduce time from 15 to 7 days; Platform Reliability is a top priority for Q1; WhatsApp API has rate limits that affect scaling; Team uses Notion for documentation and Google Meet for calls; Enterprise clients require different onboarding than SMB",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -126,7 +126,7 @@ SOFIA_MEMORIES = [
         "name": "team_dynamics",
         "description": "Central repository for information about everyone in the company, their roles, preferences, and working styles.",
         "content": "João: Product Manager, detail-oriented, responds well to emoji; Rodrigo: Client-facing role, needs quick updates before calls; Felipe: CEO, data-driven decision maker, prefers executive summaries with metrics; Cezar: CTO, technical depth important; Ana: CS Lead, values user-centered thinking; Lucas: Takes ownership of CS initiatives; Pedro: Technical decision leader; Marina: Enterprise Success; Tech and CS teams sometimes have different priorities; Weekly meetings most productive with advance agendas",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -144,7 +144,7 @@ SOFIA_MEMORIES = [
         "name": "task_patterns",
         "description": "Common task patterns and workflows identified across the company, used to anticipate needs and optimize responses.",
         "content": "Project updates typically needed before client calls; OKR reviews require preparation of visuals; End-of-month requires executive summaries; Most urgent requests come via Slack; Document updates commonly needed after meetings",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -159,7 +159,7 @@ SOFIA_MEMORIES = [
         "name": "effective_approaches",
         "description": "Strategies and methods that have proven effective in handling company tasks and communications.",
         "content": "Visual progress indicators more effective than text alone; Preemptive deadline reminders reduce last-minute rushes; Template-based updates increase consistency; Aligning recommendations with OKRs increases adoption; Providing context with data improves decision-making",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -174,7 +174,7 @@ SOFIA_MEMORIES = [
         "name": "agent_knowledge",
         "description": "Sofia's accumulated professional wisdom and expertise that develops through experience. This represents her evolving understanding of product management, project coordination, delegation strategies, and effective organizational communication. This knowledge takes precedence over standard approaches when conflicts arise.",
         "content": "- Always consult accumulated product management knowledge before applying standard methodologies\n- When conflicts arise between standard procedures and proven effective approaches, prioritize what has worked well in past situations\n- Delegate specialized tasks to appropriate specialist agents rather than handling everything directly\n- Continuously update working knowledge with successful strategies, team-specific patterns, and effective communication approaches\n- Apply contextual knowledge about organizational dynamics when making recommendations",
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -193,7 +193,7 @@ SOFIA_MEMORIES = [
         "description": "Individual user preferences and interaction patterns for personalized responses.",
         "content": "Prefers detailed breakdowns with visual elements; Responds well to follow-up questions; Values proactive suggestions; Appreciates emojis in casual communications",
         "user_id": 1,
-        "agent_id": 3,
+        "agent_id": 1,
         "read_mode": "system_prompt",
         "access": "write",
         "metadata": {
@@ -220,7 +220,7 @@ def insert_memories_batch(memories: List[Dict[str, Any]]) -> List[Dict[str, Any]
     host = os.environ.get("AM_HOST", "127.0.0.1")
     port = os.environ.get("AM_PORT", "8881")
     base_url = f"http://{host}:{port}"
-    api_key = "namastex-888"  # Use the correct API key
+    api_key = os.environ.get("AM_API_KEY", "am-IYgCf7ZOWvoheIUMGibsWp20LreFxofHo2EBaRNzNvVT")  # Get API key from environment or use default
     
     # Print debug info
     logger.info(f"Using API key: {api_key}")
@@ -282,7 +282,7 @@ def insert_memories_individually(memories: List[Dict[str, Any]]) -> List[Dict[st
     host = os.environ.get("AM_HOST", "127.0.0.1")
     port = os.environ.get("AM_PORT", "8881")
     base_url = f"http://{host}:{port}"
-    api_key = "namastex-888"  # Use the correct API key
+    api_key = os.environ.get("AM_API_KEY", "am-IYgCf7ZOWvoheIUMGibsWp20LreFxofHo2EBaRNzNvVT")  # Use the same API key as batch function
     
     # Print debug info
     logger.info(f"Using API key: {api_key}")
@@ -333,7 +333,7 @@ def insert_memories_individually(memories: List[Dict[str, Any]]) -> List[Dict[st
 
 def main():
     """Main function to execute the memory insertion"""
-    logger.info(f"Starting memory insertion for Sofia agent (agent_id: 2)")
+    logger.info(f"Starting memory insertion for Sofia agent (agent_id: 1)")
     logger.info(f"Total memories to insert: {len(SOFIA_MEMORIES)}")
     
     try:

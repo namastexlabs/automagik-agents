@@ -108,7 +108,8 @@ def create_app() -> FastAPI:
         logger.info("🔧 Initializing PostgreSQL message store for persistent storage")
         
         # First test database connection
-        from src.db import get_connection_pool, execute_query
+        from src.db.connection import get_connection_pool
+        from src.db import execute_query
         pool = get_connection_pool()
         
         # Test the connection with a simple query

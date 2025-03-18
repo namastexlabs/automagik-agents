@@ -85,7 +85,7 @@ class BaseAgent(ABC):
             
         message_history = MessageHistory(session_id, user_id=user_id)
 
-
+        # Create a user message object with content explicitly set
         user_message_obj = message_history.add(user_message, agent_id=agent_id, context=context)
         
         logging.info(f"Processing user message in session {session_id}: {user_message}")
@@ -166,15 +166,30 @@ class BaseAgent(ABC):
 
         logging.info(f"Captured {len(tool_calls)} tool calls and {len(tool_outputs)} tool outputs")
         
-        # Add the response with assistant info and agent_id
-        message_history.add_response(
+        # Ensure system prompt is obtained from the agent
+        system_prompt = getattr(self, "system_prompt", None)
+        
+        # Logging system prompt handling
+        if system_prompt:
+            logging.debug(f"Using system prompt from agent: {system_prompt[:50]}...")
+        else:
+            logging.debug("No system prompt found in agent, will check session metadata")
+        
+        # Add the response with assistant info, agent_id, and explicit content and system_prompt
+        assistant_message = message_history.add_response(
             content=response_text,
             assistant_name=self.__class__.__name__,
             tool_calls=tool_calls,
             tool_outputs=tool_outputs,
             agent_id=agent_id,
-            system_prompt=self.system_prompt 
+            system_prompt=system_prompt
         )
+        
+        # Ensure assistant message has content set
+        if hasattr(assistant_message, "content"):
+            logging.debug(f"Assistant message content set: {assistant_message.content[:50]}...")
+        else:
+            logging.warning("Assistant message doesn't have content attribute")
         
         # Use the potentially updated session_id from message_history
         session_id = message_history.session_id

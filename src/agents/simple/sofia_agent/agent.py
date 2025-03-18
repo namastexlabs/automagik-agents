@@ -451,83 +451,25 @@ class SofiaAgent(BaseAgent):
         Args:
             user_message: User message to process
             session_id: Optional session ID
-            agent_id: Optional agent ID for database tracking (integer or string for backwards compatibility)
+            agent_id: Optional agent ID for database tracking
             user_id: User ID (integer)
-            context: Optional additional context that will be logged but not passed to the agent due to API limitations
+            context: Optional additional context
             
         Returns:
             Agent response
         """
-        if not session_id:
-            # Using empty string is no longer allowed - we need a valid session ID
-            logging.error("Empty session_id provided, session must be created before calling process_message")
-            return AgentBaseResponse.from_agent_response(
-                message="Error: No valid session ID provided. A session must be created before processing messages.",
-                history=MessageHistory(""),
-                error="No valid session ID provided",
-                session_id=""
-            )
+        # Call the parent process_message method
+        response = await super().process_message(
+            user_message=user_message,
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            context=context
+        )
         
-        # Set default context if None is provided
-        context = context or {}
-            
-        logging.info(f"Using existing session ID: {session_id}")
+        # Log the system prompt to help with debugging
+        logging.debug(f"Sofia agent system prompt length: {len(self.system_prompt) if hasattr(self, 'system_prompt') and self.system_prompt else 0}")
+        if hasattr(self, 'system_prompt') and self.system_prompt:
+            logging.debug(f"Sofia agent system prompt first 100 chars: {self.system_prompt[:100]}")
         
-        # Log any additional context provided
-        if context:
-            logging.info(f"Additional message context: {context}")
-            
-        message_history = MessageHistory(session_id, user_id=user_id)
-
-        # IMPORTANT: Ensure the system prompt is in the message history
-        has_system_prompt = False
-        for msg in message_history.messages:
-            if hasattr(msg, 'role') and msg.role == 'system':
-                has_system_prompt = True
-                logging.info(f"Found system prompt in existing message history")
-                break
-        
-        # If no system prompt is found, add it explicitly
-        if not has_system_prompt and hasattr(self, 'system_prompt'):
-            logging.info("No system prompt found in message history. Adding Sofia's system prompt explicitly.")
-            message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
-            logging.info(f"Added system prompt (length: {len(self.system_prompt)})")
-
-        user_message_obj = message_history.add(user_message, agent_id=agent_id, context=context)
-        
-        logging.info(f"Processing user message in session {session_id}: {user_message}")
-
-        try:
-            # The agent.run() method doesn't accept extra_context parameter
-            # Just pass the required parameters
-            result = await self.agent.run(
-                user_message,
-                message_history=message_history.messages
-            )
-            logging.info(f"Agent run completed. Result type: {type(result)}")
-            
-            # Log the result type and content preview
-            logger.info(f"Agent result type: {type(result)}")
-            if hasattr(result, 'data'):
-                response_preview = str(result.data)[:100] + "..." if len(str(result.data)) > 100 else str(result.data)
-                logger.info(f"Agent response preview: {response_preview}")
-            
-            # Extract the response text
-            response_text = result.data
-            
-            # Create and return the agent response
-            return AgentBaseResponse.from_agent_response(
-                message=response_text,
-                history=message_history,
-                error=None,
-                session_id=message_history.session_id
-            )
-        except Exception as e:
-            error_msg = f"Error running SofiaAgent: {str(e)}"
-            logger.error(error_msg)
-            return AgentBaseResponse.from_agent_response(
-                message="An error occurred while processing your request.",
-                history=message_history,
-                error=error_msg,
-                session_id=message_history.session_id
-            )
+        return response
