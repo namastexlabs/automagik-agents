@@ -4,8 +4,9 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union, Tuple
 import math
+import traceback
 
 from pydantic_ai.messages import (
     ModelMessage,
@@ -27,6 +28,31 @@ from src.db import (
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+# Import our helper function from connection
+from src.db.connection import safe_uuid
+
+# Helper function for UUID validation
+def is_valid_uuid(value: Any) -> bool:
+    """Check if a value is a valid UUID or can be converted to one.
+    
+    Args:
+        value: The value to check
+        
+    Returns:
+        True if the value is a valid UUID or can be converted to one
+    """
+    if value is None:
+        return False
+    if isinstance(value, uuid.UUID):
+        return True
+    if not isinstance(value, str):
+        return False
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 class PostgresMessageStore(MessageStore):
     """PostgreSQL implementation of MessageStore."""
@@ -106,7 +132,7 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error retrieving messages for session {session_id}: {str(e)}")
             return []
     
-    def add_message(self, session_id: str, message: ModelMessage) -> None:
+    def add_message(self, session_id: Any, message: ModelMessage) -> None:
         """Add a message to a session.
         
         Args:
@@ -117,8 +143,22 @@ class PostgresMessageStore(MessageStore):
         user_id = getattr(message, "user_id", 1)
         
         try:
-            # Make sure the session exists
+            # Make sure the session exists and session_id is a string
+            if isinstance(session_id, bool):
+                logger.error(f"Invalid session_id: received boolean {session_id} instead of string UUID")
+                # Convert to a valid session ID string to prevent errors
+                session_id = str(uuid.uuid4())
+                logger.info(f"Generated new session ID: {session_id}")
+            
+            # Make sure session exists and returns a valid session ID string
             session_id = self._ensure_session_exists(session_id, user_id)
+            if not is_valid_uuid(session_id):
+                logger.error(f"Invalid session_id after ensure_session_exists: {session_id}")
+                # Create a fallback
+                session_id = str(uuid.uuid4())
+            
+            # Now session_id should be a valid UUID string
+            logger.info(f"📝 Processing {message.__class__.__name__} in session {session_id}")
             
             # Determine message role
             role = self._determine_message_role(message)
@@ -277,7 +317,7 @@ class PostgresMessageStore(MessageStore):
             
             message_obj = Message(
                 id=uuid.UUID(message_id),
-                session_id=uuid.UUID(session_id) if session_id else None,
+                session_id=uuid.UUID(session_id) if isinstance(session_id, str) and session_id else None,
                 user_id=user_id,
                 agent_id=agent_id,
                 role=role,
@@ -295,18 +335,20 @@ class PostgresMessageStore(MessageStore):
             
             # If this is an assistant message (response), update run_finished_at in the session
             if role == "assistant":
-                session = get_session(uuid.UUID(session_id))
-                if session:
-                    session.run_finished_at = datetime.utcnow()
-                    update_session(session)
-                    logger.debug(f"Updated session {session_id} run_finished_at")
+                # Validate session_id is a string before converting to UUID
+                if isinstance(session_id, str):
+                    session = get_session(uuid.UUID(session_id))
+                    if session:
+                        session.run_finished_at = datetime.utcnow()
+                        update_session(session)
+                        logger.debug(f"Updated session {session_id} run_finished_at")
             
         except Exception as e:
             logger.error(f"❌ Error adding message to session {session_id}: {str(e)}")
             import traceback
             logger.error(f"Detailed error: {traceback.format_exc()}")
     
-    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional = None, user_id: int = 1) -> None:
+    def update_system_prompt(self, session_id: str, system_prompt: str, agent_id: Optional[int] = None, user_id: int = 1) -> None:
         """Update the system prompt for a session.
         
         Args:
@@ -316,8 +358,13 @@ class PostgresMessageStore(MessageStore):
             user_id: Optional user ID to associate with the message.
         """
         try:
-            # Ensure session exists
-            session_id = self._ensure_session_exists(session_id, user_id)
+            # Ensure session exists and returns a valid session ID
+            session_id = self._ensure_session_exists(session_id, user_id, agent_id)
+            
+            # Make sure we have a valid session ID
+            if not is_valid_uuid(session_id):
+                logger.error(f"Invalid session_id after ensure_session_exists: {session_id}")
+                return
             
             # Store the system prompt in the session metadata instead of creating a message
             try:
@@ -377,8 +424,8 @@ class PostgresMessageStore(MessageStore):
             logger.error(f"Error checking if session {session_id} exists: {str(e)}")
             return False
     
-    def _ensure_session_exists(self, session_id: str, user_id: Optional[int] = None, agent_id: Optional[int] = None,
-                              session_name: Optional[str] = None, session_origin: Optional[str] = None) -> bool:
+    def _ensure_session_exists(self, session_id: Any, user_id: Optional[int] = None, agent_id: Optional[int] = None,
+                              session_name: Optional[str] = None, session_origin: Optional[str] = None) -> str:
         """Ensure a session exists with the given ID, creating it if necessary.
         
         If the session exists and has an agent_id, but a different one is provided, raises ValueError.
@@ -391,99 +438,117 @@ class PostgresMessageStore(MessageStore):
             session_origin: Optional session origin platform
             
         Returns:
-            True if the session exists or was created, False on error
+            The session ID as a string if the session exists or was created
             
         Raises:
             ValueError: If the session exists but with a different agent_id
         """
         try:
-            # Convert session_id to UUID if it's a string
-            if isinstance(session_id, str):
-                session_id_uuid = uuid.UUID(session_id)
-            else:
-                session_id_uuid = session_id
-                
-            # Check if session exists
-            existing_session = get_session(session_id_uuid)
+            # Handle invalid session_id types
+            if not session_id or isinstance(session_id, bool):
+                # Generate a new valid session ID
+                new_session_id = str(uuid.uuid4())
+                logger.warning(f"Invalid session_id ({type(session_id).__name__}: {session_id}), generating new one: {new_session_id}")
+                session_id = new_session_id
             
-            if existing_session:
-                # Session exists
-                logger.debug(f"Session {session_id} already exists")
-                
-                # Check if agent_id matches if both are provided
-                if agent_id is not None and existing_session.agent_id is not None and existing_session.agent_id != agent_id:
-                    # Different agent - this is usually not allowed
-                    logger.error(f"Session {session_id} is already associated with agent ID {existing_session.agent_id}, "
-                               f"cannot use with agent ID {agent_id}")
-                    raise ValueError(f"Session {session_id} is already associated with agent ID {existing_session.agent_id}")
-                
-                # Update the session with new data if provided
-                should_update = False
-                if agent_id is not None and existing_session.agent_id is None:
-                    existing_session.agent_id = agent_id
-                    should_update = True
+            # Convert session_id to UUID if possible
+            if is_valid_uuid(session_id):
+                # Valid UUID or string that can be converted
+                if isinstance(session_id, str):
+                    session_id_uuid = uuid.UUID(session_id)
+                else:
+                    session_id_uuid = session_id
                     
-                if user_id is not None and existing_session.user_id is None:
-                    existing_session.user_id = user_id
-                    should_update = True
+                # Check if session exists
+                from src.db import get_session, create_session
+                existing_session = get_session(session_id_uuid)
+                
+                if existing_session:
+                    # Session exists, check agent_id if provided
+                    if agent_id is not None and existing_session.agent_id is not None and existing_session.agent_id != agent_id:
+                        raise ValueError(f"Session {session_id} is already associated with agent ID {existing_session.agent_id}, cannot use with agent ID {agent_id}")
                     
-                if session_name is not None and not existing_session.name:
-                    existing_session.name = session_name
-                    should_update = True
-                
-                if session_origin is not None:
-                    # Handle metadata for origin
-                    metadata = existing_session.metadata or {}
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except:
-                            metadata = {}
+                    # Update session information if needed
+                    need_update = False
                     
-                    # Set the session_origin
-                    metadata['session_origin'] = session_origin
-                    existing_session.metadata = metadata
-                    should_update = True
-                
-                # Update the session if needed
-                if should_update:
-                    logger.debug(f"Updating session {session_id} with new data")
-                    update_session(existing_session)
-                
-                return True
+                    # Update agent_id if provided and the session doesn't have one
+                    if agent_id is not None and existing_session.agent_id is None:
+                        existing_session.agent_id = agent_id
+                        need_update = True
+                    
+                    # Return the session ID as a string
+                    return str(session_id_uuid)
+                else:
+                    # Session doesn't exist, create it
+                    logger.info(f"Creating new session with ID: {session_id}")
+                    
+                    from src.db.models import Session
+                    
+                    # Create metadata
+                    metadata = {}
+                    if session_origin:
+                        metadata["session_origin"] = session_origin
+                    
+                    # Create Session model
+                    new_session = Session(
+                        id=session_id_uuid,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        name=session_name,
+                        platform=session_origin or "unknown",
+                        metadata=metadata
+                    )
+                    
+                    # Use the repository function to create the session
+                    created_session_id = create_session(new_session)
+                    if created_session_id:
+                        logger.info(f"Session created with ID: {created_session_id}")
+                        return str(created_session_id)
+                    else:
+                        logger.error(f"Failed to create session with ID: {session_id}")
+                        # Return the original ID since we still want to try to use it
+                        return str(session_id_uuid)
             else:
-                # Session doesn't exist, create it
-                logger.debug(f"Creating new session with ID {session_id}")
+                # Not a valid UUID, try to use as a session name
+                logger.info(f"Using {session_id} as a session name")
                 
-                # Prepare metadata
+                # Generate a new UUID for the session
+                new_session_id = str(uuid.uuid4())
+                
+                # Create a session with this name
+                from src.db.models import Session
+                
+                # Create metadata
                 metadata = {}
                 if session_origin:
-                    metadata['session_origin'] = session_origin
+                    metadata["session_origin"] = session_origin
                 
-                # Create a new Session object
+                # Create Session model
                 new_session = Session(
-                    id=session_id_uuid,
+                    id=uuid.UUID(new_session_id),
                     user_id=user_id,
                     agent_id=agent_id,
-                    name=session_name,
-                    platform=session_origin or 'api',
-                    metadata=metadata,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    name=str(session_id),  # Use the provided value as the name
+                    platform=session_origin or "unknown",
+                    metadata=metadata
                 )
                 
-                # Create the session using repository function
-                created_id = create_session(new_session)
-                
-                if created_id:
-                    logger.info(f"Created new session with ID {session_id}")
-                    return True
+                # Use the repository function to create the session
+                from src.db import create_session
+                created_session_id = create_session(new_session)
+                if created_session_id:
+                    logger.info(f"Session created with ID: {created_session_id} and name: {session_id}")
+                    return str(created_session_id)
                 else:
-                    logger.error(f"Failed to create session {session_id}")
-                    return False
+                    logger.error(f"Failed to create session with name: {session_id}")
+                    return new_session_id
+                
         except Exception as e:
             logger.error(f"Error ensuring session exists: {str(e)}")
-            return False
+            # Generate a new session ID
+            new_session_id = str(uuid.uuid4())
+            logger.info(f"Generating fallback session ID: {new_session_id}")
+            return new_session_id
     
     def _determine_message_role(self, message: ModelMessage) -> str:
         """Determine the role of a message.
