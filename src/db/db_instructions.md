@@ -466,4 +466,61 @@ def safe_uuid(value):
     return value
 ```
 
-Using repository functions is always preferred as they handle UUID conversion automatically..
+Using repository functions is always preferred as they handle UUID conversion automatically.
+
+## Comprehensive UUID Best Practices
+
+PostgreSQL natively supports UUIDs, and our database schema uses UUID columns for identifiers. Here are best practices for working with UUIDs:
+
+### Database Schema
+- Use the `uuid` data type for identifier columns that need to be unique across systems
+- Example schema: `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
+
+### Generating UUIDs
+- Always use the utility function: `from src.db.connection import generate_uuid; new_id = generate_uuid()`
+- This prevents variable shadowing issues and ensures consistent UUID generation
+- Avoid direct calls to uuid.uuid4() which can be problematic in nested scopes
+
+### Working with UUIDs in Repository Functions
+```python
+# Creating a new record with UUID
+from src.db import create_session, Session
+from src.db.connection import generate_uuid
+
+new_session = Session(
+    id=generate_uuid(),  # Safe UUID generation
+    name="Example Session",
+    # Other fields...
+)
+session_id = create_session(new_session)
+```
+
+### Direct SQL Queries with UUIDs
+When using direct SQL queries (which should be avoided when possible):
+
+1. **Use the registered adapter**: Our system has a registered adapter for UUID objects
+   ```python
+   from src.db import execute_query
+   from src.db.connection import generate_uuid
+   
+   session_id = generate_uuid()
+   execute_query("INSERT INTO sessions (id, name) VALUES (%s, %s)", (session_id, "Test"))
+   ```
+
+2. **Use the safe_uuid utility**:
+   ```python
+   from src.db.connection import safe_uuid, execute_query
+   
+   execute_query("SELECT * FROM sessions WHERE id = %s", (safe_uuid(session_id),))
+   ```
+
+### Variables Naming
+- NEVER use `uuid` as a variable name - it shadows the module
+- Use descriptive names like `session_id`, `message_uuid`, or `uuid_value` instead
+
+### Troubleshooting UUID Issues
+If you encounter issues with UUIDs:
+
+1. **Adaptation errors**: Use `safe_uuid()` when passing UUIDs to SQL queries
+2. **Variable shadowing**: Make sure no local variables are named `uuid`
+3. **Import issues**: Always use `generate_uuid()` instead of direct `uuid.uuid4()` calls

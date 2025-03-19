@@ -17,7 +17,7 @@ from src.memory.pg_message_store import PostgresMessageStore
 from src.agents.models.agent_factory import AgentFactory
 from src.db import execute_query, get_connection_pool, ensure_default_user_exists, create_session, Session
 
-# Configure logging
+# Configure loggingg
 configure_logging()
 
 # Get our module's logger

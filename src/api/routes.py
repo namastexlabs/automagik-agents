@@ -27,6 +27,7 @@ from src.api.models import (
 from src.api.memory_routes import memory_router
 from src.memory.pg_message_store import PostgresMessageStore
 from src.db import execute_query, get_db_connection, get_user_by_identifier, list_users, update_user, list_sessions, create_session
+from src.db.connection import generate_uuid, safe_uuid
 from psycopg2.extras import RealDictCursor
 
 # Create API router for v1 endpoints
@@ -142,7 +143,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 
                 # Create a Session model
                 new_session = Session(
-                    id=uuid.uuid4(),  # Explicitly set a UUID
+                    id=generate_uuid(),  # Use safe UUID generation
                     user_id=request.user_id,
                     agent_id=agent_id,
                     name=session_name,
@@ -209,7 +210,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                         
                         # Create a Session model
                         new_session = Session(
-                            id=uuid.uuid4(),  # Explicitly set a UUID
+                            id=generate_uuid(),  # Use safe UUID generation
                             user_id=request.user_id,
                             agent_id=agent_id,
                             name=request.session_id,
