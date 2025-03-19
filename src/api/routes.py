@@ -5,7 +5,8 @@ import json
 import math
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from fastapi import APIRouter, HTTPException, Query, Path, Depends, Response
+from starlette.responses import JSONResponse
 from src.agents.models.agent_factory import AgentFactory
 from src.config import settings
 from src.memory.message_history import MessageHistory
@@ -38,6 +39,22 @@ router.include_router(memory_router)
 
 # Get our module's logger
 logger = logging.getLogger(__name__)
+
+# Create an additional helper function for UUID validation
+def is_valid_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID.
+    
+    Args:
+        value: The string to check
+        
+    Returns:
+        True if the string is a valid UUID, False otherwise
+    """
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 @router.get("/agent/list", response_model=List[AgentInfo], tags=["Agents"], 
            summary="List Available Agents",
@@ -174,8 +191,13 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
             # Check if request.session_id is a session name instead of a UUID
             session_id = request.session_id
             try:
-                # Validate if it's a UUID
-                uuid.UUID(request.session_id)
+                # Validate if it's a UUID using our helper function
+                if is_valid_uuid(request.session_id):
+                    # It's a valid UUID, continue
+                    pass
+                else:
+                    # Not a UUID, raise ValueError to trigger the except block
+                    raise ValueError("Not a valid UUID")
             except ValueError:
                 # Not a UUID, try to look up by name
                 logger.info(f"Looking up session by name: {request.session_id}")
@@ -263,27 +285,28 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                     if session_name:
                         # Use our repository function to update session name if empty
                         from src.db import update_session_name_if_empty
-                        update_session_name_if_empty(uuid.UUID(request.session_id), session_name)
+                        if is_valid_uuid(request.session_id):
+                            update_session_name_if_empty(uuid.UUID(request.session_id), session_name)
                     
                     logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
                 except ValueError as e:
                     # Handle agent ID mismatch error - look up the existing agent ID instead of failing
                     if "already associated with agent ID" in str(e):
-                        # Get the actual agent ID associated with this session using repository function
+                        # Get the session to find out which agent it belongs to
                         from src.db import get_session
-                        import uuid
-                        session = get_session(uuid.UUID(request.session_id))
-                        if session and session.agent_id:
-                            existing_agent_id = session.agent_id
-                            logger.info(f"Using existing agent ID {existing_agent_id} for session {request.session_id} instead of {agent_id}")
-                            agent_id = existing_agent_id
-                        else:
-                            # If we can't find the agent ID for some reason, log and continue with original error
-                            logger.error(f"Session agent mismatch error: {str(e)}")
-                            raise HTTPException(
-                                status_code=409,
-                                detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
-                            )
+                        if is_valid_uuid(request.session_id):
+                            session = get_session(uuid.UUID(request.session_id))
+                            if session and session.agent_id:
+                                existing_agent_id = session.agent_id
+                                logger.info(f"Using existing agent ID {existing_agent_id} for session {request.session_id} instead of {agent_id}")
+                                agent_id = existing_agent_id
+                            else:
+                                # If we can't find the agent ID for some reason, log and continue with original error
+                                logger.error(f"Session agent mismatch error: {str(e)}")
+                                raise HTTPException(
+                                    status_code=409,
+                                    detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
+                                )
                     else:
                         # For other ValueError exceptions, maintain the original behavior
                         logger.error(f"Session error: {str(e)}")
@@ -492,10 +515,11 @@ async def get_session_route(
         # Determine if the input is a UUID or session name
         session = None
         try:
-            # Try to parse as UUID
-            session_id = uuid.UUID(session_id_or_name)
-            logger.info(f"Looking up session by ID: {session_id}")
-            session = get_session(session_id)
+            # Try to parse as UUID using our helper
+            if is_valid_uuid(session_id_or_name):
+                session_id = uuid.UUID(session_id_or_name)
+                logger.info(f"Looking up session by ID: {session_id}")
+                session = get_session(session_id)
         except ValueError:
             # Not a UUID, try to look up by name
             logger.info(f"Looking up session by name: {session_id_or_name}")
@@ -563,32 +587,33 @@ async def delete_session_route(session_id_or_name: str):
     try:
         # First determine if the input is a UUID or a name
         try:
-            # Try to parse as UUID
-            session_id = uuid.UUID(session_id_or_name)
-            # It's a valid UUID, use it directly
-            from src.db import get_session, delete_session, delete_session_messages
-            
-            # Get the session to verify it exists
-            session = get_session(session_id)
-            if not session:
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": f"Session with ID {session_id_or_name} not found"}
-                )
+            # Try to parse as UUID using our helper
+            if is_valid_uuid(session_id_or_name):
+                session_id = uuid.UUID(session_id_or_name)
+                # It's a valid UUID, use it directly
+                from src.db import get_session, delete_session, delete_session_messages
                 
-            # Delete all messages first
-            delete_session_messages(session_id)
-            
-            # Then delete the session itself
-            success = delete_session(session_id)
-            
-            if success:
-                return {"status": "success", "message": f"Session {session_id_or_name} deleted successfully"}
-            else:
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": f"Failed to delete session {session_id_or_name}"}
-                )
+                # Get the session to verify it exists
+                session = get_session(session_id)
+                if not session:
+                    return JSONResponse(
+                        status_code=404,
+                        content={"error": f"Session with ID {session_id_or_name} not found"}
+                    )
+                    
+                # Delete all messages first
+                delete_session_messages(session_id)
+                
+                # Then delete the session itself
+                success = delete_session(session_id)
+                
+                if success:
+                    return {"status": "success", "message": f"Session {session_id_or_name} deleted successfully"}
+                else:
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": f"Failed to delete session {session_id_or_name}"}
+                    )
                 
         except ValueError:
             # Not a valid UUID, try to find by name
