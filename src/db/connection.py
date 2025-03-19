@@ -25,6 +25,18 @@ _pool: Optional[ThreadedConnectionPool] = None
 psycopg2.extensions.register_adapter(uuid.UUID, lambda u: psycopg2.extensions.AsIs(f"'{u}'"))
 
 
+def generate_uuid() -> uuid.UUID:
+    """Safely generate a new UUID.
+    
+    This function ensures that the uuid module is properly accessed
+    and not shadowed by local variables.
+    
+    Returns:
+        A new UUID4 object
+    """
+    return uuid.uuid4()
+
+
 def safe_uuid(value: Any) -> Any:
     """Convert UUID objects to strings for safe database use.
     
