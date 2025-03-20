@@ -26,7 +26,6 @@ from src.api.models import (
 
 # Import memory router
 from src.api.memory_routes import memory_router
-from src.memory.pg_message_store import PostgresMessageStore
 from src.db import execute_query, get_db_connection, get_user_by_identifier, list_users, update_user, list_sessions, create_session
 from src.db.connection import generate_uuid, safe_uuid
 from psycopg2.extras import RealDictCursor
@@ -105,9 +104,8 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Extract session_name if provided
         session_name = request.session_name
         
-        # Create message store instance
-        from src.memory.pg_message_store import PostgresMessageStore
-        store = PostgresMessageStore()
+        # We'll initialize message_history later once we have a valid session_id
+        # Removing this initialization to prevent duplicate session creation
         
         # Get the agent database ID if available
         agent_id = getattr(agent, "db_id", None)
@@ -127,11 +125,12 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Check if session name is provided, use it to lookup existing sessions
         if session_name:
             # Look up the session by name
-            existing_session = store.get_session_by_name(session_name)
+            from src.db import get_session_by_name
+            existing_session = get_session_by_name(session_name)
             if existing_session:
                 # Found an existing session with this name
-                session_id = existing_session["id"]
-                existing_agent_id = existing_session["agent_id"]
+                session_id = existing_session.id
+                existing_agent_id = existing_session.agent_id
                 
                 # Check if the session is already associated with a different agent
                 if existing_agent_id is not None and existing_agent_id != agent_id:
@@ -142,7 +141,7 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                     )
                 
                 # Found an existing session with this name, use it
-                request.session_id = session_id
+                request.session_id = str(session_id)
                 logger.info(f"Found existing session with name '{session_name}', using ID: {session_id}")
         
         # Check if session_id is provided
@@ -202,13 +201,14 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 # Not a UUID, try to look up by name
                 logger.info(f"Looking up session by name: {request.session_id}")
                 
-                # Use the PostgresMessageStore method to get session by name
-                resolved_session = store.get_session_by_name(request.session_id)
+                # Use the db function to get session by name
+                from src.db import get_session_by_name
+                resolved_session = get_session_by_name(request.session_id)
                 
                 if resolved_session:
                     # Found a session with matching name
-                    session_id = resolved_session["id"]
-                    existing_agent_id = resolved_session["agent_id"]
+                    session_id = resolved_session.id
+                    existing_agent_id = resolved_session.agent_id
                     
                     # Check if the session is already associated with a different agent
                     if existing_agent_id is not None and existing_agent_id != agent_id:
@@ -261,59 +261,11 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                         raise
                 
                 # Update the request.session_id with the actual UUID
-                request.session_id = session_id
+                request.session_id = str(session_id)
             
-            # Check if the provided session exists, if not create it
-            if not store.session_exists(request.session_id):
-                # Create the session with the provided ID
-                try:
-                    store._ensure_session_exists(request.session_id, request.user_id, agent_id, session_name, session_origin)
-                    logger.info(f"Created session with provided ID: {request.session_id}, name: {session_name}, and origin: {session_origin}")
-                except ValueError as e:
-                    # Handle agent ID mismatch error
-                    logger.error(f"Session agent mismatch error: {str(e)}")
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
-                    )
-            else:
-                # Session exists - update the session with the current session_origin and session_name if provided
-                try:
-                    store._ensure_session_exists(request.session_id, request.user_id, agent_id, session_name, session_origin)
-                    
-                    # If a session name is provided but the session has no name, update it
-                    if session_name:
-                        # Use our repository function to update session name if empty
-                        from src.db import update_session_name_if_empty
-                        if is_valid_uuid(request.session_id):
-                            update_session_name_if_empty(uuid.UUID(request.session_id), session_name)
-                    
-                    logger.info(f"Using existing session: {request.session_id}, name: {session_name}, with origin: {session_origin}")
-                except ValueError as e:
-                    # Handle agent ID mismatch error - look up the existing agent ID instead of failing
-                    if "already associated with agent ID" in str(e):
-                        # Get the session to find out which agent it belongs to
-                        from src.db import get_session
-                        if is_valid_uuid(request.session_id):
-                            session = get_session(uuid.UUID(request.session_id))
-                            if session and session.agent_id:
-                                existing_agent_id = session.agent_id
-                                logger.info(f"Using existing agent ID {existing_agent_id} for session {request.session_id} instead of {agent_id}")
-                                agent_id = existing_agent_id
-                            else:
-                                # If we can't find the agent ID for some reason, log and continue with original error
-                                logger.error(f"Session agent mismatch error: {str(e)}")
-                                raise HTTPException(
-                                    status_code=409,
-                                    detail=f"Session ID {request.session_id} is already associated with a different agent. Please use a different session."
-                                )
-                    else:
-                        # For other ValueError exceptions, maintain the original behavior
-                        logger.error(f"Session error: {str(e)}")
-                        raise HTTPException(
-                            status_code=409,
-                            detail=f"Session error: {str(e)}"
-                        )
+            # MessageHistory will handle session existence checks
+            # Initialize message_history with the proper session_id
+            message_history = MessageHistory(session_id=request.session_id, user_id=request.user_id)
         
         # Store channel_payload in the users table if provided
         if request.channel_payload:
@@ -359,15 +311,15 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Update agent_id in the request
         request.agent_id = agent_id
         
-        # Get message history with user_id
+        # MessageHistory should now be initialized with the correct session_id
         message_history = MessageHistory(request.session_id, user_id=request.user_id)
         
         # Link the agent to the session in the database
         AgentFactory.link_agent_to_session(agent_name, request.session_id)
         
-        if message_history and message_history.messages:
-            # Get filtered messages up to the limit for agent processing
-            # No need to update the database - just filter for memory purposes
+        # Get filtered messages up to the limit for agent processing
+        filtered_messages = None
+        if message_history and hasattr(message_history, 'get_filtered_messages'):
             filtered_messages = message_history.get_filtered_messages(
                 message_limit=request.message_limit,
                 sort_desc=False  # Sort chronologically for agent processing
@@ -392,30 +344,99 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         if request.mediaUrl:
             logger.info(f"Media URL: {request.mediaUrl}, MIME type: {request.mime_type}")
         
-        response = await agent.process_message(
-            request.message_content,  # Use message_content instead of message_input
-            session_id=request.session_id,
-            agent_id=agent_id,  # Pass the agent ID to be stored with the messages
-            user_id=request.user_id,  # Pass the user ID
-            context=combined_context  # Include all context information
-        )
+        # Prepare multimodal content
+        multimodal_content = {}
         
-        # Log the tool call and output counts more safely
-        messages = response.history.get('messages', [])
-        if messages:  # Only try to access if there are messages
-            last_message = messages[-1]
-            tool_call_count = len(last_message.get('tool_calls', []))
-            tool_output_count = len(last_message.get('tool_outputs', []))
-            logging.info(f"Agent run completed. Tool calls: {tool_call_count}, Tool outputs: {tool_output_count}")
-        else:
-            logging.info("Agent run completed. No messages in history.")
+        # Handle legacy single media fields
+        if request.mediaUrl and request.mime_type:
+            logger.info(f"Processing legacy single media with URL: {request.mediaUrl} and type: {request.mime_type}")
+            media_type = "unknown"
+            if request.mime_type.startswith("image/"):
+                media_type = "image"
+                multimodal_content["image_url"] = request.mediaUrl
+            elif request.mime_type.startswith("audio/"):
+                media_type = "audio"
+                multimodal_content["audio_url"] = request.mediaUrl
+            elif request.mime_type.startswith(("application/", "text/")):
+                media_type = "document"
+                multimodal_content["document_url"] = request.mediaUrl
+            logger.info(f"Detected media type: {media_type}")
         
-        return response
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Handle new multimodal content array
+        if request.media_contents:
+            logger.info(f"Processing {len(request.media_contents)} multimodal content items")
+            for item in request.media_contents:
+                if isinstance(item, ImageUrlContent):
+                    multimodal_content["image_url"] = item.media_url
+                    logger.info(f"Added image URL: {item.media_url}")
+                elif isinstance(item, ImageBinaryContent):
+                    multimodal_content["image_data"] = item.data
+                    logger.info(f"Added binary image data (length: {len(item.data) if item.data else 0})")
+                elif isinstance(item, AudioUrlContent):
+                    multimodal_content["audio_url"] = item.media_url
+                    logger.info(f"Added audio URL: {item.media_url}")
+                elif isinstance(item, AudioBinaryContent):
+                    multimodal_content["audio_data"] = item.data
+                    logger.info(f"Added binary audio data (length: {len(item.data) if item.data else 0})")
+                elif isinstance(item, DocumentUrlContent):
+                    multimodal_content["document_url"] = item.media_url
+                    logger.info(f"Added document URL: {item.media_url}")
+                elif isinstance(item, DocumentBinaryContent):
+                    multimodal_content["document_data"] = item.data
+                    logger.info(f"Added binary document data (length: {len(item.data) if item.data else 0})")
+
+        # Process the rest of the request
+        try:
+            # Add the user context to the agent before processing
+            if hasattr(agent, 'process_message'):
+                message_context = {}
+                
+                # Include request context if available
+                if request.context:
+                    message_context.update(request.context)
+                
+                # Include multimodal content in context
+                if multimodal_content:
+                    message_context["multimodal_content"] = multimodal_content
+                
+                # Process message with user ID, session ID, and context
+                response = await agent.process_message(
+                    request.message_content,
+                    session_id=request.session_id,
+                    user_id=request.user_id,
+                    context=message_context,
+                    message_history=message_history  # Pass the existing MessageHistory object
+                )
+                
+                # Return the parsed response
+                return {
+                    "message": response.text,
+                    "session_id": request.session_id,
+                    "success": response.success,
+                    "tool_calls": response.tool_calls,
+                    "tool_outputs": response.tool_outputs,
+                }
+            else:
+                # If agent does not implement process_message, return error
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "Agent does not support message processing"}
+                )
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Error processing message: {str(e)}"}
+            )
+    except HTTPException as http_ex:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        logger.exception(f"Error running agent {agent_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error running agent {agent_name}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Error running agent: {str(e)}"}
+        )
 
 @router.get("/sessions", response_model=SessionListResponse, tags=["Sessions"],
             summary="List All Sessions",

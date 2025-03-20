@@ -1,0 +1,36 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## Task Management Protocol
+
+1. **Task Documentation**:
+   - For each new task, create a single Markdown file in the format `YYYYMMDD_HHMMSS_task_name.md` (use `get_datetime`) in the `tasks/` directory (which already exists, do not try to recreate.)
+   - This file will serve as the complete record of the task's lifecycle
+
+2. **Task File Structure**:
+   - Each task file should contain these clearly labeled sections:
+     - **Analysis**: Initial assessment of requirements and challenges
+     - **Plan**: Step-by-step approach with file references and dependencies
+     - **Execution**: Implementation details and decisions made during coding
+     - **Testing**: Evidence of functionality with test cases and results
+     - **Summary**: Brief overview of changes made and potential future impact
+
+3. **Workflow Progression**:
+   - Update the task file as you progress through each phase
+   - Each section should be completed in sequence before moving to the next
+   - Never proceed to the Summary without documented testing evidence
+   
+4. **Testing Requirements**:
+   - All code changes must include specific test scenarios
+   - Document both expected and actual outcomes
+   - Include error handling tests where applicable
+   
+5. **Debugging-Focused Documentation**:
+   - In the Summary section, always document:
+     - Files modified with line number ranges
+     - Dependencies introduced or modified
+     - Edge cases considered
+     - Known limitations
+     - Potential future impact points

@@ -65,6 +65,7 @@ class Settings(BaseSettings):
 
     # Logging
     AM_LOG_LEVEL: LogLevel = Field(LogLevel.INFO, description="Logging level")
+    AM_VERBOSE_LOGGING: bool = Field(False, description="Enable verbose logging with additional details")
     LOGFIRE_TOKEN: Optional[str] = Field(None, description="Logfire token for logging service")
     LOGFIRE_IGNORE_NO_CONFIG: bool = Field(True, description="Suppress Logfire warning if no token")
 

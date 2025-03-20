@@ -52,6 +52,7 @@ from src.db.repository import (
     update_session,
     delete_session,
     finish_session,
+    update_session_name_if_empty,
     
     # Message repository
     get_message,

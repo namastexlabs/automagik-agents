@@ -36,7 +36,8 @@ from src.db.repository.session import (
     create_session,
     update_session,
     delete_session,
-    finish_session
+    finish_session,
+    update_session_name_if_empty
 )
 
 # Message repository functions

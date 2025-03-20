@@ -14,7 +14,8 @@ from src.db import (
     Memory, 
     get_memory, 
     get_memory_by_name,
-    list_memories as repo_list_memories
+    list_memories as repo_list_memories,
+    get_agent_by_name
 )
 from src.tools.memory_tools.common import clean_memory_object, map_agent_id
 
@@ -80,7 +81,7 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
             # If agent_id is not in context, log a warning and use a default
             if not agent_id_raw:
                 logger.warning("No agent_id found in context, using default value")
-                agent_id_raw = "sofia_agent"
+                agent_id_raw = "simple_agent"
             
             # Get the numeric agent ID from the agent name
             if isinstance(agent_id_raw, int):
@@ -96,8 +97,23 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
         else:
             # Fallback when deps is not available - use default values
             logger.warning("Context deps not available for read_memory, using default values")
-            agent_id = 3  # Default to sofia_agent ID 3 as fallback
-            agent_id_raw = "sofia_agent"
+            # Use repository function to get default agent info
+            try:
+                # Try to get any available agent from the system
+                from src.agents.models.agent_factory import AgentFactory
+                available_agents = AgentFactory.list_available_agents()
+                if available_agents:
+                    agent = get_agent_by_name(available_agents[0])
+                    agent_id = agent.id if agent else None
+                    agent_id_raw = available_agents[0]
+                else:
+                    agent_id = None
+                    agent_id_raw = None
+                logger.info(f"Using first available agent ID: {agent_id}")
+            except Exception as e:
+                logger.warning(f"Could not determine default agent ID: {str(e)}")
+                agent_id = None
+                agent_id_raw = None
             user_id = 1  # Default to user ID 1 if not provided
             session_id = None
 
@@ -240,118 +256,59 @@ def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, name: Op
             
         # If list_all is True, return all available memories for this agent/user
         elif list_all:
-            # Use consistent agent_id for sofia_agent
-            if agent_id_raw == "sofia_agent":
-                agent_id = 3  # Use consistent ID 3 for sofia_agent
-                logger.info(f"Using consistent agent_id={agent_id} for sofia_agent")
-            
-            # Construct a query with proper access controls
-            query = """
-                SELECT id, name, description, created_at, updated_at, 
-                       read_mode, access, session_id, user_id, agent_id, metadata
-                FROM memories 
-                WHERE (
-                      -- Agent-specific global memories (accessible to all users of this agent)
-                      (agent_id = %s AND user_id IS NULL)
-                      
-                      -- Agent + User memories (personalized agent)
-                      OR (agent_id = %s AND user_id = %s AND session_id IS NULL)
-                      
-                      -- Agent + User + Session memories (personalized session)
-                      OR (agent_id = %s AND user_id = %s AND session_id = %s)
+            # Use repository function to list memories with appropriate filters
+            try:
+                from src.db import list_memories as repo_list_memories
+                memories = repo_list_memories(
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    session_id=session_id if session_specific else None,
+                    read_mode=read_mode
                 )
-            """
-            
-            # Add read_mode filter if provided
-            params = [agent_id, agent_id, user_id, agent_id, user_id, session_id]
-            if read_mode is not None:
-                # Ensure the read_mode filter is explicitly part of the WHERE clause
-                query += " AND read_mode = %s"
-                params.append(read_mode)
                 
-            query += " ORDER BY name ASC"
-            
-            # Execute the query with parameters
-            logger.info(f"Executing list_all query with params: {params}")
-            logger.info(f"SQL Query: {query}")
-            
-            result = execute_query(query, params)
-            
-            # Log detailed information about the query result to debug filtering
-            if isinstance(result, list):
-                logger.info(f"Query returned {len(result)} results as a list")
-                if read_mode:
-                    # Count how many items actually have the expected read_mode
-                    matching_count = sum(1 for r in result if r.get("read_mode") == read_mode)
-                    logger.info(f"Of these, {matching_count} actually have read_mode={read_mode}")
-            else:
-                rows = result.get('rows', [])
-                logger.info(f"Query returned {len(rows)} results as dict.rows")
-                if read_mode and rows:
-                    # Count how many items actually have the expected read_mode
-                    matching_count = sum(1 for r in rows if r.get("read_mode") == read_mode)
-                    logger.info(f"Of these, {matching_count} actually have read_mode={read_mode}")
-            
-            # Handle case where result is a list (DB rows) or dict with 'rows' key
-            if isinstance(result, list):
-                rows = result
-            else:
-                rows = result.get('rows', [])
-                
-            # If no memories found, return empty list with success
-            if not rows:
-                if read_mode:
-                    # Display user-friendly read_mode value in messages
+                # If no memories found, return empty list with success
+                if not memories:
                     display_read_mode = original_read_mode or read_mode
-                    logger.warning(f"No memories found for agent_id={agent_id}, user_id={user_id}, session_id={session_id}, read_mode={display_read_mode}")
+                    message = f"No memories"
+                    if read_mode:
+                        message += f" with read_mode={display_read_mode}"
+                    message += " available for this agent/user"
+                    
                     return {
                         "success": True,
-                        "message": f"No memories with read_mode={display_read_mode} available for this agent/user",
+                        "message": message,
                         "count": 0,
                         "memories": []
                     }
-                else:
-                    logger.warning(f"No memories found for agent_id={agent_id}, user_id={user_id}, session_id={session_id}")
-                    return {
-                        "success": True,
-                        "message": "No memories available for this agent/user",
-                        "count": 0,
-                        "memories": []
-                    }
-            
-            # Additional validation for read_mode filter
-            if read_mode and rows:
-                # Double-check that all rows match the expected read_mode
-                for row in rows:
-                    if row.get("read_mode") != read_mode:
-                        logger.warning(f"Found memory with mismatched read_mode: expected {read_mode}, got {row.get('read_mode')} for memory {row.get('name')}")
-            
-            # Normalize read_mode in all results for consistency
-            for memory in rows:
-                if memory.get("read_mode") == "tool":
-                    memory["read_mode"] = "tool_calling"
                 
-            # Return list of memories without content
-            memories = []
-            for memory in rows:
-                cleaned_memory = clean_memory_object(memory, include_content=False)
-                memories.append(cleaned_memory)
-            
-            if read_mode:
-                # Display user-friendly read_mode value in messages
+                # Format the memories for response
+                memory_list = []
+                for memory in memories:
+                    memory_dict = memory.model_dump()
+                    # Normalize read_mode for consistency
+                    if memory_dict.get("read_mode") == "tool":
+                        memory_dict["read_mode"] = "tool_calling"
+                    
+                    cleaned_memory = clean_memory_object(memory_dict, include_content=False)
+                    memory_list.append(cleaned_memory)
+                
                 display_read_mode = original_read_mode or read_mode
+                message = f"Found {len(memory_list)} memories"
+                if read_mode:
+                    message += f" with read_mode={display_read_mode}"
+                message += " available to this agent/user"
+                
                 return {
                     "success": True,
-                    "message": f"Found {len(memories)} memories with read_mode={display_read_mode} available to this agent/user",
-                    "count": len(memories),
-                    "memories": memories
+                    "message": message,
+                    "count": len(memory_list),
+                    "memories": memory_list
                 }
-            else:
+            except Exception as e:
+                logger.error(f"Error listing memories: {str(e)}")
                 return {
-                    "success": True,
-                    "message": f"Found {len(memories)} memories available to this agent/user",
-                    "count": len(memories),
-                    "memories": memories
+                    "success": False,
+                    "message": f"Error listing memories: {str(e)}"
                 }
             
         # If no specific lookup criteria provided
@@ -375,7 +332,7 @@ def map_agent_id(agent_name):
         agent_name: Agent name
         
     Returns:
-        Numeric agent ID
+        Numeric agent ID or None if not found
     """
     # Try to convert to int if it's a string number
     if isinstance(agent_name, int):
@@ -384,14 +341,13 @@ def map_agent_id(agent_name):
     try:
         return int(agent_name)
     except (ValueError, TypeError):
-        # Query the database to get the ID
-        query = "SELECT id FROM agents WHERE name = %s"
-        result = execute_query(query, [agent_name])
-        
-        if result and isinstance(result, dict) and 'rows' in result and len(result['rows']) > 0:
-            return result['rows'][0].get('id')
-        elif isinstance(result, list) and len(result) > 0:
-            return result[0].get('id')
-        else:
-            logger.warning(f"Agent ID not found for name: {agent_name}, using default ID 3")
-            return 3  # Default to sofia_agent ID 3 as fallback
+        # Use repository function to get the agent ID
+        try:
+            from src.db import get_agent_by_name
+            agent = get_agent_by_name(agent_name)
+            if agent and hasattr(agent, "id"):
+                return agent.id
+        except Exception as e:
+            logger.warning(f"Agent ID not found for name: {agent_name}: {str(e)}")
+            
+        return None
