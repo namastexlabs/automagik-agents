@@ -1,28 +1,48 @@
 """Tools package.
 
-This package contains all tool implementations for agents.
+This package includes various tools used by Sofia.
 """
 
-# Import and export all tools
-from src.tools.datetime_tools import get_current_date, get_current_time
-from src.tools.discord_tools import DiscordTools
-from src.tools.notion_tools import NotionTools
+from .datetime import datetime_tools
+from .discord import discord_tools
+from .evolution import evolution_tools
+from .google_drive import google_drive_tools
+from .memory import (
+    get_documents_by_id_tool,
+    memory_store_tool, 
+    memory_recall_tool, 
+    memory_prune_tool, 
+    memory_inspect_tool, 
+    memory_update_tool,
+    memory_delete_tool,
+    memory_tools,
+)
+from .notion import notion_tools
 
-# Import mock tools
-from src.tools.blackpearl_tools import BlackPearlTools
-from src.tools.omie_tools import OmieTools
-from src.tools.google_drive_tools import GoogleDriveTools
-from src.tools.evolution_tools import EvolutionTools
-from src.tools.chroma_tools import ChromaTools
-
+# Export individual tools and groups
 __all__ = [
-    "get_current_date",
-    "get_current_time",
-    "DiscordTools",
-    "NotionTools",
-    "BlackPearlTools",
-    "OmieTools",
-    "GoogleDriveTools",
-    "EvolutionTools",
-    "ChromaTools"
+    # DateTime tools
+    "datetime_tools",
+    
+    # Discord tools
+    "discord_tools",
+    
+    # Evolution tools
+    "evolution_tools",
+    
+    # Google Drive tools
+    "google_drive_tools",
+    
+    # Memory tools
+    "get_documents_by_id_tool",
+    "memory_store_tool",
+    "memory_recall_tool",
+    "memory_prune_tool",
+    "memory_inspect_tool",
+    "memory_update_tool",
+    "memory_delete_tool",
+    "memory_tools",
+    
+    # Notion tools
+    "notion_tools",
 ] 
