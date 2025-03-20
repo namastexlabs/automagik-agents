@@ -17,6 +17,8 @@ from pydantic_ai import RunContext
 from src.db import execute_query
 from src.db import get_agent_by_name, get_memory, create_memory, update_memory as update_memory_in_db
 from src.tools.memory_tools.common import map_agent_id
+from src.tools.memory_tools.interface import invalidate_memory_cache
+from src.agents.models.agent_factory import AgentFactory
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +205,8 @@ def _perform_update(agent_id, user_id, session_id, content, memory_id=None, name
         return {"success": False, "message": f"Error updating memory: {str(e)}"}
 
 
-def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], memory_id: Optional[str] = None, 
+@invalidate_memory_cache
+async def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], memory_id: Optional[str] = None, 
                  name: Optional[str] = None, description: Optional[str] = None, 
                  read_mode: Optional[str] = None, session_specific: bool = False,
                  metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -244,15 +247,26 @@ def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], me
         # Special case for when ctx is None or empty
         if ctx is None or (not hasattr(ctx, 'deps') or ctx.deps is None or not ctx.deps):
             logger.warning("Context is None or empty, using default values")
-            # Try to get the agent ID from the database
-            agent = get_agent_by_name("sofia_agent")
-            if agent is None:
-                agent_id = 3  # Default to sofia_agent ID 3 as fallback
-                logger.warning(f"⚠️ Agent ID not found for name: sofia_agent, using default ID {agent_id}")
-            else:
-                agent_id = agent.id
+            # Get agent ID from context
+            try:
+                # Get first available agent if needed
+                available_agents = AgentFactory.list_available_agents()
                 
-            agent_id_raw = "sofia_agent"
+                if agent_id_raw:
+                    agent = get_agent_by_name(agent_id_raw)
+                elif available_agents:
+                    agent = get_agent_by_name(available_agents[0])
+                    agent_id_raw = available_agents[0]
+                else:
+                    agent = None
+                
+                agent_id = agent.id if agent and hasattr(agent, "id") else None
+                logger.debug(f"Using agent_id={agent_id} from registry")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get agent ID from registry: {str(e)}")
+                agent_id = None
+                agent_id_raw = None
+            
             user_id = 1  # Default to user ID 1 if not provided
             session_id = None if not session_specific else None  # No session ID available in this case
             
@@ -267,7 +281,7 @@ def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any]], me
         # If agent_id is not in context, log a warning and use a default
         if not agent_id_raw:
             logger.warning("No agent_id found in context, using default value")
-            agent_id_raw = "sofia_agent"
+            agent_id_raw = "simple_agent"
         
         # Get the numeric agent ID from the agent name using repository function
         agent = get_agent_by_name(agent_id_raw)

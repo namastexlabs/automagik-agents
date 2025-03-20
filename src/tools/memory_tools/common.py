@@ -9,6 +9,7 @@ import json
 import logging
 from datetime import datetime
 from uuid import UUID
+from src.db import get_agent_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +75,14 @@ def map_agent_id(agent_id):
     # If agent_id is already an integer or a string that can be converted to an integer, return it
     if isinstance(agent_id, int) or (isinstance(agent_id, str) and agent_id.isdigit()):
         return int(agent_id) if isinstance(agent_id, str) else agent_id
-        
-    # Map known agent names to their numeric IDs
-    agent_map = {
-        "simple_agent": 2,
-        "sofia_agent": 3,
-    }
     
-    # If the agent_id is in our map, return the numeric ID
-    if agent_id in agent_map:
-        return agent_map[agent_id]
-        
-    # Otherwise, return the original value
+    # Get the agent ID from the database by name
+    try:
+        agent = get_agent_by_name(agent_id)
+        if agent and hasattr(agent, "id"):
+            return agent.id
+    except Exception as e:
+        logger.warning(f"Failed to get agent ID from database: {str(e)}")
+    
+    # Return the original value if we couldn't resolve it to a numeric ID
     return agent_id

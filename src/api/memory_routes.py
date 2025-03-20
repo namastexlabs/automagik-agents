@@ -22,12 +22,30 @@ from src.db import (
     delete_memory as repo_delete_memory,
     execute_query
 )
+from src.config import settings
+from src.memory.message_history import MessageHistory
 
 # Create API router for memory endpoints
 memory_router = APIRouter()
 
 # Get our module's logger
 logger = logging.getLogger(__name__)
+
+# Validate UUID helper function (duplicated from routes.py for modularity)
+def is_valid_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID.
+    
+    Args:
+        value: The string to check
+        
+    Returns:
+        True if the string is a valid UUID, False otherwise
+    """
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 @memory_router.get("/memories", response_model=MemoryListResponse, tags=["Memories"],
             summary="List Memories",

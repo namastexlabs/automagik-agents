@@ -7,7 +7,7 @@ name = "automagik-agents"
 dynamic = ["version"]
 description = "Automagik agents templates"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10, <3.13"
 license = {text = "MIT"}
 authors = [
     {name = "Cezar Vasconcelos", email = "cezar@namastex.ai"}
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "python-dotenv>=1.0.1",
@@ -42,6 +43,9 @@ dependencies = [
     "pytest-xdist>=3.6.1",
     "requests>=2.32.3",
     "ruff>=0.10.0",
+    "uv>=0.6.8",
+    "pydantic-ai-slim[duckduckgo]>=0.0.42",
+    "pip>=25.0.1",
 ]
 
 [project.urls]

@@ -13,7 +13,6 @@ from src.auth import APIKeyMiddleware
 from src.api.models import HealthResponse
 from src.api.routes import router as api_router
 from src.memory.message_history import MessageHistory
-from src.memory.pg_message_store import PostgresMessageStore
 from src.agents.models.agent_factory import AgentFactory
 from src.db import execute_query, get_connection_pool, ensure_default_user_exists, create_session, Session
 
@@ -105,7 +104,7 @@ def create_app() -> FastAPI:
     
     # Set up database message store regardless of environment
     try:
-        logger.info("🔧 Initializing PostgreSQL message store for persistent storage")
+        logger.info("🔧 Initializing database connection for message storage")
         
         # First test database connection
         from src.db.connection import get_connection_pool
@@ -134,11 +133,8 @@ def create_app() -> FastAPI:
             
         logger.info("✅ Database connection pool initialized successfully")
         
-        # Initialize PostgreSQL message store
-        pg_store = PostgresMessageStore()
-        
         # Verify database functionality without creating persistent test data
-        logger.info("🔍 Performing verification test of PostgresMessageStore without creating persistent sessions...")
+        logger.info("🔍 Performing verification test of message storage without creating persistent sessions...")
         test_user_id = 1  # Use numeric ID instead of string
         
         # First ensure the default user exists using repository function
@@ -147,7 +143,7 @@ def create_app() -> FastAPI:
         # Verify message store functionality without creating test sessions
         # Use a transaction that we'll roll back to avoid persisting test data
         try:
-            logger.info("Testing database message store functionality with transaction rollback...")
+            logger.info("Testing database message storage functionality with transaction rollback...")
             with pool.getconn() as conn:
                 conn.autocommit = False  # Start a transaction
                 
@@ -242,22 +238,22 @@ def create_app() -> FastAPI:
             logger.error(f"Detailed error: {traceback.format_exc()}")
             raise
         
-        # Set PostgresMessageStore as the message store for MessageHistory
-        MessageHistory.set_message_store(pg_store)
-        
         # Log success
-        logger.info("✅ PostgreSQL message store initialized and set for MessageHistory")
+        logger.info("✅ Database message storage initialized successfully")
+        
+        # Configure MessageHistory to use database by default
+        from src.memory.message_history import MessageHistory
+        logger.info("✅ MessageHistory configured to use database storage")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize PostgreSQL message store: {str(e)}")
+        logger.error(f"❌ Failed to initialize database connection for message storage: {str(e)}")
         logger.error("⚠️ Application will fall back to in-memory message store")
         # Include traceback for debugging
         import traceback
         logger.error(f"Detailed error: {traceback.format_exc()}")
         
-        # Explicitly set CacheMessageStore to make it clear we're falling back
-        from src.memory.message_store import CacheMessageStore
-        MessageHistory.set_message_store(CacheMessageStore())
-        logger.warning("⚠️ Using in-memory CacheMessageStore as fallback - MESSAGES WILL NOT BE PERSISTED!")
+        # Create an in-memory message history as fallback
+        # Don't reference the non-existent message_store module
+        logger.warning("⚠️ Using in-memory storage as fallback - MESSAGES WILL NOT BE PERSISTED!")
     
     # Remove direct call since we're using the startup event
     # initialize_all_agents()

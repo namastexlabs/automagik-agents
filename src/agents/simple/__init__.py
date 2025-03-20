@@ -3,8 +3,8 @@
 This package contains agents that provide basic functionality like date/time information.
 """
 
-# Export sofia agent (the most updated agent)
-from src.agents.simple.sofia_agent import default_agent as sofia_agent
+# Export simple agent with pydantic-ai capabilities
+from src.agents.simple.simple_agent import default_agent as simple_agent
 
-# Export creator function
-from src.agents.simple.sofia_agent import create_sofia_agent
+# Export creator function for simple agent
+from src.agents.simple.simple_agent import create_simple_agent

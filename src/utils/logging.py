@@ -1,12 +1,18 @@
 import os
 import logging
+from typing import Dict, Optional
 from src.config import settings, LogLevel
 
 class PrettyFormatter(logging.Formatter):
     """A formatter that adds colors and emojis to log messages."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, include_timestamp: bool = True):
+        self.include_timestamp = include_timestamp
+        format_str = '%(message)s'
+        if include_timestamp:
+            format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        super().__init__(format_str)
+        
         self.colors = {
             logging.INFO: '\033[92m',  # Green
             logging.ERROR: '\033[91m',  # Red
@@ -44,6 +50,7 @@ def configure_logging():
     """Configure logging with pretty formatting and proper log level."""
     # Get log level from settings
     log_level = get_log_level(settings.AM_LOG_LEVEL)
+    verbose_logging = settings.AM_VERBOSE_LOGGING
     
     # Configure root logger
     root_logger = logging.getLogger()
@@ -55,8 +62,11 @@ def configure_logging():
 
     # Create and configure stream handler
     handler = logging.StreamHandler()
-    handler.setFormatter(PrettyFormatter())
+    handler.setFormatter(PrettyFormatter(include_timestamp=verbose_logging))
     root_logger.addHandler(handler)
+
+    # Configure module-specific log levels
+    configure_module_log_levels(verbose_logging)
 
     # Configure Logfire if token is present
     if settings.LOGFIRE_TOKEN:
@@ -69,6 +79,23 @@ def configure_logging():
     elif not settings.LOGFIRE_IGNORE_NO_CONFIG:
         print("Warning: LOGFIRE_TOKEN is not set. Tracing will be disabled.")
 
-    # Disable httpx logging unless in DEBUG mode
-    if log_level > logging.DEBUG:
-        logging.getLogger('httpx').setLevel(logging.WARNING)
+def configure_module_log_levels(verbose_logging: bool):
+    """Configure log levels for specific modules based on verbosity setting."""
+    # Always restrict certain modules regardless of verbosity
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+    
+    # If not in verbose mode, restrict more modules
+    if not verbose_logging:
+        # Database operations
+        logging.getLogger('src.db').setLevel(logging.INFO)
+        
+        # HTTP requests - restrict details in non-verbose mode
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        
+        # API requests in non-verbose mode
+        logging.getLogger('src.api').setLevel(logging.INFO)
+        
+        # Memory system in non-verbose mode 
+        memory_logger = logging.getLogger('src.memory.message_history')
+        memory_logger.setLevel(logging.INFO)

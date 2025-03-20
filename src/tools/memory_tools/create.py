@@ -8,11 +8,17 @@ import json
 import logging
 import os
 import requests
-from pydantic import BaseModel
-from datetime import datetime
+import uuid
 from uuid import UUID
+from datetime import datetime
+import re
+from pydantic import BaseModel
 from pydantic_ai import RunContext
+from src.db import get_agent_by_name, create_memory as create_memory_in_db
+from src.db import execute_query
 from src.tools.memory_tools.common import map_agent_id
+from src.tools.memory_tools.interface import invalidate_memory_cache
+from src.agents.models.agent_factory import AgentFactory
 
 logger = logging.getLogger(__name__)
 
@@ -27,20 +33,14 @@ def get_agent_id_from_db(agent_name):
         The agent ID if found, None otherwise.
     """
     try:
-        query = "SELECT id FROM agents WHERE name = %s"
-        result = execute_query(query, [agent_name])
+        # Use repository function instead of direct SQL query
+        agent = get_agent_by_name(agent_name)
         
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            rows = result
-        else:
-            rows = result.get('rows', [])
-            
-        if not rows:
+        if not agent:
             logger.warning(f"Agent '{agent_name}' not found in database")
             return None
             
-        agent_id = rows[0].get('id')
+        agent_id = agent.id if hasattr(agent, "id") else None
         if not agent_id:
             logger.warning(f"Agent '{agent_name}' has no ID")
             return None
@@ -194,7 +194,8 @@ def _perform_create(agent_id, user_id, session_id, name, content, description=No
         return {"success": False, "message": f"Error: {str(e)}"}
 
 
-def create_memory(ctx: RunContext[Dict], name: str, content: Union[str, Dict[str, Any]], 
+@invalidate_memory_cache
+async def create_memory(ctx: RunContext[Dict], name: str, content: Union[str, Dict[str, Any]], 
                  description: Optional[str] = None, read_mode: str = "tool_calling", 
                  scope: Optional[str] = None, session_specific: bool = False,
                  metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -228,12 +229,24 @@ def create_memory(ctx: RunContext[Dict], name: str, content: Union[str, Dict[str
         # Special case for when ctx is None or empty
         if ctx is None or (not hasattr(ctx, 'deps') or ctx.deps is None or not ctx.deps):
             logger.warning("Context is None or empty, using default values")
-            # Try to get the agent ID from the database
-            agent_id = get_agent_id_from_db("sofia_agent")
-            if agent_id is None:
-                agent_id = 3  # Default to sofia_agent ID 3 as fallback
-                logger.warning(f"⚠️ Agent ID not found for name: sofia_agent, using default ID {agent_id}")
-            agent_id_raw = "sofia_agent"
+            # Try to get the agent ID using repository functions
+            try:
+                # Try to get any available agent
+                available_agents = AgentFactory.list_available_agents()
+                if available_agents:
+                    agent = get_agent_by_name(available_agents[0])
+                    agent_id = agent.id if agent and hasattr(agent, "id") else None
+                    agent_id_raw = available_agents[0]
+                else:
+                    agent_id = None
+                    agent_id_raw = None
+                
+                logger.info(f"Using first available agent ID: {agent_id}")
+            except Exception as e:
+                logger.warning(f"Could not determine default agent ID: {str(e)}")
+                agent_id = None
+                agent_id_raw = None
+                
             user_id = 1  # Default to user ID 1 if not provided
             session_id = None
             
@@ -246,25 +259,27 @@ def create_memory(ctx: RunContext[Dict], name: str, content: Union[str, Dict[str
         # Extract context information
         agent_id_raw = ctx.deps.get("agent_id")
         
-        # If agent_id is not in context, log a warning and use a default
+        # If agent_id is not in context, try to get any available agent
         if not agent_id_raw:
-            logger.warning("No agent_id found in context, using default value")
-            agent_id_raw = "sofia_agent"
+            logger.warning("No agent_id found in context, looking for available agents")
+            try:
+                available_agents = AgentFactory.list_available_agents()
+                if available_agents:
+                    agent_id_raw = available_agents[0]
+                    logger.info(f"Using first available agent: {agent_id_raw}")
+                else:
+                    logger.warning("No available agents found")
+                    return {"success": False, "message": "No available agents found"}
+            except Exception as e:
+                logger.error(f"Failed to find available agents: {str(e)}")
+                return {"success": False, "message": f"No agent ID available and failed to find alternative agents: {str(e)}"}
         
-        # Get the numeric agent ID from the agent name
-        query = "SELECT id FROM agents WHERE name = %s"
-        result = execute_query(query, [agent_id_raw])
-        
-        # Handle case where result is a list (DB rows) or dict with 'rows' key
-        if isinstance(result, list):
-            rows = result
-        else:
-            rows = result.get('rows', [])
-            
-        if not rows:
+        # Get the agent object using the repository function
+        agent = get_agent_by_name(agent_id_raw)
+        if not agent:
             return {"success": False, "message": f"Agent '{agent_id_raw}' not found"}
             
-        agent_id = rows[0].get('id')
+        agent_id = agent.id if hasattr(agent, "id") else None
         if not agent_id:
             return {"success": False, "message": f"Agent '{agent_id_raw}' has no ID"}
             

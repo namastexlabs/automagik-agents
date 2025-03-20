@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, ConfigDict
+from typing import Dict, List, Optional, Any, Union, Literal
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 class BaseResponseModel(BaseModel):
     """Base model for all response models with common configuration."""
@@ -10,12 +10,77 @@ class BaseResponseModel(BaseModel):
         extra='ignore'  # Ignore extra fields
     )
 
+# Multimodal content models
+class MediaContent(BaseResponseModel):
+    """Base model for media content."""
+    mime_type: str
+    
+class UrlMediaContent(MediaContent):
+    """Media content accessible via URL."""
+    media_url: str
+
+class BinaryMediaContent(MediaContent):
+    """Media content with binary data."""
+    data: str  # Base64 encoded binary data
+    
+class ImageContent(MediaContent):
+    """Image content with metadata."""
+    mime_type: str = Field(pattern=r'^image/')
+    width: Optional[int] = None
+    height: Optional[int] = None
+    alt_text: Optional[str] = None
+    
+class ImageUrlContent(ImageContent, UrlMediaContent):
+    """Image content accessible via URL."""
+    pass
+    
+class ImageBinaryContent(ImageContent, BinaryMediaContent):
+    """Image content with binary data."""
+    thumbnail_url: Optional[str] = None
+    
+class AudioContent(MediaContent):
+    """Audio content with metadata."""
+    mime_type: str = Field(pattern=r'^audio/')
+    duration_seconds: Optional[float] = None
+    transcript: Optional[str] = None
+    
+class AudioUrlContent(AudioContent, UrlMediaContent):
+    """Audio content accessible via URL."""
+    pass
+    
+class AudioBinaryContent(AudioContent, BinaryMediaContent):
+    """Audio content with binary data."""
+    pass
+    
+class DocumentContent(MediaContent):
+    """Document content with metadata."""
+    mime_type: str = Field(pattern=r'^(application|text)/')
+    name: Optional[str] = None
+    size_bytes: Optional[int] = None
+    page_count: Optional[int] = None
+    
+class DocumentUrlContent(DocumentContent, UrlMediaContent):
+    """Document content accessible via URL."""
+    pass
+    
+class DocumentBinaryContent(DocumentContent, BinaryMediaContent):
+    """Document content with binary data."""
+    pass
+
+# Update AgentRunRequest to support multimodal content
 class AgentRunRequest(BaseResponseModel):
     """Request model for running an agent."""
     message_content: str
     message_type: Optional[str] = None
+    # Legacy single media fields (maintained for backward compatibility)
     mediaUrl: Optional[str] = None
     mime_type: Optional[str] = None
+    # New multimodal content support
+    media_contents: Optional[List[Union[
+        ImageUrlContent, ImageBinaryContent,
+        AudioUrlContent, AudioBinaryContent,
+        DocumentUrlContent, DocumentBinaryContent
+    ]]] = None
     channel_payload: Optional[Dict[str, Any]] = None
     context: dict = {}
     session_id: Optional[str] = None
@@ -62,6 +127,15 @@ class MessageModel(BaseResponseModel):
     role: str
     content: str
     assistant_name: Optional[str] = None
+    # Legacy media fields (maintained for backward compatibility)
+    media_url: Optional[str] = None
+    mime_type: Optional[str] = None
+    # New multimodal content support
+    media_contents: Optional[List[Union[
+        ImageUrlContent, ImageBinaryContent, 
+        AudioUrlContent, AudioBinaryContent,
+        DocumentUrlContent, DocumentBinaryContent
+    ]]] = None
     tool_calls: Optional[List[ToolCallModel]] = None
     tool_outputs: Optional[List[ToolOutputModel]] = None
 

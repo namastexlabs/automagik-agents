@@ -118,6 +118,11 @@ def create_message(message: Message) -> Optional[uuid.UUID]:
         UUID of the created message if successful, None otherwise
     """
     try:
+        # Log message parameters for debugging
+        logger.debug(f"Creating message with parameters: session_id={message.session_id}, role={message.role}, "
+                    f"user_id={message.user_id}, agent_id={message.agent_id}, "
+                    f"message_type={message.message_type}, text_length={len(message.text_content or '') if message.text_content else 0}")
+        
         # Prepare raw_payload, tool_calls, and tool_outputs for storage
         raw_payload = message.raw_payload
         if raw_payload is not None and not isinstance(raw_payload, str):
@@ -162,18 +167,30 @@ def create_message(message: Message) -> Optional[uuid.UUID]:
             context, system_prompt, created_at, updated_at
         ]
         
+        # Log the SQL query and parameters for debugging
+        logger.debug(f"Executing message creation query: {query}")
+        logger.debug(f"Query parameters: id={message.id}, session_id={message.session_id}, "
+                    f"user_id={message.user_id}, agent_id={message.agent_id}")
+        
         result = execute_query(query, params)
         
         if isinstance(result, list) and len(result) > 0:
-            return result[0].get('id')
+            message_id = result[0].get('id')
+            logger.info(f"Successfully created message {message_id} for session {message.session_id}")
+            return message_id
         elif isinstance(result, dict) and 'rows' in result and len(result['rows']) > 0:
-            return result['rows'][0].get('id')
+            message_id = result['rows'][0].get('id')
+            logger.info(f"Successfully created message {message_id} for session {message.session_id}")
+            return message_id
             
+        logger.error(f"Error creating message: Unexpected result format: {result}")
         return None
     except Exception as e:
         logger.error(f"Error creating message: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Message details: session_id={message.session_id}, role={message.role}, "
+                     f"id={message.id}, text_length={len(message.text_content or '') if message.text_content else 0}")
         return None
 
 
