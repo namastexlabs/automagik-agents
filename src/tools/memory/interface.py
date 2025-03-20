@@ -1,3 +1,7 @@
+"""Memory tool interface helpers.
+
+This module provides helper functions and decorators for memory tools.
+"""
 from typing import Dict, Any, Optional, Callable
 import logging
 import re
@@ -23,7 +27,7 @@ def invalidate_memory_cache(func: Callable) -> Callable:
         result = await func(*args, **kwargs)
         
         # Get the memory provider
-        from src.tools.memory_tools.provider import get_memory_provider_for_agent
+        from src.tools.memory.provider import get_memory_provider_for_agent
         
         # Try to extract agent_id from args/kwargs
         agent_id = None
