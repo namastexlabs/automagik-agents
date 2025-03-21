@@ -99,7 +99,9 @@ class SimpleAgent(BaseAgent):
             # Initialize memory variables if agent ID is available
             if self.db_id:
                 try:
-                    self._initialize_memory_variables_sync()
+                    # Create a basic context with the agent ID
+                    context = {"agent_id": self.db_id, "user_id": None}
+                    self._initialize_memory_variables_sync(context=context)
                     logger.info(f"Memory variables initialized for agent ID {self.db_id}")
                 except Exception as e:
                     logger.error(f"Error initializing memory variables: {str(e)}")
@@ -134,6 +136,9 @@ class SimpleAgent(BaseAgent):
         # Set up message history with a valid session ID but don't auto-create in database during init
         session_id = config.get("session_id", str(uuid.uuid4()))
         self.message_history = MessageHistory(session_id=session_id, no_auto_create=True)
+        
+        # Initialize context for memory tools
+        self.context = {"agent_id": self.db_id}
                
         logger.info("SimpleAgent initialized successfully")
     
@@ -150,7 +155,7 @@ class SimpleAgent(BaseAgent):
         matches = re.findall(pattern, template)
         return list(set(matches))  # Remove duplicates
     
-    def _initialize_memory_variables_sync(self, user_id: Optional[int] = None) -> None:
+    def _initialize_memory_variables_sync(self, user_id: Optional[int] = None, context: Optional[dict] = None) -> None:
         """Initialize memory variables in the database.
         
         This ensures all template variables exist in memory with default values.
@@ -158,6 +163,7 @@ class SimpleAgent(BaseAgent):
         
         Args:
             user_id: Optional user ID to associate with the memory variables
+            context: Optional context dictionary containing agent_id and user_id
         """
         if not self.db_id:
             logger.warning("Cannot initialize memory variables: No agent ID available")
@@ -168,6 +174,13 @@ class SimpleAgent(BaseAgent):
             from src.db.repository.memory import get_memory_by_name, create_memory
             from src.db.models import Memory
             
+            # Create context if not provided
+            if context is None:
+                context = {
+                    "agent_id": self.db_id,
+                    "user_id": user_id
+                }
+                
             # Extract all variables except run_id which is handled separately
             memory_vars = [var for var in self.template_vars if var != "run_id"]
             
@@ -429,6 +442,12 @@ class SimpleAgent(BaseAgent):
         try:
             from src.db.repository.memory import get_memory_by_name
             
+            # Create a context dict for memory operations
+            context = {
+                "agent_id": self.db_id,
+                "user_id": user_id
+            }
+            
             # Extract all variables except run_id which is handled separately
             memory_vars = [var for var in self.template_vars if var != "run_id"]
             missing_vars = []
@@ -443,9 +462,10 @@ class SimpleAgent(BaseAgent):
             # If we found missing variables, try to initialize them
             if missing_vars:
                 logger.warning(f"Found {len(missing_vars)} uninitialized memory variables: {', '.join(missing_vars)}")
-                self._initialize_memory_variables_sync(user_id)
+                # Pass the context to initialization
+                self._initialize_memory_variables_sync(user_id, context=context)
                 return False
-            
+                
             return True
         except Exception as e:
             logger.error(f"Error checking memory variables: {str(e)}")
@@ -848,10 +868,44 @@ class SimpleAgent(BaseAgent):
             all_messages = message_history.all_messages()
             logger.info(f"Retrieved {len(all_messages) if all_messages else 0} messages from message history")
             
-            # Set messages in dependencies without filtering
-            # Our dynamic system prompt with dynamic=True will take precedence
-            self.dependencies.set_message_history(all_messages)
-            logger.info("Set message history in dependencies (dynamic system prompt will be used)")
+            # Filter out previous tool calls and returns to avoid compatibility issues
+            # with PydanticAI's message history processing
+            from pydantic_ai.messages import ModelRequest, ModelResponse, SystemPromptPart, UserPromptPart, TextPart
+            
+            filtered_messages = []
+            for msg in all_messages:
+                # Keep system messages and user messages intact
+                if isinstance(msg, ModelRequest):
+                    has_system_part = False
+                    for part in msg.parts:
+                        if hasattr(part, 'part_kind') and part.part_kind == 'system-prompt':
+                            has_system_part = True
+                            break
+                    
+                    if has_system_part:
+                        # System message - keep as is
+                        filtered_messages.append(msg)
+                    else:
+                        # User message - keep as is
+                        filtered_messages.append(msg)
+                elif isinstance(msg, ModelResponse):
+                    # For assistant messages, only keep the text content parts
+                    # to avoid issues with tool calls/returns in history
+                    text_parts = []
+                    for part in msg.parts:
+                        if hasattr(part, 'part_kind') and part.part_kind == 'text':
+                            text_parts.append(part)
+                    
+                    # Only add if we have some text parts
+                    if text_parts:
+                        filtered_messages.append(ModelResponse(parts=text_parts))
+                else:
+                    # Unknown message type, add as is
+                    filtered_messages.append(msg)
+            
+            # Update message history in dependencies with filtered messages
+            self.dependencies.set_message_history(filtered_messages)
+            logger.info(f"Set filtered message history in dependencies with {len(filtered_messages)} messages (stripped tool parts)")
         else:
             logger.info(f"No MessageHistory provided, will not store messages in database")
         
@@ -894,7 +948,17 @@ class SimpleAgent(BaseAgent):
         _import_memory_tools()
         for var_name in memory_vars:
             try:
-                # Use get_memory_tool to get memory content
+                # Make sure context has the latest user_id and agent_id
+                user_id = getattr(self.dependencies, 'user_id', None)
+                if hasattr(self, 'context'):
+                    self.context.update({
+                        "agent_id": self.db_id,
+                        "user_id": user_id
+                    })
+                else:
+                    self.context = {"agent_id": self.db_id, "user_id": user_id}
+                
+                # Use get_memory_tool to get memory content - pass context but not separate user_id to avoid duplicates
                 response = await get_memory_tool(self.context, var_name)
                 
                 if isinstance(response, dict):
@@ -916,7 +980,7 @@ class SimpleAgent(BaseAgent):
         for var_name, value in template_values.items():
             result = result.replace(f"$memory.{var_name}", value)
             
-        return result 
+        return result
 
     def _get_current_system_prompt(self) -> str:
         """Retrieve the current system prompt with template variables replaced.
@@ -960,6 +1024,18 @@ class SimpleAgent(BaseAgent):
         # Get user_id from dependencies if available
         user_id = getattr(self.dependencies, 'user_id', None)
         
+        # Update context with user_id and agent_id
+        if hasattr(self, 'context'):
+            self.context.update({
+                "agent_id": self.db_id,
+                "user_id": user_id
+            })
+            logger.info(f"Updated context for memory tools: agent_id={self.db_id}, user_id={user_id}")
+        else:
+            # Create context if it doesn't exist
+            self.context = {"agent_id": self.db_id, "user_id": user_id}
+            logger.info(f"Created new context for memory tools: agent_id={self.db_id}, user_id={user_id}")
+        
         # Start with template values dictionary
         template_values = {}
         
@@ -979,22 +1055,66 @@ class SimpleAgent(BaseAgent):
         else:
             template_values["run_id"] = "1"
         
-        # Get memory variables
+        # Get system prompt memory variables directly from the repository
         memory_vars = [var for var in self.template_vars if var != "run_id"]
-        for var_name in memory_vars:
-            try:
-                if user_id:
-                    memory_content = await get_memory_tool(self.context, var_name, user_id=user_id)
+        try:
+            # Import repository function for direct database access to system prompt memories
+            from src.db.repository.memory import list_memories
+            
+            # Get all memories with read_mode='system_prompt' for this agent and user
+            system_memories = list_memories(
+                agent_id=self.db_id,
+                user_id=user_id,
+                read_mode="system_prompt"
+            )
+            
+            # Create a dictionary of memory name to content
+            memory_dict = {mem.name: mem.content for mem in system_memories}
+            logger.info(f"Retrieved {len(memory_dict)} system_prompt memories: {', '.join(memory_dict.keys())}")
+            
+            # Fill in template values with memory content
+            for var_name in memory_vars:
+                if var_name in memory_dict:
+                    template_values[var_name] = memory_dict[var_name]
+                    logger.info(f"Using system_prompt memory for {var_name}: {memory_dict[var_name][:50]}...")
                 else:
-                    memory_content = await get_memory_tool(self.context, var_name)
-                
-                if memory_content and not memory_content.startswith("Memory with key"):
-                    template_values[var_name] = memory_content
-                else:
+                    # Fallback to regular memory tool if not found
+                    try:
+                        # Make sure context has up-to-date user_id
+                        context_copy = dict(self.context) if hasattr(self, 'context') and self.context else {}
+                        if user_id:
+                            context_copy["user_id"] = user_id
+                        
+                        memory_content = await get_memory_tool(context_copy, var_name)
+                        
+                        if memory_content and not memory_content.startswith("Memory with key"):
+                            template_values[var_name] = memory_content
+                            logger.info(f"Using regular memory for {var_name}: {memory_content[:50]}...")
+                        else:
+                            template_values[var_name] = "None stored yet"
+                            logger.info(f"No memory found for {var_name}, using default")
+                    except Exception as e:
+                        logger.error(f"Error getting memory for {var_name}: {str(e)}")
+                        template_values[var_name] = "None stored yet"
+        except Exception as e:
+            logger.error(f"Error accessing system memories: {str(e)}")
+            # Fall back to regular memory tool if repository access fails
+            for var_name in memory_vars:
+                try:
+                    # Make sure context has up-to-date user_id
+                    context_copy = dict(self.context) if hasattr(self, 'context') and self.context else {}
+                    if user_id:
+                        context_copy["user_id"] = user_id
+                    
+                    memory_content = await get_memory_tool(context_copy, var_name)
+                    
+                    if memory_content and not memory_content.startswith("Memory with key"):
+                        template_values[var_name] = memory_content
+                    else:
+                        template_values[var_name] = "None stored yet"
+                except Exception as e:
+                    logger.error(f"Error getting memory for {var_name}: {str(e)}")
                     template_values[var_name] = "None stored yet"
-            except Exception as e:
-                logger.error(f"Error getting memory for {var_name}: {str(e)}")
-                template_values[var_name] = "None stored yet"
         
         # Now fill the template
         prompt_template = self.prompt_template
@@ -1002,4 +1122,5 @@ class SimpleAgent(BaseAgent):
             placeholder = f"{{{{{var_name}}}}}"
             prompt_template = prompt_template.replace(placeholder, value)
         
+        logger.info(f"Filled system prompt with {len(template_values)} template variables")
         return prompt_template 
