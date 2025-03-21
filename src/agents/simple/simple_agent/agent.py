@@ -228,14 +228,9 @@ class SimpleAgent(BaseAgent):
     def _create_base_system_prompt(self) -> str:
         """Create the base system prompt.
         
-        Returns an empty base prompt since we'll completely fill it
-        in the dynamic system prompt handler.
-        
         Returns:
-            Empty string as base prompt
+            Base system prompt template
         """
-        # Instead of returning an empty string, we'll use the template directly
-        # This ensures the prompt is available even without template replacement
         return self.prompt_template
 
     def _parse_model_settings(self, config: Dict[str, str]) -> Dict[str, Any]:
@@ -330,10 +325,6 @@ class SimpleAgent(BaseAgent):
         model_name = self.dependencies.model_name
         model_settings = self._get_model_settings()
         
-        # Ensure system_prompt is set properly from the template
-        self.system_prompt = self.prompt_template
-        logger.info(f"Initializing agent with system prompt template (first 50 chars): {self.system_prompt[:50]}...")
-        
         # Get available tools
         tools = []
         for name, func in self._registered_tools.items():
@@ -365,20 +356,19 @@ class SimpleAgent(BaseAgent):
         
         logger.info(f"Prepared {len(tools)} tools for PydanticAI agent")
                     
-        # Create the agent
+        # Create the agent with a base static system prompt
         try:
+            # Initialize with just the template as the base system prompt
+            # The template variables will be filled by the dynamic system prompt
             self._agent_instance = Agent(
                 model=model_name,
-                system_prompt=self.system_prompt,
+                system_prompt=self.prompt_template,
                 tools=tools,
                 model_settings=model_settings,
                 deps_type=SimpleAgentDependencies
             )
             
-            # Log that we created the agent with the system prompt
-            logger.info(f"Created Agent with system prompt: {self.system_prompt[:50]}...")
-            
-            # Register dynamic system prompts
+            # Register dynamic system prompts before first use
             self._register_system_prompts()
             
             logger.info(f"Initialized agent with model: {model_name} and {len(tools)} tools")
@@ -387,124 +377,19 @@ class SimpleAgent(BaseAgent):
             raise
     
     def _register_system_prompts(self) -> None:
-        """Register dynamic system prompts for template variables."""
+        """Initialize system prompts for the agent.
+        
+        Since we're manually adding the system prompt to the message history
+        before each run, we don't need to use PydanticAI's dynamic system prompt
+        decorator, which doesn't work properly with message history.
+        """
         if not self._agent_instance:
             logger.error("Cannot register system prompts: Agent not initialized")
             return
             
-        # Register a dynamic prompt handler that will replace all template variables in the prompt
-        @self._agent_instance.system_prompt
-        async def replace_template_variables(ctx: RunContext[SimpleAgentDependencies]) -> str:
-            """Replace all template variables in the system prompt with their values."""
-            template_values = {}
-            variables_with_errors = []
-            
-            # Get user_id from dependencies if available
-            user_id = None
-            if ctx and hasattr(ctx, 'deps'):
-                user_id = getattr(ctx.deps, 'user_id', None)
-                if user_id:
-                    logger.info(f"Using user_id={user_id} for memory variables")
-            
-            # Get run_id value
-            if self.db_id:
-                try:
-                    from src.db.repository import increment_agent_run_id, get_agent
-                    # First increment
-                    increment_success = increment_agent_run_id(self.db_id)
-                    if not increment_success:
-                        logger.warning(f"Failed to increment run_id for agent {self.db_id}")
-                    
-                    # Then get updated value
-                    agent = get_agent(self.db_id)
-                    if agent and hasattr(agent, 'run_id'):
-                        template_values["run_id"] = str(agent.run_id)
-                        logger.info(f"Using run_id={agent.run_id} for prompt")
-                    else:
-                        template_values["run_id"] = "1"
-                except Exception as e:
-                    logger.error(f"Error getting run_id: {str(e)}")
-                    template_values["run_id"] = "1"
-                    variables_with_errors.append("run_id")
-            else:
-                template_values["run_id"] = "1"
-                logger.warning("No agent ID available - using default run_id=1")
-            
-            # Get memory variables
-            _import_memory_tools()
-            memory_vars = [var for var in self.template_vars if var != "run_id"]
-            for var_name in memory_vars:
-                try:
-                    # Pass user_id to get_memory_tool if available
-                    if user_id:
-                        memory_content = await get_memory_tool(self.context, var_name, user_id=user_id)
-                    else:
-                        memory_content = await get_memory_tool(self.context, var_name)
-                    
-                    if memory_content and not memory_content.startswith("Memory with key"):
-                        template_values[var_name] = memory_content
-                    else:
-                        # Try to create memory if it doesn't exist and we have an agent ID
-                        if self.db_id:
-                            try:
-                                from src.db.repository.memory import get_memory_by_name, create_memory
-                                from src.db.models import Memory
-                                
-                                # Create memory with default value
-                                memory = Memory(
-                                    name=var_name,
-                                    content="None stored yet",
-                                    description=f"Auto-created template variable for SimpleAgent during runtime",
-                                    agent_id=self.db_id,
-                                    user_id=user_id,  # Add user_id to runtime-created memories
-                                    read_mode="system_prompt"
-                                )
-                                
-                                memory_id = create_memory(memory)
-                                if memory_id:
-                                    logger.info(f"Created memory variable during runtime: {var_name} with ID: {memory_id} for user: {user_id}")
-                                    template_values[var_name] = "None stored yet"
-                                else:
-                                    logger.error(f"Failed to create memory variable: {var_name}")
-                                    template_values[var_name] = "None stored yet"
-                                    variables_with_errors.append(var_name)
-                            except Exception as e:
-                                logger.error(f"Error creating memory during runtime for {var_name}: {str(e)}")
-                                template_values[var_name] = "None stored yet"
-                                variables_with_errors.append(var_name)
-                        else:
-                            template_values[var_name] = "None stored yet"
-                            variables_with_errors.append(var_name)
-                except Exception as e:
-                    logger.error(f"Error getting memory for {var_name}: {str(e)}")
-                    template_values[var_name] = "None stored yet"
-                    variables_with_errors.append(var_name)
-            
-            # Log the values we're using
-            for name, value in template_values.items():
-                display_value = value[:30] + "..." if len(value) > 30 else value
-                logger.info(f"Template variable {name} = {display_value}")
-            
-            if variables_with_errors:
-                logger.warning(f"Issues with template variables: {', '.join(variables_with_errors)}")
-            
-            # Now generate a filled template by replacing each variable
-            try:
-                prompt_template = self.prompt_template
-                for var_name, value in template_values.items():
-                    placeholder = f"{{{{{var_name}}}}}"
-                    prompt_template = prompt_template.replace(placeholder, value)
-                
-                # Log the first 100 characters of the final prompt for debugging
-                preview = prompt_template[:100] + "..." if len(prompt_template) > 100 else prompt_template
-                logger.info(f"Final system prompt (preview): {preview}")
-                
-                # Return the filled template as the system prompt
-                return prompt_template
-            except Exception as e:
-                logger.error(f"Error filling template: {str(e)}")
-                # Return the original template as a fallback
-                return self.prompt_template
+        logger.info("System prompts will be explicitly added to message history")
+        # We're not using the decorator approach since it doesn't work reliably with message history
+        # Instead, we explicitly add the system prompt to message history in the run method
     
     def _get_model_settings(self) -> Optional[ModelSettings]:
         """Get model settings for the PydanticAI agent.
@@ -572,7 +457,7 @@ class SimpleAgent(BaseAgent):
         Args:
             input_text: Text input for the agent
             multimodal_content: Optional multimodal content
-            system_message: Optional system message for this run
+            system_message: Optional system message for this run (ignored in favor of template)
             message_history_obj: Optional MessageHistory instance for DB storage
             
         Returns:
@@ -591,56 +476,66 @@ class SimpleAgent(BaseAgent):
         # Initialize agent if not done already
         await self._initialize_agent()
         
-        # Log the current system prompt for debugging
-        if hasattr(self, "system_prompt") and self.system_prompt:
-            preview = self.system_prompt[:100] + "..." if len(self.system_prompt) > 100 else self.system_prompt
-            logger.info(f"Using system prompt (preview): {preview}")
-        
-        # Get or create message history from dependencies
+        # Get message history from dependencies
         pydantic_message_history = self.dependencies.get_message_history()
-        
-        # If we have no message history yet, ensure we'll use the proper system prompt
-        if not pydantic_message_history:
-            logger.info("No existing message history found, will ensure system prompt is used")
-            
-            # Force rebuild the agent with current system prompt if needed
-            if self._agent_instance and not system_message:
-                logger.info("Rebuilding agent to ensure fresh system prompt application")
-                self._agent_instance = None
-                await self._initialize_agent()
-        else:
-            # If we have existing message history, ensure it includes the system prompt
-            self.dependencies_to_message_history()
+        logger.info(f"Got message history from dependencies with {len(pydantic_message_history) if pydantic_message_history else 0} messages")
         
         # Check if we need multimodal support
         agent_input = input_text
         if multimodal_content:
             agent_input = self._configure_for_multimodal(input_text, multimodal_content)
         
-        # If a system message is provided for this run and we don't have message history,
-        # we need to reinitialize the agent with the new system prompt
-        if system_message and not pydantic_message_history:
-            temp_system_prompt = self.system_prompt
-            self.system_prompt = system_message
-            self._agent_instance = None  # Force reinitialization
-            await self._initialize_agent()
-            self.system_prompt = temp_system_prompt  # Restore original
-            
-            # Also store system prompt in database if we have MessageHistory
-            if message_history_obj and system_message:
-                message_history_obj.add_system_prompt(system_message, agent_id=getattr(self, "db_id", None))
-                logger.info(f"Added custom system message to MessageHistory")
+        # We will ignore any provided system_message and always use our template
+        # with dynamic variables from _register_system_prompts
+        if system_message:
+            logger.warning("Ignoring provided system_message in favor of template with dynamic variables")
         
-        # If we have a MessageHistory object but no messages in dependencies,
-        # check if we should add a system prompt to the database
-        if message_history_obj and not pydantic_message_history and hasattr(self, "system_prompt") and self.system_prompt:
-            message_history_obj.add_system_prompt(self.system_prompt, agent_id=getattr(self, "db_id", None))
-            logger.info(f"Added system prompt from agent to MessageHistory: {self.system_prompt[:50]}...")
+        # Store user message in message history database if provided
+        if message_history_obj:
+            logger.info(f"Using MessageHistory for database storage of messages")
+        
+        # Log that we're using the dynamic system prompt
+        logger.info("Running agent with dynamic system prompt from template.py (reevaluated each run)")
         
         # Run the agent
         try:
             # Include usage_limits if available
             usage_limits = self.dependencies.usage_limits if hasattr(self.dependencies, "usage_limits") else None
+            
+            # Explicitly include system prompt in message history
+            # First, get the filled system prompt
+            filled_system_prompt = await self._get_filled_system_prompt()
+            
+            # Create a new message history with the system prompt at the beginning
+            # Import needed types from pydantic_ai
+            from pydantic_ai.messages import ModelRequest, SystemPromptPart
+            
+            # Create system prompt message
+            system_message = ModelRequest(
+                parts=[SystemPromptPart(content=filled_system_prompt)]
+            )
+            
+            # Add system message to beginning of history (if history exists)
+            if pydantic_message_history is None:
+                pydantic_message_history = [system_message]
+                logger.info("Created new message history with system prompt")
+            else:
+                # Check if the first message is already a system prompt
+                has_system = False
+                if pydantic_message_history:
+                    first_msg = pydantic_message_history[0]
+                    if hasattr(first_msg, 'parts') and first_msg.parts:
+                        first_part = first_msg.parts[0]
+                        if hasattr(first_part, 'part_kind') and first_part.part_kind == 'system-prompt':
+                            has_system = True
+                
+                if not has_system:
+                    # Prepend system message to history
+                    pydantic_message_history = [system_message] + pydantic_message_history
+                    logger.info("Prepended system prompt to message history")
+            
+            # Log the system prompt being used
+            logger.info(f"Using system prompt: {filled_system_prompt[:100]}...")
             
             result = await self._agent_instance.run(
                 agent_input,
@@ -831,13 +726,13 @@ class SimpleAgent(BaseAgent):
                         }
                         formatted_tool_outputs.append(formatted_to)
                 
-                # Store in database with properly formatted tool calls/outputs
+                # Store in database with properly formatted tool calls/outputs and filled system prompt
                 message_history_obj.add_response(
                     content=response_content,
                     tool_calls=formatted_tool_calls if formatted_tool_calls else None,
                     tool_outputs=formatted_tool_outputs if formatted_tool_outputs else None,
                     agent_id=getattr(self, "db_id", None),
-                    system_prompt=self._get_current_system_prompt()
+                    system_prompt=filled_system_prompt  # Use the filled system prompt we already have
                 )
             
             # Create response with the tool calls and outputs
@@ -942,15 +837,21 @@ class SimpleAgent(BaseAgent):
         if context and "multimodal_content" in context:
             multimodal_content = context["multimodal_content"]
         
-        # If message_history is provided:
-        # 1. Store user message in database
-        # 2. Extract messages for PydanticAI
+        # If message_history is provided, store user message in database
+        # but don't try to handle system messages from database
         if message_history:
-            logger.info(f"Using provided MessageHistory for session {session_id}")
-            # Add user message to database
+            logger.info(f"Using provided MessageHistory for session {session_id} to store user message")
+            # Add user message to database (but not system message)
             message_history.add(user_message, agent_id=self.db_id, context=context)
+            
             # Get messages to pass to PydanticAI
-            self.dependencies.set_message_history(message_history.all_messages())
+            all_messages = message_history.all_messages()
+            logger.info(f"Retrieved {len(all_messages) if all_messages else 0} messages from message history")
+            
+            # Set messages in dependencies without filtering
+            # Our dynamic system prompt with dynamic=True will take precedence
+            self.dependencies.set_message_history(all_messages)
+            logger.info("Set message history in dependencies (dynamic system prompt will be used)")
         else:
             logger.info(f"No MessageHistory provided, will not store messages in database")
         
@@ -960,9 +861,11 @@ class SimpleAgent(BaseAgent):
             self._agent_instance = None
             logger.info(f"Agent will be reinitialized with updated ID {self.db_id}")
         
-        logger.info(f"Processing message for agent {self.db_id} with dynamic system prompts")
+        logger.info(f"Processing message for agent {self.db_id} with dynamic system prompts from template")
         
         # Run the agent with the MessageHistory object for database storage
+        # but don't pass any system_message as we'll use our template
+        logger.info(f"message_history: {message_history}")
         return await self.run(
             user_message, 
             multimodal_content=multimodal_content,
@@ -1018,48 +921,85 @@ class SimpleAgent(BaseAgent):
     def _get_current_system_prompt(self) -> str:
         """Retrieve the current system prompt with template variables replaced.
         
+        Returns the filled system prompt from our template variables.
+        
         Returns:
             The current system prompt with all template variables filled
         """
         try:
-            # If we've initialized the agent, get the most up-to-date system prompt with all replacements
-            if self._agent_instance and hasattr(self._agent_instance, 'get_full_system_prompt'):
-                try:
-                    # Get the system prompt with all template variables replaced
-                    return self._agent_instance.get_full_system_prompt()
-                except Exception as e:
-                    logger.error(f"Error getting full system prompt: {str(e)}")
-            
-            # Fallback to the original system prompt if we can't get the filled version
-            return self.system_prompt
+            # Get the filled system prompt directly
+            return asyncio.run(self._get_filled_system_prompt())
         except Exception as e:
             logger.error(f"Error in _get_current_system_prompt: {str(e)}")
-            return self.system_prompt 
+            return self.prompt_template
 
     def dependencies_to_message_history(self) -> None:
         """Ensure dependencies message history includes the system prompt.
         
-        This method ensures that when we use existing dependencies for message history,
-        the system prompt is properly included.
+        When using existing dependencies for message history,
+        we need to manually ensure the system prompt is included as the first message.
+        This is handled in the run method.
         """
-        # Check if we have dependencies with a message history manager
-        if not hasattr(self.dependencies, "message_history_manager"):
-            logger.warning("No message_history_manager in dependencies")
-            return
-            
-        # If there are no messages yet, add the system prompt
-        messages = self.dependencies.message_history_manager.messages
-        if not messages or len(messages) == 0:
-            logger.info("Adding system prompt to empty message history manager")
-            if hasattr(self, "system_prompt") and self.system_prompt:
-                try:
-                    # Add system prompt to the beginning of the messages
-                    # Implementation depends on the specific structure of message_history_manager
-                    # This is a basic approach that might need adaptation
-                    if hasattr(self.dependencies.message_history_manager, "add_system_message"):
-                        self.dependencies.message_history_manager.add_system_message(self.system_prompt)
-                        logger.info("Added system prompt to message history manager")
-                    else:
-                        logger.warning("message_history_manager lacks add_system_message method")
-                except Exception as e:
-                    logger.error(f"Failed to add system prompt to message history: {str(e)}") 
+        # The system prompt is manually added in the run method
+        # See the run method for implementation
+        pass
+
+    async def _get_filled_system_prompt(self) -> str:
+        """Get the system prompt with all template variables filled.
+        
+        This is a helper method for testing purposes that directly fills in the
+        template variables in the system prompt, similar to what the dynamic
+        system prompt decorator would do.
+        
+        Returns:
+            System prompt with all template variables filled
+        """
+        # Make sure memory tools are imported
+        _import_memory_tools()
+        
+        # Get user_id from dependencies if available
+        user_id = getattr(self.dependencies, 'user_id', None)
+        
+        # Start with template values dictionary
+        template_values = {}
+        
+        # Get run_id value
+        if self.db_id:
+            try:
+                from src.db.repository import increment_agent_run_id, get_agent
+                # Get current value without incrementing (we'll increment in the decorator)
+                agent = get_agent(self.db_id)
+                if agent and hasattr(agent, 'run_id'):
+                    template_values["run_id"] = str(agent.run_id)
+                else:
+                    template_values["run_id"] = "1"
+            except Exception as e:
+                logger.error(f"Error getting run_id: {str(e)}")
+                template_values["run_id"] = "1"
+        else:
+            template_values["run_id"] = "1"
+        
+        # Get memory variables
+        memory_vars = [var for var in self.template_vars if var != "run_id"]
+        for var_name in memory_vars:
+            try:
+                if user_id:
+                    memory_content = await get_memory_tool(self.context, var_name, user_id=user_id)
+                else:
+                    memory_content = await get_memory_tool(self.context, var_name)
+                
+                if memory_content and not memory_content.startswith("Memory with key"):
+                    template_values[var_name] = memory_content
+                else:
+                    template_values[var_name] = "None stored yet"
+            except Exception as e:
+                logger.error(f"Error getting memory for {var_name}: {str(e)}")
+                template_values[var_name] = "None stored yet"
+        
+        # Now fill the template
+        prompt_template = self.prompt_template
+        for var_name, value in template_values.items():
+            placeholder = f"{{{{{var_name}}}}}"
+            prompt_template = prompt_template.replace(placeholder, value)
+        
+        return prompt_template 
