@@ -24,7 +24,7 @@ class AgentFactory:
 
     @classmethod
     def discover_agents(cls) -> None:
-        """Discover all available agents in the agents directory."""
+        """Discover all available agents using standardized create_agent functions."""
         agents_dir = Path(__file__).parent.parent
         logger.info(f"Scanning for agents in directory: {agents_dir}")
 
@@ -33,156 +33,41 @@ class AgentFactory:
         cls._initialized_agents.clear()
         cls._agent_db_ids.clear()
 
-        # List of agent directories to scan (will include subdirectories of type directories)
-        agent_dirs_to_scan = []
-        
-        # First, identify type directories and direct agent directories
-        type_dirs = []
-        for item in agents_dir.iterdir():
-            if item.is_dir() and item.name not in ["models", "__pycache__"]:
-                logger.info(f"Found potential agent directory: {item}")
-                if (item / "__init__.py").exists():
-                    logger.info(f"Detected directory with __init__.py: {item}")
-                    # For top-level directories with __init__.py, try to load directly
-                    if cls._try_load_agent_from_dir(item, item.name):
-                        logger.info(f"Successfully loaded agent from {item}")
+        # Scan for agent type directories
+        for type_dir in agents_dir.iterdir():
+            if type_dir.is_dir() and type_dir.name not in ["models", "__pycache__"]:
+                agent_type = type_dir.name
+                
+                # Check if the directory has an __init__.py file
+                init_file = type_dir / "__init__.py"
+                if init_file.exists():
+                    logger.info(f"Found agent type directory with __init__.py: {type_dir}")
                     
-                    # Always check if it's also a type directory (like 'simple')
-                    type_dirs.append(item)
-                else:
-                    # It's a type directory without an __init__.py
-                    type_dirs.append(item)
-                    logger.info(f"Added {item} to type directories list")
-        
-        # Then, scan all type directories for agents
-        for type_dir in type_dirs:
-            agent_type = type_dir.name
-            logger.info(f"Scanning type directory: {type_dir} (agent_type: {agent_type})")
-            
-            for agent_dir in type_dir.iterdir():
-                if agent_dir.is_dir() and agent_dir.name not in ["__pycache__"]:
-                    if (agent_dir / "__init__.py").exists():
-                        logger.info(f"Found agent directory: {agent_dir}")
-                        if cls._try_load_agent_from_dir(agent_dir, agent_type):
-                            logger.info(f"Successfully loaded agent from {agent_dir} as type {agent_type}")
-                    else:
-                        logger.info(f"Skipping directory without __init__.py: {agent_dir}")
-        
+                    # For each agent subdirectory, register it as an agent
+                    for agent_dir in type_dir.iterdir():
+                        if agent_dir.is_dir() and agent_dir.name != "__pycache__":
+                            agent_name = agent_dir.name
+                            full_agent_name = agent_name if agent_name.endswith("_agent") else f"{agent_name}_agent"
+                            
+                            logger.info(f"Registering agent: {full_agent_name} [Type: {agent_type}]")
+                            
+                            # Store the agent name and type for later initialization
+                            # We'll use GenericAgent as a placeholder until actual initialization
+                            class GenericAgent(BaseAgent):
+                                def __init__(self, config=None):
+                                    super().__init__(config or {}, f"Generic {full_agent_name}")
+                                def register_tools(self):
+                                    pass
+                                def run(self, *args, **kwargs):
+                                    pass
+                                    
+                            cls._agents[full_agent_name] = (GenericAgent, agent_type)
+
         # Report discovered agents
         if cls._agents:
             logger.info(f"Discovered {len(cls._agents)} agents: {', '.join(cls._agents.keys())}")
         else:
             logger.warning("No agents discovered!")
-
-    @classmethod
-    def _try_load_agent_from_dir(cls, agent_dir: Path, agent_type: str = None) -> bool:
-        """Try to load an agent from a specific directory."""
-
-        try:
-            # Identify the module path based on directory structure
-            module_path = f"src.agents.{agent_dir.name}"
-            if agent_type is not None and agent_type != agent_dir.name:
-                module_path = f"src.agents.{agent_type}.{agent_dir.name}"
-
-            logger.info(f"Attempting to import module: {module_path}")
-
-            # Import the module
-            module = importlib.import_module(module_path)
-            
-            # Look for agent classes in the module and submodules
-            agent_found = False
-            
-            # Check if this is a module with a default_agent
-            if hasattr(module, "default_agent"):
-                logger.info(f"Found default_agent in module {module_path}")
-                default_agent = getattr(module, "default_agent")
-                
-                # Check if default_agent is None
-                if default_agent is None:
-                    logger.error(f"Found default_agent in {module_path} but it's None - check initialization errors")
-                    
-                    # Check if create_* function exists - we can still register the agent type
-                    create_func_name = f"create_{agent_dir.name.replace('_agent', '')}_agent"
-                    if hasattr(module, create_func_name) and callable(getattr(module, create_func_name)):
-                        logger.info(f"Found {create_func_name} function, registering agent type despite None default_agent")
-                        # Set agent name - use directory name without adding _agent if it already has it
-                        agent_name = agent_dir.name if agent_dir.name.endswith("_agent") else f"{agent_dir.name}_agent"
-                        
-                        # Use a generic SimpleAgent class for registration since default_agent is None
-                        from src.agents.models.base_agent import BaseAgent
-                        class GenericAgent(BaseAgent):
-                            def __init__(self, config):
-                                super().__init__(config, "Generic agent")
-                            def register_tools(self):
-                                pass
-                        
-                        cls._agents[agent_name] = (GenericAgent, agent_type or "generic")
-                        logger.info(f"Registered agent type: {agent_name} using GenericAgent class")
-                        return True
-                    
-                    return False
-                
-                # Get the agent class from the default agent instance
-                agent_class = type(default_agent)
-                
-                # Set agent name - use directory name without adding _agent if it already has it
-                agent_name = agent_dir.name if agent_dir.name.endswith("_agent") else f"{agent_dir.name}_agent"
-
-                # Display more detailed debug info
-                logger.info(f"Agent class: {agent_class.__name__}, Agent name: {agent_name}")
-
-                # Get config details from module if available
-                config_dict = {}
-                for config_attr in ["DEFAULT_CONFIG", "CONFIG", "config"]:
-                    if hasattr(module, config_attr):
-                        config_dict = getattr(module, config_attr)
-                        break
-
-                # Extract metadata from module
-                description = (
-                    getattr(module, "DESCRIPTION", "")
-                    or getattr(agent_class, "__doc__", "")
-                    or f"{agent_name} agent"
-                )
-                model = config_dict.get("model", "")
-                
-                # Add to registry
-                cls._agents[agent_name] = (agent_class, agent_type or "generic")
-                agent_found = True
-
-                # Register in database - use agent_type from directory, not class name
-                try:
-                    db_id = register_agent(
-                        name=agent_name,
-                        agent_type=agent_type
-                        or "generic",  # Use directory type, not class name
-                        model=model,
-                        description=description,
-                        config=config_dict,
-                    )
-                    cls._agent_db_ids[agent_name] = db_id
-                except Exception as e:
-                    logger.error(
-                        f"Failed to register agent {agent_name} in database: {str(e)}"
-                    )
-
-                logger.info(
-                    f"Discovered agent: {agent_name} ({agent_class.__name__}) [Type: {agent_type or 'generic'}]"
-                )
-                return True
-
-            return False
-        except ImportError as e:
-            logger.error(f"Import error loading agent from {agent_dir.name}: {str(e)}")
-            logger.error(
-                f"Make sure the agent class and imports are correctly defined in {module_path}"
-            )
-        except Exception as e:
-            logger.error(f"Error loading agent from {agent_dir.name}: {str(e)}")
-            import traceback
-            logger.error(f"Detailed error: {traceback.format_exc()}")
-
-        return False
 
     @classmethod
     def get_agent(cls, agent_name: str) -> BaseAgent:
@@ -207,70 +92,91 @@ class AgentFactory:
                         f"Agent {agent_name} not found. Available agents: {', '.join(available_agents)}"
                     )
 
-            # First, try to get from simple type
+            # Get the agent type
+            _, agent_type = cls._agents[agent_name]
+            
             try:
-                agent_class, agent_type = cls._agents[agent_name]
+                # Import the agent type module (e.g., src.agents.simple)
+                type_module_path = f"src.agents.{agent_type}"
+                type_module = importlib.import_module(type_module_path)
                 
-                # Special case handling for the simple agent with simple subdirectory
-                if agent_type == "simple" and agent_name == "simple_agent":
-                    module_path = "src.agents.simple.simple_agent"
+                # Get the base name without _agent suffix if needed
+                base_name = agent_name.replace("_agent", "") if agent_name.endswith("_agent") else agent_name
+                
+                # Create the agent using the standardized function
+                if hasattr(type_module, "create_agent") and callable(type_module.create_agent):
+                    logger.info(f"Using create_agent from {type_module_path}")
+                    agent = type_module.create_agent(base_name)
                 else:
-                    # Regular module path construction
-                    # For most agents, the module name is the directory name
-                    agent_module_name = agent_name.replace("_agent", "")
-                    module_path = (
-                        f"src.agents.{agent_type}.{agent_module_name}"
-                        if agent_type != "generic"
-                        else f"src.agents.{agent_module_name}"
-                    )
-
-                logger.info(f"Importing agent module: {module_path}")
-                module = importlib.import_module(module_path)
+                    # Try to import the specific agent module as a fallback
+                    agent_module_path = f"src.agents.{agent_type}.{base_name}"
+                    try:
+                        agent_module = importlib.import_module(agent_module_path)
+                        if hasattr(agent_module, "create_agent"):
+                            logger.info(f"Using create_agent from {agent_module_path}")
+                            agent = agent_module.create_agent()
+                        else:
+                            raise AttributeError(f"Could not find create_agent function in {agent_module_path}")
+                    except ImportError:
+                        # Try with _agent suffix in the module path if base_name doesn't have it
+                        if not base_name.endswith("_agent"):
+                            agent_module_path = f"src.agents.{agent_type}.{base_name}_agent"
+                            agent_module = importlib.import_module(agent_module_path)
+                            if hasattr(agent_module, "create_agent"):
+                                logger.info(f"Using create_agent from {agent_module_path}")
+                                agent = agent_module.create_agent()
+                            else:
+                                raise AttributeError(f"Could not find create_agent function in {agent_module_path}")
+                        else:
+                            raise
                 
-                # Get the correct creation function name
-                create_func_name = f"create_{agent_name.replace('_agent', '')}_agent"
-                logger.info(f"Looking for function: {create_func_name}")
+                # Extract agent metadata for database registration
+                agent_class = type(agent)
+                config_dict = {}
                 
-                # Check if function exists
-                if not hasattr(module, create_func_name):
-                    logger.error(f"Function {create_func_name} not found in module {module_path}")
-                    available_attrs = [attr for attr in dir(module) if not attr.startswith('_')]
-                    logger.info(f"Available attributes in module: {available_attrs}")
-                    raise AttributeError(f"Module {module_path} has no attribute '{create_func_name}'")
-                    
-                create_func = getattr(module, create_func_name)
+                if hasattr(agent, "config"):
+                    config = getattr(agent, "config")
+                    # Ensure config is a dictionary
+                    if isinstance(config, dict):
+                        config_dict = config
+                    else:
+                        # Try to convert to dict if it has __dict__ attribute
+                        if hasattr(config, "__dict__"):
+                            config_dict = config.__dict__
+                        else:
+                            config_dict = {"value": str(config)}
                 
-                # Check if function is callable
-                if not callable(create_func):
-                    logger.error(f"Found {create_func_name} but it's not callable: {type(create_func)}")
-                    raise TypeError(f"{create_func_name} is not callable")
-
-                # Create the agent
-                logger.info(f"Calling {create_func_name}()")
-                agent = create_func()
-                logger.info(f"Agent created successfully: {agent}")
-
-                # Store the database ID with the agent instance
-                if agent_name in cls._agent_db_ids:
+                description = (
+                    getattr(agent, "description", "") 
+                    or getattr(agent_class, "__doc__", "") 
+                    or f"{agent_name} agent"
+                )
+                model = config_dict.get("model", "")
+                
+                # Update the agent class in the registry
+                cls._agents[agent_name] = (agent_class, agent_type)
+                
+                # Register in database if not already registered
+                if agent_name not in cls._agent_db_ids:
+                    try:
+                        db_id = register_agent(
+                            name=agent_name,
+                            agent_type=agent_type,
+                            model=model,
+                            description=description,
+                            config=config_dict,
+                        )
+                        cls._agent_db_ids[agent_name] = db_id
+                        agent.db_id = db_id
+                    except Exception as e:
+                        logger.error(f"Failed to register agent {agent_name} in database: {str(e)}")
+                else:
                     agent.db_id = cls._agent_db_ids[agent_name]
-                else:
-                    # Try to get the agent ID from the database
-                    db_agent = get_agent_by_name(agent_name)
-                    if db_agent:
-                        agent.db_id = db_agent["id"]
-                        cls._agent_db_ids[agent_name] = db_agent["id"]
-
+                
+                # Store the initialized agent
                 cls._initialized_agents[agent_name] = agent
-            except ImportError as e:
-                logger.error(f"Failed to import agent module {agent_name}: {str(e)}")
-                raise ValueError(
-                    f"Failed to import agent module {agent_name}: {str(e)}"
-                )
-            except AttributeError as e:
-                logger.error(f"Failed to find create function for agent {agent_name}: {str(e)}")
-                raise ValueError(
-                    f"Failed to find create function for agent {agent_name}: {str(e)}"
-                )
+                logger.info(f"Successfully initialized agent: {agent_name}")
+                
             except Exception as e:
                 logger.error(f"Failed to initialize agent {agent_name}: {str(e)}")
                 import traceback
