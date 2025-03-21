@@ -420,16 +420,8 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 "message_history": message_history,  # Pass the existing MessageHistory object
             }
             
-            # Only add the message ourselves if the agent supports message_already_added
-            if supports_message_already_added:
-                # Store the message in the message history
-                message_history.add(
-                    request.message_content,
-                    agent_id=agent_id,
-                    context=combined_context
-                )
-                # Indicate that we've already added the message
-                process_args["message_already_added"] = True
+            # Let the agent handle adding the message to avoid formatting issues with tools
+            # Do not add message_already_added=True as this is causing tool handling issues
             
             # Ensure system_prompt is stored for this session
             if hasattr(agent, "system_prompt") and agent.system_prompt:
