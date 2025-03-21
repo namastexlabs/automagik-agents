@@ -14,6 +14,8 @@ import os
 import uuid
 from datetime import datetime
 
+from pydantic_ai import Agent
+
 # Import constants
 from src.constants import (
     DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_RETRIES
@@ -25,8 +27,6 @@ from src.agents.models.dependencies import SimpleAgentDependencies
 from src.agents.models.response import AgentResponse
 from src.memory.message_history import MessageHistory
 
-# Import tools with new structure
-# Web and other media tools are no longer available
 from src.tools.datetime import get_current_date_tool, get_current_time_tool, format_date_tool
 
 # Import memory tools but delay actual import until needed to avoid circular imports
@@ -203,16 +203,7 @@ class SimpleAgent(BaseAgent):
         # Set up message history with a valid session ID but don't auto-create in database during init
         session_id = config.get("session_id", str(uuid.uuid4()))
         self.message_history = MessageHistory(session_id=session_id, no_auto_create=True)
-        
-        # Flag for whether PydanticAI is available
-        self.has_pydantic_ai = PYDANTIC_AI_AVAILABLE
-        
-        # Initialize PydanticAI if available
-        self.pydantic_agent = None
-        
-        # Initialize tools for this agent
-        self._initialize_tools()
-        
+               
         logger.info("SimpleAgent initialized successfully")
     
     def _extract_template_variables(self, template: str) -> List[str]:
@@ -447,7 +438,7 @@ class SimpleAgent(BaseAgent):
                     
         # Create the agent
         try:
-            self._agent_instance = PydanticAgent(
+            self._agent_instance = Agent(
                 model=model_name,
                 system_prompt=self.system_prompt,
                 tools=tools,
@@ -1053,19 +1044,6 @@ class SimpleAgent(BaseAgent):
             multimodal_content=multimodal_content,
             message_history_obj=message_history
         )
-        
-    def register_tools(self):
-        """Register tools with the agent.
-        
-        This method is required by BaseAgent.
-        """
-        # Tools are registered during initialization
-        pass 
-
-    def _initialize_tools(self):
-        """Register available tools with the agent."""
-        # Tools are registered during initialization
-        pass
 
     async def _handle_memory_variables(self, template: str) -> str:
         """Replace memory variable references with actual memory contents.

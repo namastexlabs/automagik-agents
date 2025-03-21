@@ -96,9 +96,6 @@ class BaseAgent(ABC, Generic[T]):
         # Initialize the agent
         self.agent = self.initialize_agent()
         
-        # Register tools with the agent
-        if self.agent:
-            self.register_tools()
 
     def initialize_agent(self) -> PydanticAgent:
         """Initialize the pydantic-ai agent.
@@ -149,15 +146,6 @@ class BaseAgent(ABC, Generic[T]):
         )
         
         return agent
-
-    @abstractmethod
-    def register_tools(self):
-        """Register tools with the agent.
-        
-        This method should be implemented by subclasses to register
-        all tools that the agent will use.
-        """
-        pass
 
     @abstractmethod
     async def process_message(self, user_message: str, session_id: str = None, user_id: int = None) -> AgentBaseResponse_v2:
@@ -225,10 +213,6 @@ class BaseAgent(ABC, Generic[T]):
             limits["total_tokens_limit"] = int(total_tokens_limit)
             
         return UsageLimits(**limits) if limits else None
-
-    def post_init(self):
-        """Post-initialization tasks. Can be overridden by subclasses."""
-        self.register_tools()
 
     @abstractmethod
     async def run(self, user_message: str, message_history: MessageHistory) -> AgentBaseResponse_v2:
