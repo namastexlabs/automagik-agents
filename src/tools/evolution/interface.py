@@ -5,8 +5,14 @@ This module provides a compatibility layer for Evolution tools.
 import logging
 from typing import List, Dict, Any
 from pydantic_ai import RunContext
+from pydantic_ai.tools import Tool
 
-from .tool import send_message, get_chat_history
+from .tool import (
+    send_message, 
+    get_chat_history,
+    get_send_message_description,
+    get_chat_history_description
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,4 +78,23 @@ class EvolutionTools:
         # Extract the messages from the result
         if result.get("success", False) and "messages" in result:
             return result["messages"]
-        return [] 
+        return []
+
+# Create Evolution tool instances
+evolution_send_message_tool = Tool(
+    name="evolution_send_message",
+    description=get_send_message_description(),
+    function=send_message
+)
+
+evolution_get_chat_history_tool = Tool(
+    name="evolution_get_chat_history",
+    description=get_chat_history_description(),
+    function=get_chat_history
+)
+
+# Group all Evolution tools
+evolution_tools = [
+    evolution_send_message_tool,
+    evolution_get_chat_history_tool
+] 

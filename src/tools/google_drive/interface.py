@@ -5,8 +5,14 @@ This module provides a compatibility layer for Google Drive tools.
 import logging
 from typing import List, Dict, Any
 from pydantic_ai import RunContext
+from pydantic_ai.tools import Tool
 
-from .tool import search_files, get_file_content
+from .tool import (
+    search_files, 
+    get_file_content,
+    get_search_files_description,
+    get_file_content_description
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,4 +70,23 @@ class GoogleDriveTools:
         # Extract the content from the result
         if result.get("success", False) and "content" in result:
             return result["content"]
-        return f"Error retrieving content for file ID: {file_id}" 
+        return f"Error retrieving content for file ID: {file_id}"
+
+# Create Google Drive tool instances
+google_drive_search_files_tool = Tool(
+    name="google_drive_search_files",
+    description=get_search_files_description(),
+    function=search_files
+)
+
+google_drive_get_file_content_tool = Tool(
+    name="google_drive_get_file_content",
+    description=get_file_content_description(),
+    function=get_file_content
+)
+
+# Group all Google Drive tools
+google_drive_tools = [
+    google_drive_search_files_tool,
+    google_drive_get_file_content_tool
+] 

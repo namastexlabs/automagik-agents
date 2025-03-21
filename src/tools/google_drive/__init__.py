@@ -19,7 +19,10 @@ from src.tools.google_drive.schema import (
 )
 
 # Import interface
-from src.tools.google_drive.interface import GoogleDriveTools
+from src.tools.google_drive.interface import (
+    GoogleDriveTools,
+    google_drive_tools
+)
 
 # Export public API
 __all__ = [
@@ -37,5 +40,6 @@ __all__ = [
     'GetFileContentResponse',
     
     # Interface
-    'GoogleDriveTools'
+    'GoogleDriveTools',
+    'google_drive_tools'
 ] 

@@ -272,6 +272,11 @@ class BaseAgent(ABC, Generic[T]):
             
         logging.info(f"Using existing session ID: {session_id}")
         
+        # Update self.db_id from agent_id parameter if provided
+        if agent_id:
+            self.db_id = int(agent_id) if isinstance(agent_id, (str, int)) and str(agent_id).isdigit() else agent_id
+            logging.info(f"Updated agent ID to {self.db_id}")
+        
         # Log any additional context provided
         if context:
             logging.info(f"Additional message context: {context}")
@@ -287,10 +292,10 @@ class BaseAgent(ABC, Generic[T]):
         # This ensures it will be the first message in the sequence sent to OpenAI
         if hasattr(self, "system_prompt") and self.system_prompt:
             logging.info("Adding system prompt to message history before user message")
-            message_history.add_system_prompt(self.system_prompt, agent_id=agent_id)
+            message_history.add_system_prompt(self.system_prompt, agent_id=self.db_id)
         
         # Add the user message AFTER the system prompt
-        user_message_obj = message_history.add(user_message, agent_id=agent_id, context=context)
+        user_message_obj = message_history.add(user_message, agent_id=self.db_id, context=context)
         
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 
@@ -395,7 +400,7 @@ class BaseAgent(ABC, Generic[T]):
             assistant_name=self.__class__.__name__,
             tool_calls=tool_calls,
             tool_outputs=tool_outputs,
-            agent_id=agent_id,
+            agent_id=self.db_id,
             system_prompt=system_prompt
         )
         

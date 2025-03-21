@@ -27,6 +27,12 @@ from src.tools.discord.schema import (
     SendMessageResponse
 )
 
+# Import interface
+from src.tools.discord.interface import (
+    DiscordTools,
+    discord_tools
+)
+
 # Export public API
 __all__ = [
     # Tool functions
@@ -49,5 +55,9 @@ __all__ = [
     'ListGuildsResponse',
     'GuildInfoResponse',
     'FetchMessagesResponse',
-    'SendMessageResponse'
+    'SendMessageResponse',
+    
+    # Interface
+    'DiscordTools',
+    'discord_tools'
 ] 
