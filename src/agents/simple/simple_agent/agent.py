@@ -413,13 +413,18 @@ class SimpleAgent(BaseAgent):
         # Get available tools
         tools = []
         for name, func in self._registered_tools.items():
-            if hasattr(func, "get_pydantic_tool"):
-                # Use the PydanticAI tool definition if available
-                tool = func.get_pydantic_tool()
-                tools.append(tool)
-            elif hasattr(func, "__doc__") and callable(func):
-                # Create a basic wrapper for regular functions
-                try:
+            try:
+                if hasattr(func, "get_pydantic_tool"):
+                    # Use the PydanticAI tool definition if available
+                    tool = func.get_pydantic_tool()
+                    tools.append(tool)
+                    logger.info(f"Registered PydanticAI tool: {name}")
+                elif isinstance(func, PydanticTool):
+                    # If it's already a PydanticTool instance, use it directly
+                    tools.append(func)
+                    logger.info(f"Added existing PydanticTool: {name}")
+                elif hasattr(func, "__doc__") and callable(func):
+                    # Create a basic wrapper for regular functions
                     doc = func.__doc__ or f"Tool for {name}"
                     # Create a simple PydanticTool
                     tool = PydanticTool(
@@ -428,8 +433,13 @@ class SimpleAgent(BaseAgent):
                         function=func
                     )
                     tools.append(tool)
-                except Exception as e:
-                    logger.error(f"Error creating tool {name}: {str(e)}")
+                    logger.info(f"Created PydanticTool for function: {name}")
+                else:
+                    logger.warning(f"Could not register tool {name}: not a function or missing documentation")
+            except Exception as e:
+                logger.error(f"Error creating tool {name}: {str(e)}")
+        
+        logger.info(f"Prepared {len(tools)} tools for PydanticAI agent")
                     
         # Create the agent
         try:
@@ -444,7 +454,7 @@ class SimpleAgent(BaseAgent):
             # Register dynamic system prompts
             self._register_system_prompts()
             
-            logger.info(f"Initialized agent with model: {model_name}")
+            logger.info(f"Initialized agent with model: {model_name} and {len(tools)} tools")
         except Exception as e:
             logger.error(f"Failed to initialize agent: {str(e)}")
             raise
@@ -695,9 +705,146 @@ class SimpleAgent(BaseAgent):
                 deps=self.dependencies
             )
             
-            # Extract tool calls and outputs safely
-            tool_calls = getattr(result, "tool_calls", None)
-            tool_outputs = getattr(result, "tool_outputs", None)
+            # Extract tool calls and outputs from message parts
+            tool_calls = []
+            tool_outputs = []
+            
+            try:
+                all_messages = result.all_messages()
+                logger.info(f"Retrieved {len(all_messages)} messages from result")
+                
+                for msg in all_messages:
+                    # Handle direct message attributes containing tool calls/returns
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tc in msg.tool_calls:
+                            tool_call = {
+                                'tool_name': getattr(tc, 'name', getattr(tc, 'tool_name', '')),
+                                'args': getattr(tc, 'args', getattr(tc, 'arguments', {})),
+                                'tool_call_id': getattr(tc, 'id', getattr(tc, 'tool_call_id', ''))
+                            }
+                            tool_calls.append(tool_call)
+                            logger.info(f"Found direct tool call: {tool_call['tool_name']}")
+                            
+                    if hasattr(msg, 'tool_outputs') and msg.tool_outputs:
+                        for to in msg.tool_outputs:
+                            tool_output = {
+                                'tool_name': getattr(to, 'name', getattr(to, 'tool_name', '')),
+                                'content': getattr(to, 'content', ''),
+                                'tool_call_id': getattr(to, 'id', getattr(to, 'tool_call_id', ''))
+                            }
+                            tool_outputs.append(tool_output)
+                            logger.info(f"Found direct tool output: {tool_output['tool_name']}")
+                    
+                    # Process message parts if available
+                    if hasattr(msg, 'parts'):
+                        for part in msg.parts:
+                            # Check if this part is a tool call by looking for multiple indicators
+                            if (hasattr(part, 'part_kind') and part.part_kind == 'tool-call') or \
+                               type(part).__name__ == 'ToolCallPart' or \
+                               hasattr(part, 'tool_name') and hasattr(part, 'args'):
+                                
+                                tool_call = {
+                                    'tool_name': getattr(part, 'tool_name', ''),
+                                    'args': getattr(part, 'args', {}),
+                                    'tool_call_id': getattr(part, 'tool_call_id', getattr(part, 'id', ''))
+                                }
+                                tool_calls.append(tool_call)
+                                logger.info(f"Found part tool call: {tool_call['tool_name']}")
+                            
+                            # Check if this part is a tool return by looking for multiple indicators
+                            if (hasattr(part, 'part_kind') and part.part_kind == 'tool-return') or \
+                               type(part).__name__ == 'ToolReturnPart' or \
+                               (hasattr(part, 'tool_name') and hasattr(part, 'content')):
+                                
+                                # Extract content, handling both string and object formats
+                                content = getattr(part, 'content', None)
+                                
+                                tool_output = {
+                                    'tool_name': getattr(part, 'tool_name', ''),
+                                    'content': content,
+                                    'tool_call_id': getattr(part, 'tool_call_id', getattr(part, 'id', ''))
+                                }
+                                tool_outputs.append(tool_output)
+                                
+                                # Safely log a preview of the content
+                                try:
+                                    if content is None:
+                                        content_preview = "None"
+                                    elif isinstance(content, str):
+                                        content_preview = content[:50]
+                                    elif isinstance(content, dict):
+                                        content_preview = f"Dict with keys: {', '.join(content.keys())[:50]}"
+                                    else:
+                                        content_preview = f"{type(content).__name__}[...]"
+                                    
+                                    logger.info(f"Found part tool output for {tool_output['tool_name']} with content: {content_preview}")
+                                except Exception as e:
+                                    logger.warning(f"Error creating content preview: {str(e)}")
+                    
+                    # Also check for any direct attributes on the message that might contain tool info
+                    for attr_name in dir(msg):
+                        # Skip private attributes and already processed ones
+                        if attr_name.startswith('_') or attr_name in ('parts', 'tool_calls', 'tool_outputs'):
+                            continue
+                        
+                        try:
+                            attr_value = getattr(msg, attr_name)
+                            # Check if this attribute looks like a tool call or return object
+                            if hasattr(attr_value, 'tool_name') and (hasattr(attr_value, 'args') or hasattr(attr_value, 'content')):
+                                if hasattr(attr_value, 'args'):
+                                    # It's likely a tool call
+                                    tool_call = {
+                                        'tool_name': getattr(attr_value, 'tool_name', ''),
+                                        'args': getattr(attr_value, 'args', {}),
+                                        'tool_call_id': getattr(attr_value, 'tool_call_id', getattr(attr_value, 'id', ''))
+                                    }
+                                    tool_calls.append(tool_call)
+                                    logger.info(f"Found attribute tool call: {tool_call['tool_name']}")
+                                else:
+                                    # It's likely a tool return
+                                    content = getattr(attr_value, 'content', None)
+                                    tool_output = {
+                                        'tool_name': getattr(attr_value, 'tool_name', ''),
+                                        'content': content,
+                                        'tool_call_id': getattr(attr_value, 'tool_call_id', getattr(attr_value, 'id', ''))
+                                    }
+                                    tool_outputs.append(tool_output)
+                                    logger.info(f"Found attribute tool output: {tool_output['tool_name']}")
+                        except Exception:
+                            # Skip any attributes that can't be accessed
+                            pass
+                            
+            except Exception as e:
+                logger.error(f"Error extracting tool calls and outputs: {str(e)}")
+                logger.error(traceback.format_exc())
+            
+            # Log the extracted tool calls and outputs
+            if tool_calls:
+                logger.info(f"Found {len(tool_calls)} tool calls in the result")
+                for i, tc in enumerate(tool_calls):
+                    args_preview = str(tc.get('args', {}))[:50] + ('...' if len(str(tc.get('args', {}))) > 50 else '')
+                    logger.info(f"Tool call {i+1}: {tc.get('tool_name', 'unknown')} with args: {args_preview}")
+            else:
+                logger.info("No tool calls found in the result")
+                
+            if tool_outputs:
+                logger.info(f"Found {len(tool_outputs)} tool outputs in the result")
+                for i, to in enumerate(tool_outputs):
+                    content = to.get('content', '')
+                    try:
+                        if content is None:
+                            content_preview = "None"
+                        elif isinstance(content, str):
+                            content_preview = f"string[{len(content)} chars]"
+                        elif isinstance(content, dict):
+                            content_preview = f"dict[{len(content)} keys]"
+                        else:
+                            content_preview = f"{type(content).__name__}"
+                        logger.info(f"Tool output {i+1}: {to.get('tool_name', 'unknown')} with content: {content_preview}")
+                    except Exception as e:
+                        logger.warning(f"Error logging tool output: {str(e)}")
+            else:
+                logger.info("No tool outputs found in the result")
             
             # Store assistant response in database if we have a MessageHistory object
             if message_history_obj:
@@ -706,16 +853,50 @@ class SimpleAgent(BaseAgent):
                 # Extract the response content
                 response_content = result.data
                 
-                # Store in database
+                # Make sure tool_calls and tool_outputs are in the right format for storage
+                formatted_tool_calls = []
+                formatted_tool_outputs = []
+                
+                # Format tool calls for storage
+                if tool_calls:
+                    for tc in tool_calls:
+                        formatted_tc = {
+                            'tool_name': tc.get('tool_name', ''),
+                            'args': tc.get('args', {}),
+                            'tool_call_id': tc.get('tool_call_id', '')
+                        }
+                        formatted_tool_calls.append(formatted_tc)
+                
+                # Format tool outputs for storage, ensuring content is properly serializable
+                if tool_outputs:
+                    for to in tool_outputs:
+                        content = to.get('content', '')
+                        # Ensure content is JSON serializable
+                        if not isinstance(content, (str, dict, list, int, float, bool, type(None))):
+                            try:
+                                # Try to convert to a string representation
+                                content = str(content)
+                            except Exception as e:
+                                logger.warning(f"Could not convert tool output content to string: {str(e)}")
+                                content = f"[Unserializable content of type {type(content).__name__}]"
+                        
+                        formatted_to = {
+                            'tool_name': to.get('tool_name', ''),
+                            'content': content,
+                            'tool_call_id': to.get('tool_call_id', '')
+                        }
+                        formatted_tool_outputs.append(formatted_to)
+                
+                # Store in database with properly formatted tool calls/outputs
                 message_history_obj.add_response(
                     content=response_content,
-                    tool_calls=tool_calls,
-                    tool_outputs=tool_outputs,
+                    tool_calls=formatted_tool_calls if formatted_tool_calls else None,
+                    tool_outputs=formatted_tool_outputs if formatted_tool_outputs else None,
                     agent_id=getattr(self, "db_id", None),
                     system_prompt=self.system_prompt if hasattr(self, "system_prompt") else None
                 )
             
-            # Create response
+            # Create response with the tool calls and outputs
             return AgentResponse(
                 text=result.data,
                 success=True,
