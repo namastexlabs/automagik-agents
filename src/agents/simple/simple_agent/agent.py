@@ -312,9 +312,9 @@ class SimpleAgent(BaseAgent):
         Returns:
             Empty string as base prompt
         """
-        # Return empty string as we'll fully replace it with the filled template
-        # in our dynamic system prompt handler
-        return ""
+        # Instead of returning an empty string, we'll use the template directly
+        # This ensures the prompt is available even without template replacement
+        return self.prompt_template
 
     def _parse_model_settings(self, config: Dict[str, str]) -> Dict[str, Any]:
         """Parse model settings from config.
@@ -410,6 +410,10 @@ class SimpleAgent(BaseAgent):
         model_name = self.dependencies.model_name
         model_settings = self._get_model_settings()
         
+        # Ensure system_prompt is set properly from the template
+        self.system_prompt = self.prompt_template
+        logger.info(f"Initializing agent with system prompt template (first 50 chars): {self.system_prompt[:50]}...")
+        
         # Get available tools
         tools = []
         for name, func in self._registered_tools.items():
@@ -450,6 +454,9 @@ class SimpleAgent(BaseAgent):
                 model_settings=model_settings,
                 deps_type=SimpleAgentDependencies
             )
+            
+            # Log that we created the agent with the system prompt
+            logger.info(f"Created PydanticAgent with system prompt: {self.system_prompt[:50]}...")
             
             # Register dynamic system prompts
             self._register_system_prompts()
@@ -568,6 +575,10 @@ class SimpleAgent(BaseAgent):
                     placeholder = f"{{{{{var_name}}}}}"
                     prompt_template = prompt_template.replace(placeholder, value)
                 
+                # Log the first 100 characters of the final prompt for debugging
+                preview = prompt_template[:100] + "..." if len(prompt_template) > 100 else prompt_template
+                logger.info(f"Final system prompt (preview): {preview}")
+                
                 # Return the filled template as the system prompt
                 return prompt_template
             except Exception as e:
@@ -637,16 +648,12 @@ class SimpleAgent(BaseAgent):
             logger.error(f"Error checking memory variables: {str(e)}")
             return False
             
-    async def run(self, 
-                 input_text: str, 
-                 multimodal_content: Optional[Dict[str, Any]] = None,
-                 system_message: Optional[str] = None,
-                 message_history_obj: Optional['MessageHistory'] = None) -> AgentResponse:
-        """Run the agent on the input text.
+    async def run(self, input_text: str, *, multimodal_content=None, system_message=None, message_history_obj=None) -> AgentResponse:
+        """Run the agent with the given input.
         
         Args:
-            input_text: Text input from the user
-            multimodal_content: Optional multimodal content dictionary
+            input_text: Text input for the agent
+            multimodal_content: Optional multimodal content
             system_message: Optional system message for this run
             message_history_obj: Optional MessageHistory instance for DB storage
             
@@ -662,12 +669,30 @@ class SimpleAgent(BaseAgent):
                 logger.info(f"Checked memory variables for user_id={user_id}")
             else:
                 logger.warning("No user_id available in dependencies for memory initialization")
-            
+        
         # Initialize agent if not done already
         await self._initialize_agent()
         
+        # Log the current system prompt for debugging
+        if hasattr(self, "system_prompt") and self.system_prompt:
+            preview = self.system_prompt[:100] + "..." if len(self.system_prompt) > 100 else self.system_prompt
+            logger.info(f"Using system prompt (preview): {preview}")
+        
         # Get or create message history from dependencies
         pydantic_message_history = self.dependencies.get_message_history()
+        
+        # If we have no message history yet, ensure we'll use the proper system prompt
+        if not pydantic_message_history:
+            logger.info("No existing message history found, will ensure system prompt is used")
+            
+            # Force rebuild the agent with current system prompt if needed
+            if self._agent_instance and not system_message:
+                logger.info("Rebuilding agent to ensure fresh system prompt application")
+                self._agent_instance = None
+                await self._initialize_agent()
+        else:
+            # If we have existing message history, ensure it includes the system prompt
+            self.dependencies_to_message_history()
         
         # Check if we need multimodal support
         agent_input = input_text
@@ -686,12 +711,13 @@ class SimpleAgent(BaseAgent):
             # Also store system prompt in database if we have MessageHistory
             if message_history_obj and system_message:
                 message_history_obj.add_system_prompt(system_message, agent_id=getattr(self, "db_id", None))
+                logger.info(f"Added custom system message to MessageHistory")
         
         # If we have a MessageHistory object but no messages in dependencies,
         # check if we should add a system prompt to the database
         if message_history_obj and not pydantic_message_history and hasattr(self, "system_prompt") and self.system_prompt:
             message_history_obj.add_system_prompt(self.system_prompt, agent_id=getattr(self, "db_id", None))
-            logger.info(f"Added system prompt from agent to MessageHistory")
+            logger.info(f"Added system prompt from agent to MessageHistory: {self.system_prompt[:50]}...")
         
         # Run the agent
         try:
@@ -1107,3 +1133,31 @@ class SimpleAgent(BaseAgent):
         except Exception as e:
             logger.error(f"Error in _get_current_system_prompt: {str(e)}")
             return self.system_prompt 
+
+    def dependencies_to_message_history(self) -> None:
+        """Ensure dependencies message history includes the system prompt.
+        
+        This method ensures that when we use existing dependencies for message history,
+        the system prompt is properly included.
+        """
+        # Check if we have dependencies with a message history manager
+        if not hasattr(self.dependencies, "message_history_manager"):
+            logger.warning("No message_history_manager in dependencies")
+            return
+            
+        # If there are no messages yet, add the system prompt
+        messages = self.dependencies.message_history_manager.messages
+        if not messages or len(messages) == 0:
+            logger.info("Adding system prompt to empty message history manager")
+            if hasattr(self, "system_prompt") and self.system_prompt:
+                try:
+                    # Add system prompt to the beginning of the messages
+                    # Implementation depends on the specific structure of message_history_manager
+                    # This is a basic approach that might need adaptation
+                    if hasattr(self.dependencies.message_history_manager, "add_system_message"):
+                        self.dependencies.message_history_manager.add_system_message(self.system_prompt)
+                        logger.info("Added system prompt to message history manager")
+                    else:
+                        logger.warning("message_history_manager lacks add_system_message method")
+                except Exception as e:
+                    logger.error(f"Failed to add system prompt to message history: {str(e)}") 
