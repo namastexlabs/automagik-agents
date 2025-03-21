@@ -26,8 +26,7 @@ try:
         logger.info("Creating SimpleAgent with PydanticAI ")
         
         default_config = {
-            "model": "openai:gpt-4o-mini",  # Default model
-            "system_prompt": SIMPLE_AGENT_PROMPT,
+            "model": "openai:gpt-4o-mini",  
             "retries": "3"
         }
         

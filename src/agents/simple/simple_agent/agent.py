@@ -16,6 +16,12 @@ from datetime import datetime
 
 from pydantic_ai import Agent
 
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import UsageLimits
+
+# Tool-related imports
+from pydantic_ai.tools import Tool as PydanticTool, RunContext
+
 # Import constants
 from src.constants import (
     DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_RETRIES
@@ -54,77 +60,6 @@ def _import_memory_tools():
         
         memory_tools_imported = True
 
-# Import PydanticAI types with correct import structure
-try:
-    # Core PydanticAI classes
-    from pydantic_ai import Agent as PydanticAgent
-    from pydantic_ai.settings import ModelSettings
-    from pydantic_ai.usage import UsageLimits
-    
-    # Tool-related imports
-    from pydantic_ai.tools import Tool as PydanticTool, RunContext
-    
-    # The missing types aren't directly available, so we'll create placeholders 
-    # that will allow the code to run but won't cause import errors
-    class ToolSet:
-        pass
-    class ResponseSchema:
-        pass
-    class ToolCallJsonSchema:
-        pass
-    class Message:
-        pass
-    class MessageRole:
-        pass
-    class State:
-        pass
-    class AgentRunResult:
-        pass
-    
-    PYDANTIC_AI_AVAILABLE = True
-except ImportError as e:
-    logger = logging.getLogger(__name__)
-    logger.error(f"PydanticAI import error: {str(e)}")
-    # Create placeholder types for better error handling
-    class PydanticAgent:
-        pass
-    class ModelMessage:
-        pass
-    class PydanticTool:
-        pass
-    class RunContext:
-        pass
-    class ModelSettings:
-        pass
-    class UsageLimits:
-        pass
-    class ImageUrl:
-        pass
-    class AudioUrl:
-        pass
-    class DocumentUrl:
-        pass
-    class BinaryContent:
-        pass
-    
-    # Add placeholders for the new imports
-    class Message:
-        pass
-    class MessageRole:
-        pass
-    class ToolSet:
-        pass
-    class ResponseSchema:
-        pass
-    class ToolCallJsonSchema:
-        pass
-    class State:
-        pass
-    class AgentRunResult:
-        pass
-        
-    PYDANTIC_AI_AVAILABLE = False
-
 # Setup logging
 logger = logging.getLogger(__name__)
 T = TypeVar('T')  # Generic type for callable return values
@@ -142,10 +77,6 @@ class SimpleAgent(BaseAgent):
         Args:
             config: Dictionary with configuration options
         """
-        if not PYDANTIC_AI_AVAILABLE:
-            logger.error("PydanticAI is required for SimpleAgent. Install with: pip install pydantic-ai")
-            raise ImportError("PydanticAI is required for SimpleAgent")
-        
         # Import prompt template from prompt.py
         from src.agents.simple.simple_agent.prompts.prompt import SIMPLE_AGENT_PROMPT
         self.prompt_template = SIMPLE_AGENT_PROMPT
@@ -180,7 +111,7 @@ class SimpleAgent(BaseAgent):
         super().__init__(config, base_system_prompt)
         
         # Initialize variables
-        self._agent_instance: Optional[PydanticAgent] = None
+        self._agent_instance: Optional[Agent] = None
         self._registered_tools: Dict[str, Callable] = {}
         
         # Create dependencies
@@ -338,8 +269,6 @@ class SimpleAgent(BaseAgent):
         Args:
             config: Configuration dictionary
         """
-        if not PYDANTIC_AI_AVAILABLE:
-            return
             
         # Parse limits from config
         response_tokens_limit = config.get("response_tokens_limit")
@@ -447,7 +376,7 @@ class SimpleAgent(BaseAgent):
             )
             
             # Log that we created the agent with the system prompt
-            logger.info(f"Created PydanticAgent with system prompt: {self.system_prompt[:50]}...")
+            logger.info(f"Created Agent with system prompt: {self.system_prompt[:50]}...")
             
             # Register dynamic system prompts
             self._register_system_prompts()
@@ -583,9 +512,7 @@ class SimpleAgent(BaseAgent):
         Returns:
             ModelSettings object with model configuration
         """
-        if not PYDANTIC_AI_AVAILABLE:
-            return None
-            
+   
         settings = self.dependencies.model_settings.copy()
         
         # Apply defaults if not specified
@@ -940,9 +867,6 @@ class SimpleAgent(BaseAgent):
         Returns:
             List containing text and multimodal content objects
         """
-        if not PYDANTIC_AI_AVAILABLE:
-            logger.warning("Multimodal content provided but PydanticAI is not available")
-            return input_text
             
         result = [input_text]
         
