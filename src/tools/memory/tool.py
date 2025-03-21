@@ -140,17 +140,35 @@ def _convert_to_memory_object(memory_dict: Dict[str, Any]) -> Memory:
     return Memory(**memory_data)
 
 # SimpleAgent compatibility functions
-async def get_memory_tool(key: str, user_id: Optional[int] = None) -> str:
+async def get_memory_tool(ctx_or_key, key_or_user_id=None, user_id=None):
     """Retrieve a memory by key.
     
+    This function can be called in two ways:
+    1. get_memory_tool(context, key) - where context contains user_id
+    2. get_memory_tool(key, user_id=user_id) - directly passing key and optional user_id
+    
     Args:
-        key: The memory key to retrieve
-        user_id: Optional user ID to filter memories
+        ctx_or_key: Either a context dictionary or the memory key to retrieve
+        key_or_user_id: Either the memory key (if ctx_or_key is context) or user_id (if ctx_or_key is key)
+        user_id: Optional user ID to filter memories (only used in the second calling pattern)
         
     Returns:
         The memory content as a string, or an error message if not found
     """
-    logger.info(f"Getting memory with key: {key} for user_id: {user_id}")
+    # Determine which calling pattern is being used
+    if isinstance(ctx_or_key, dict):
+        # First calling pattern: get_memory_tool(context, key)
+        context = ctx_or_key
+        key = key_or_user_id
+        user_id = context.get("user_id")
+        logger.info(f"Getting memory with key: {key} from context (user_id: {user_id})")
+    else:
+        # Second calling pattern: get_memory_tool(key, user_id)
+        key = ctx_or_key
+        if user_id is None:
+            user_id = key_or_user_id
+        logger.info(f"Getting memory with key: {key} for user_id: {user_id}")
+    
     try:
         # Create a proper context with required parameters
         model, usage, prompt = _create_mock_context()
@@ -179,10 +197,11 @@ async def get_memory_tool(key: str, user_id: Optional[int] = None) -> str:
         logger.error(f"Error getting memory: {str(e)}")
         return f"Error getting memory with key '{key}': {str(e)}"
 
-async def store_memory_tool(key: str, content: str) -> str:
+async def store_memory_tool(ctx: dict, key: str, content: str) -> str:
     """Store a memory with the given key.
     
     Args:
+        ctx: The context dictionary with agent and user information
         key: The key to store the memory under
         content: The memory content to store
         
@@ -193,25 +212,27 @@ async def store_memory_tool(key: str, content: str) -> str:
     try:
         # Create a proper context with required parameters
         model, usage, prompt = _create_mock_context()
-        ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
-        logger.info(f"Create memory context: {ctx}")
-        logger.info(f"Context deps: {ctx.deps}")
+        run_ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
+        logger.info(f"Create memory context: {run_ctx}")
+        logger.info(f"Context deps: {run_ctx.deps}")
         
-        # Get agent ID and user ID from thread context if possible
-        agent_id = 1  # Default agent ID
-        user_id = None  # Default to None - will look for thread context
+        # Extract agent_id and user_id from the provided context if available
+        agent_id = ctx.get("agent_id", 1)  # Default agent ID
+        user_id = ctx.get("user_id", None)  # Default to None, will look for thread context
         
-        try:
-            # Try to get thread context (if available)
-            import threading
-            from src.context import ThreadContext
-            thread_context = getattr(threading.current_thread(), "_context", None)
-            if thread_context and isinstance(thread_context, ThreadContext):
-                if hasattr(thread_context, "user_id") and thread_context.user_id:
-                    user_id = thread_context.user_id
-                    logger.info(f"Extracted user_id={user_id} from thread context")
-        except Exception as e:
-            logger.warning(f"Could not extract user/session from thread context: {str(e)}")
+        # If still no user_id, try the thread context
+        if user_id is None:
+            try:
+                # Try to get thread context (if available)
+                import threading
+                from src.context import ThreadContext
+                thread_context = getattr(threading.current_thread(), "_context", None)
+                if thread_context and isinstance(thread_context, ThreadContext):
+                    if hasattr(thread_context, "user_id") and thread_context.user_id:
+                        user_id = thread_context.user_id
+                        logger.info(f"Extracted user_id={user_id} from thread context")
+            except Exception as e:
+                logger.warning(f"Could not extract user/session from thread context: {str(e)}")
         
         # If still no user_id, try the current request context
         if user_id is None:
@@ -231,7 +252,24 @@ async def store_memory_tool(key: str, content: str) -> str:
             logger.warning(f"Using default user_id={user_id}, could not extract from context")
         
         logger.info(f"Using values: agent_id={agent_id}, user_id={user_id}, session_id=None")
-        logger.info(f"Creating memory: name={key}, read_mode=tool_calling")
+        
+        # Check if this memory already exists and get its read_mode
+        read_mode = "tool_calling"  # Default for new memories
+        try:
+            # Import the repository function
+            from src.db.repository.memory import get_memory_by_name
+            
+            # Try to find existing memory with this key
+            existing_memory = get_memory_by_name(name=key, agent_id=agent_id, user_id=user_id)
+            
+            if existing_memory:
+                # If memory exists, preserve its read_mode
+                read_mode = existing_memory.read_mode
+                logger.info(f"Found existing memory with key '{key}', preserving read_mode='{read_mode}'")
+        except Exception as e:
+            logger.warning(f"Error checking for existing memory: {str(e)}, using default read_mode='tool_calling'")
+        
+        logger.info(f"Creating/updating memory: name={key}, read_mode={read_mode}")
         
         # Create Memory object
         memory = DBMemory(
@@ -241,7 +279,7 @@ async def store_memory_tool(key: str, content: str) -> str:
             description=f"Memory created by SimpleAgent",
             agent_id=agent_id,
             user_id=user_id,
-            read_mode="tool_calling",
+            read_mode=read_mode,  # Use preserved read_mode
             metadata={"created_at": str(datetime.now())}
         )
         
