@@ -315,7 +315,29 @@ class SimpleAgent(BaseAgent):
         
         # Memory tools
         _import_memory_tools()
-        self.register_tool(store_memory_tool)
+        
+        # For store_memory_tool, we need to create a wrapped version that includes the context
+        # This ensures the LLM doesn't need to pass the context parameter 
+        if hasattr(self, 'context'):
+            context = self.context
+        else:
+            context = {"agent_id": self.db_id, "user_id": None}
+        
+        # Create and register wrapper for store_memory_tool that includes the context
+        async def store_memory_wrapper(key: str, content: str) -> str:
+            """Store a memory with the given key.
+            
+            Args:
+                key: The key to store the memory under
+                content: The memory content to store
+                
+            Returns:
+                Confirmation message
+            """
+            return await store_memory_tool(key, content, ctx=context)
+        
+        # Register the wrapper instead of the original
+        self.register_tool(store_memory_wrapper)
         self.register_tool(get_memory_tool)
         
         logger.info("Default tools registered for SimpleAgent")
@@ -1120,7 +1142,7 @@ class SimpleAgent(BaseAgent):
         prompt_template = self.prompt_template
         for var_name, value in template_values.items():
             placeholder = f"{{{{{var_name}}}}}"
-            prompt_template = prompt_template.replace(placeholder, value)
+            prompt_template = prompt_template.replace(placeholder, f"{placeholder}: {value}")
         
         logger.info(f"Filled system prompt with {len(template_values)} template variables")
         return prompt_template 
