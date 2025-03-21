@@ -11,7 +11,11 @@ from .tool import (
     list_guilds_and_channels,
     get_guild_info,
     fetch_messages,
-    send_message
+    send_message,
+    get_list_guilds_description,
+    get_guild_info_description,
+    get_fetch_messages_description,
+    get_send_message_description
 )
 
 logger = logging.getLogger(__name__)
@@ -84,4 +88,37 @@ class DiscordTools:
             self.get_guild_info,
             self.fetch_messages,
             self.send_message
-        ] 
+        ]
+
+# Create Discord tool instances
+discord_list_guilds_tool = Tool(
+    name="discord_list_guilds",
+    description=get_list_guilds_description(),
+    function=list_guilds_and_channels
+)
+
+discord_guild_info_tool = Tool(
+    name="discord_guild_info",
+    description=get_guild_info_description(),
+    function=get_guild_info
+)
+
+discord_fetch_messages_tool = Tool(
+    name="discord_fetch_messages",
+    description=get_fetch_messages_description(),
+    function=fetch_messages
+)
+
+discord_send_message_tool = Tool(
+    name="discord_send_message",
+    description=get_send_message_description(),
+    function=send_message
+)
+
+# Group all Discord tools
+discord_tools = [
+    discord_list_guilds_tool,
+    discord_guild_info_tool,
+    discord_fetch_messages_tool,
+    discord_send_message_tool
+] 

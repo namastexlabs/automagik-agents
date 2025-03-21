@@ -74,27 +74,29 @@ class MessageHistory:
     for database operations without intermediate abstractions.
     """
     
-    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: int = 1):
-        """Initialize a new message history for a session.
+    def __init__(self, session_id: str, system_prompt: Optional[str] = None, user_id: int = 1, no_auto_create: bool = False):
+        """Initialize a new message history.
         
         Args:
             session_id: The unique session identifier.
             system_prompt: Optional system prompt to set at initialization.
             user_id: The user identifier to associate with this session (defaults to 1).
+            no_auto_create: If True, don't automatically create a session in the database.
         """
-        self.session_id = self._ensure_session_id(session_id, user_id)
+        self.session_id = self._ensure_session_id(session_id, user_id, no_auto_create)
         self.user_id = user_id
         
         # Add system prompt if provided
         if system_prompt:
             self.add_system_prompt(system_prompt)
     
-    def _ensure_session_id(self, session_id: str, user_id: int) -> str:
+    def _ensure_session_id(self, session_id: str, user_id: int, no_auto_create: bool = False) -> str:
         """Ensure the session exists, creating it if necessary.
         
         Args:
             session_id: The session ID (string or UUID)
             user_id: The user ID to associate with the session
+            no_auto_create: If True, don't automatically create a session
             
         Returns:
             The validated session ID as a string
@@ -105,14 +107,17 @@ class MessageHistory:
                 new_uuid = uuid.uuid4()
                 logger.info(f"Creating new session with UUID: {new_uuid}")
                 
-                # Create a new session
-                session = Session(
-                    id=new_uuid,
-                    user_id=user_id,
-                    name=f"Session-{new_uuid}",
-                    platform="automagik"
-                )
-                create_session(session)
+                if not no_auto_create:
+                    # Create a new session
+                    session = Session(
+                        id=new_uuid,
+                        user_id=user_id,
+                        name=f"Session-{new_uuid}",
+                        platform="automagik"
+                    )
+                    create_session(session)
+                else:
+                    logger.info("Auto-creation disabled, not creating session in database")
                 
                 return str(new_uuid)
             
@@ -124,7 +129,7 @@ class MessageHistory:
                 
             # Check if session exists
             session = get_session(session_uuid)
-            if not session:
+            if not session and not no_auto_create:
                 # Create new session with this ID
                 session = Session(
                     id=session_uuid,

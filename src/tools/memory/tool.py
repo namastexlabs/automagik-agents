@@ -140,28 +140,40 @@ def _convert_to_memory_object(memory_dict: Dict[str, Any]) -> Memory:
     return Memory(**memory_data)
 
 # SimpleAgent compatibility functions
-async def get_memory_tool(key: str) -> str:
+async def get_memory_tool(key: str, user_id: Optional[int] = None) -> str:
     """Retrieve a memory by key.
     
     Args:
         key: The memory key to retrieve
+        user_id: Optional user ID to filter memories
         
     Returns:
         The memory content as a string, or an error message if not found
     """
-    logger.info(f"Getting memory with key: {key}")
+    logger.info(f"Getting memory with key: {key} for user_id: {user_id}")
     try:
         # Create a proper context with required parameters
         model, usage, prompt = _create_mock_context()
         ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
         
-        # Try to get memory by name
-        memory = db_get_memory_by_name(name=key)
+        # Try to get memory by name with user_id filter if provided
+        memory = db_get_memory_by_name(name=key, user_id=user_id)
         if memory:
             content = memory.content
             if isinstance(content, dict):
                 return str(content)
             return content
+        
+        # If not found with user_id, try without user_id filter
+        if user_id is not None:
+            memory = db_get_memory_by_name(name=key)
+            if memory:
+                logger.info(f"Found memory {key} without user_id filter")
+                content = memory.content
+                if isinstance(content, dict):
+                    return str(content)
+                return content
+                
         return f"Memory with key '{key}' not found"
     except Exception as e:
         logger.error(f"Error getting memory: {str(e)}")
@@ -185,17 +197,41 @@ async def store_memory_tool(key: str, content: str) -> str:
         logger.info(f"Create memory context: {ctx}")
         logger.info(f"Context deps: {ctx.deps}")
         
-        # Get agent ID and user ID
+        # Get agent ID and user ID from thread context if possible
         agent_id = 1  # Default agent ID
-        user_id = 1   # Default user ID
+        user_id = None  # Default to None - will look for thread context
         
-        if not ctx or not ctx.deps:
-            logger.warning("Context is None or empty, using default values")
-            logger.info(f"Using first available agent ID: {agent_id}")
+        try:
+            # Try to get thread context (if available)
+            import threading
+            from src.context import ThreadContext
+            thread_context = getattr(threading.current_thread(), "_context", None)
+            if thread_context and isinstance(thread_context, ThreadContext):
+                if hasattr(thread_context, "user_id") and thread_context.user_id:
+                    user_id = thread_context.user_id
+                    logger.info(f"Extracted user_id={user_id} from thread context")
+        except Exception as e:
+            logger.warning(f"Could not extract user/session from thread context: {str(e)}")
         
-        logger.info(f"Using default values: agent_id={agent_id}, user_id={user_id}, session_id=None")
-        logger.info(f"Creating memory: name={key}, scope=None, read_mode=tool_calling")
-        logger.info(f"Context: agent_id={agent_id}, user_id={user_id}, session_id=None")
+        # If still no user_id, try the current request context
+        if user_id is None:
+            try:
+                # Try to get from global request state if available
+                from src.context import get_current_user_id
+                current_user_id = get_current_user_id()
+                if current_user_id:
+                    user_id = current_user_id
+                    logger.info(f"Extracted user_id={user_id} from current request")
+            except Exception as e:
+                logger.warning(f"Could not extract user_id from request context: {str(e)}")
+        
+        # Fallback to default user_id if not found
+        if user_id is None:
+            user_id = 1
+            logger.warning(f"Using default user_id={user_id}, could not extract from context")
+        
+        logger.info(f"Using values: agent_id={agent_id}, user_id={user_id}, session_id=None")
+        logger.info(f"Creating memory: name={key}, read_mode=tool_calling")
         
         # Create Memory object
         memory = DBMemory(

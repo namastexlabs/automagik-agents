@@ -19,7 +19,10 @@ from src.tools.evolution.schema import (
 )
 
 # Import interface
-from src.tools.evolution.interface import EvolutionTools
+from src.tools.evolution.interface import (
+    EvolutionTools,
+    evolution_tools
+)
 
 # Export public API
 __all__ = [
@@ -37,5 +40,6 @@ __all__ = [
     'GetChatHistoryResponse',
     
     # Interface
-    'EvolutionTools'
+    'EvolutionTools',
+    'evolution_tools'
 ] 
