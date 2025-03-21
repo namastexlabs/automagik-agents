@@ -7,7 +7,7 @@ multimodal content: images, audio, and documents.
 import asyncio
 import logging
 import os
-from src.agents.simple.simple_agent import create_simple_agent
+from src.agents.simple.simple_agent import create_agent
 from src.agents.models.dependencies import SimpleAgentDependencies
 
 # Configure logging
@@ -25,7 +25,7 @@ async def test_multimodal_support():
     }
     
     # Create agent instance
-    agent = create_simple_agent(config)
+    agent = create_agent(config)
     logger.info(f"Created agent with initial model: {agent.config.model}")
     
     # Test image processing
