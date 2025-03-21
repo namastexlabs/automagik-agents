@@ -73,7 +73,8 @@ def configure_logging():
         try:
             import logfire
             os.environ["LOGFIRE_TOKEN"] = settings.LOGFIRE_TOKEN
-            logfire.configure()  # Logfire reads token from environment
+            logfire.configure(scrubbing=False)  # Logfire reads token from environment
+            logfire.instrument_pydantic_ai()
         except Exception as e:
             print(f"Warning: Failed to configure Logfire: {str(e)}")
     elif not settings.LOGFIRE_IGNORE_NO_CONFIG:
