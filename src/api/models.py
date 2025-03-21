@@ -89,6 +89,7 @@ class AgentRunRequest(BaseResponseModel):
     message_limit: Optional[int] = 10  # Default to last 10 messages
     session_origin: Optional[str] = "automagik-agent"
     agent_id: Optional[Any] = None  # Agent ID to store with messages, can be int or string
+    preserve_system_prompt: Optional[bool] = False  # Whether to preserve the existing system prompt
 
 class AgentInfo(BaseResponseModel):
     """Information about an available agent."""

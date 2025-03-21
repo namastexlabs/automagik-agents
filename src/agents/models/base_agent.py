@@ -243,7 +243,7 @@ class BaseAgent(ABC, Generic[T]):
         """
         pass
     
-    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[Union[int, str]] = None, user_id: int = 1, context: Optional[Dict] = None, message_history: Optional['MessageHistory'] = None) -> AgentBaseResponse_v2:
+    async def process_message(self, user_message: str, session_id: Optional[str] = None, agent_id: Optional[Union[int, str]] = None, user_id: int = 1, context: Optional[Dict] = None, message_history: Optional['MessageHistory'] = None, message_already_added: bool = False) -> AgentBaseResponse_v2:
         """Process a user message with this agent.
         
         Args:
@@ -253,6 +253,7 @@ class BaseAgent(ABC, Generic[T]):
             user_id: User ID (integer)
             context: Optional additional context that will be logged but not passed to the agent due to API limitations
             message_history: Optional existing MessageHistory object
+            message_already_added: Whether the message has already been added to the history
             
         Returns:
             Agent response
@@ -294,8 +295,12 @@ class BaseAgent(ABC, Generic[T]):
             logging.info("Adding system prompt to message history before user message")
             message_history.add_system_prompt(self.system_prompt, agent_id=self.db_id)
         
-        # Add the user message AFTER the system prompt
-        user_message_obj = message_history.add(user_message, agent_id=self.db_id, context=context)
+        # Add the user message AFTER the system prompt ONLY if it hasn't been added already
+        if not message_already_added:
+            logging.info(f"Adding user message to message history: {user_message[:50]}...")
+            user_message_obj = message_history.add(user_message, agent_id=self.db_id, context=context)
+        else:
+            logging.info("User message was already added to message history, skipping add operation")
         
         logging.info(f"Processing user message in session {session_id}: {user_message}")
 

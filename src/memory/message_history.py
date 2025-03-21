@@ -298,10 +298,26 @@ class MessageHistory:
                 "tool_outputs": tool_outputs,
             }
             
-            # If system_prompt not directly provided, try to get it from session metadata
+            # If system_prompt isn't directly provided or is None, try to get it from:
+            # 1. Session metadata
+            # 2. Last system prompt in the message history
+            # 3. Agent configuration (through agent_id)
             if not system_prompt:
                 try:
-                    system_prompt = get_system_prompt(uuid.UUID(self.session_id))
+                    # Try to get from session metadata first
+                    session_system_prompt = get_system_prompt(uuid.UUID(self.session_id))
+                    if session_system_prompt:
+                        system_prompt = session_system_prompt
+                        logger.debug(f"Using system prompt from session metadata")
+                    else:
+                        # If not found, try other sources
+                        if agent_id:
+                            # Try to get system prompt from agent configuration
+                            from src.db.repository.agent import get_agent
+                            agent = get_agent(agent_id)
+                            if agent and agent.system_prompt:
+                                system_prompt = agent.system_prompt
+                                logger.debug(f"Using system prompt from agent configuration")
                 except Exception as e:
                     logger.error(f"Error getting system prompt: {str(e)}")
             
@@ -312,6 +328,7 @@ class MessageHistory:
             
             # For INFO level, just log basic info
             logger.info(f"Adding assistant response to MessageHistory in the database")
+            logger.info(f"System prompt status: {'Present' if system_prompt else 'Not provided'}")
             
             # For DEBUG level (verbose logging), add more details
             logger.debug(f"Adding assistant response to history for session {self.session_id}, user {self.user_id}")
