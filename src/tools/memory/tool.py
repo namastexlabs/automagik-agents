@@ -140,39 +140,25 @@ def _convert_to_memory_object(memory_dict: Dict[str, Any]) -> Memory:
     return Memory(**memory_data)
 
 # SimpleAgent compatibility functions
-async def get_memory_tool(ctx_or_key, key_or_user_id=None, user_id=None):
+async def get_memory_tool(ctx: dict, key: str) -> str:
     """Retrieve a memory by key.
     
-    This function can be called in two ways:
-    1. get_memory_tool(context, key) - where context contains user_id
-    2. get_memory_tool(key, user_id=user_id) - directly passing key and optional user_id
-    
     Args:
-        ctx_or_key: Either a context dictionary or the memory key to retrieve
-        key_or_user_id: Either the memory key (if ctx_or_key is context) or user_id (if ctx_or_key is key)
-        user_id: Optional user ID to filter memories (only used in the second calling pattern)
+        ctx: The context dictionary with agent and user information
+        key: The memory key to retrieve
         
     Returns:
         The memory content as a string, or an error message if not found
     """
-    # Determine which calling pattern is being used
-    if isinstance(ctx_or_key, dict):
-        # First calling pattern: get_memory_tool(context, key)
-        context = ctx_or_key
-        key = key_or_user_id
-        user_id = context.get("user_id")
-        logger.info(f"Getting memory with key: {key} from context (user_id: {user_id})")
-    else:
-        # Second calling pattern: get_memory_tool(key, user_id)
-        key = ctx_or_key
-        if user_id is None:
-            user_id = key_or_user_id
-        logger.info(f"Getting memory with key: {key} for user_id: {user_id}")
-    
+    logger.info(f"Getting memory with key: {key}")
     try:
         # Create a proper context with required parameters
         model, usage, prompt = _create_mock_context()
-        ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
+        run_ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
+        
+        # Extract user_id from context
+        user_id = ctx.get("user_id") if isinstance(ctx, dict) else None
+        logger.info(f"Using user_id from context: {user_id}")
         
         # Try to get memory by name with user_id filter if provided
         memory = db_get_memory_by_name(name=key, user_id=user_id)
@@ -197,13 +183,13 @@ async def get_memory_tool(ctx_or_key, key_or_user_id=None, user_id=None):
         logger.error(f"Error getting memory: {str(e)}")
         return f"Error getting memory with key '{key}': {str(e)}"
 
-async def store_memory_tool(ctx: dict, key: str, content: str) -> str:
+async def store_memory_tool(key: str, content: str, ctx: dict = None) -> str:
     """Store a memory with the given key.
     
     Args:
-        ctx: The context dictionary with agent and user information
         key: The key to store the memory under
         content: The memory content to store
+        ctx: Optional context dictionary with agent and user information
         
     Returns:
         Confirmation message
@@ -215,6 +201,10 @@ async def store_memory_tool(ctx: dict, key: str, content: str) -> str:
         run_ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
         logger.info(f"Create memory context: {run_ctx}")
         logger.info(f"Context deps: {run_ctx.deps}")
+        
+        # Create default context if not provided
+        if ctx is None:
+            ctx = {}
         
         # Extract agent_id and user_id from the provided context if available
         agent_id = ctx.get("agent_id", 1)  # Default agent ID
