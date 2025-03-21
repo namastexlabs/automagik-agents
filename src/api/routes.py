@@ -4,6 +4,7 @@ from typing import List, Optional
 import json
 import math
 import uuid
+import inspect
 
 from fastapi import APIRouter, HTTPException, Query, Path, Depends, Response
 from starlette.responses import JSONResponse
@@ -263,7 +264,6 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                 # Update the request.session_id with the actual UUID
                 request.session_id = str(session_id)
             
-            # MessageHistory will handle session existence checks
             # Initialize message_history with the proper session_id
             message_history = MessageHistory(session_id=request.session_id, user_id=request.user_id)
         
@@ -311,8 +311,8 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
         # Update agent_id in the request
         request.agent_id = agent_id
         
-        # MessageHistory should now be initialized with the correct session_id
-        message_history = MessageHistory(request.session_id, user_id=request.user_id)
+        # Initialize message_history with the proper session_id
+        message_history = MessageHistory(session_id=request.session_id, user_id=request.user_id)
         
         # Link the agent to the session in the database
         AgentFactory.link_agent_to_session(agent_name, request.session_id)
@@ -385,43 +385,94 @@ async def run_agent(agent_name: str, request: AgentRunRequest):
                     multimodal_content["document_data"] = item.data
                     logger.info(f"Added binary document data (length: {len(item.data) if item.data else 0})")
 
-        # Process the rest of the request
-        try:
-            # Add the user context to the agent before processing
-            if hasattr(agent, 'process_message'):
-                message_context = {}
-                
-                # Include request context if available
-                if request.context:
-                    message_context.update(request.context)
-                
-                # Include multimodal content in context
-                if multimodal_content:
-                    message_context["multimodal_content"] = multimodal_content
-                
-                # Process message with user ID, session ID, and context
-                response = await agent.process_message(
+        # If preserve_system_prompt flag is set, check for existing system_prompt in session
+        if request.preserve_system_prompt:
+            try:
+                # Look up existing system_prompt in session metadata
+                from src.db import get_session
+                existing_session = get_session(uuid.UUID(request.session_id))
+                if existing_session and existing_session.metadata:
+                    try:
+                        metadata = existing_session.metadata
+                        if isinstance(metadata, str):
+                            metadata = json.loads(metadata)
+                            
+                        if metadata and "system_prompt" in metadata:
+                            # Use the existing system_prompt
+                            if hasattr(agent, "system_prompt"):
+                                agent.system_prompt = metadata["system_prompt"]
+                                logger.info("Using existing system_prompt from session metadata")
+                    except Exception as e:
+                        logger.error(f"Error retrieving system_prompt from metadata: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error handling preserve_system_prompt flag: {str(e)}")
+        
+        try:        
+            # Check if the agent's process_message accepts message_already_added parameter
+            agent_process_signature = inspect.signature(agent.process_message)
+            supports_message_already_added = 'message_already_added' in agent_process_signature.parameters
+            
+            # Prepare base arguments for all agents
+            process_args = {
+                "session_id": request.session_id,
+                "user_id": request.user_id,
+                "context": combined_context,
+                "message_history": message_history,  # Pass the existing MessageHistory object
+            }
+            
+            # Only add the message ourselves if the agent supports message_already_added
+            if supports_message_already_added:
+                # Store the message in the message history
+                message_history.add(
                     request.message_content,
-                    session_id=request.session_id,
-                    user_id=request.user_id,
-                    context=message_context,
-                    message_history=message_history  # Pass the existing MessageHistory object
+                    agent_id=agent_id,
+                    context=combined_context
                 )
-                
-                # Return the parsed response
-                return {
-                    "message": response.text,
-                    "session_id": request.session_id,
-                    "success": response.success,
-                    "tool_calls": response.tool_calls,
-                    "tool_outputs": response.tool_outputs,
-                }
-            else:
-                # If agent does not implement process_message, return error
-                return JSONResponse(
-                    status_code=500,
-                    content={"error": "Agent does not support message processing"}
-                )
+                # Indicate that we've already added the message
+                process_args["message_already_added"] = True
+            
+            # Ensure system_prompt is stored for this session
+            if hasattr(agent, "system_prompt") and agent.system_prompt:
+                # Store in session metadata if not already present
+                try:
+                    from src.db import get_session, update_session
+                    session = get_session(uuid.UUID(request.session_id))
+                    if session:
+                        # Get existing metadata or create new dictionary
+                        metadata = session.metadata or {}
+                        if isinstance(metadata, str):
+                            try:
+                                import json
+                                metadata = json.loads(metadata)
+                            except json.JSONDecodeError:
+                                metadata = {}
+                        
+                        # Update system_prompt in metadata if not already set
+                        if "system_prompt" not in metadata:
+                            metadata["system_prompt"] = agent.system_prompt
+                            session.metadata = metadata
+                            
+                            # Update session
+                            update_session(session)
+                            logger.info(f"Stored system prompt in session metadata")
+                except Exception as e:
+                    logger.error(f"Error updating session metadata with system prompt: {str(e)}")
+            
+            # Process the message with agent
+            # Call process_message with appropriate arguments
+            response = await agent.process_message(
+                request.message_content,
+                **process_args
+            )
+            
+            # Return the parsed response
+            return {
+                "message": response.text,
+                "session_id": request.session_id,
+                "success": response.success,
+                "tool_calls": response.tool_calls,
+                "tool_outputs": response.tool_outputs,
+            }
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             return JSONResponse(

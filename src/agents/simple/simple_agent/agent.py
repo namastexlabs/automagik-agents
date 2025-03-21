@@ -893,7 +893,7 @@ class SimpleAgent(BaseAgent):
                     tool_calls=formatted_tool_calls if formatted_tool_calls else None,
                     tool_outputs=formatted_tool_outputs if formatted_tool_outputs else None,
                     agent_id=getattr(self, "db_id", None),
-                    system_prompt=self.system_prompt if hasattr(self, "system_prompt") else None
+                    system_prompt=self._get_current_system_prompt()
                 )
             
             # Create response with the tool calls and outputs
@@ -1086,3 +1086,24 @@ class SimpleAgent(BaseAgent):
             result = result.replace(f"$memory.{var_name}", value)
             
         return result 
+
+    def _get_current_system_prompt(self) -> str:
+        """Retrieve the current system prompt with template variables replaced.
+        
+        Returns:
+            The current system prompt with all template variables filled
+        """
+        try:
+            # If we've initialized the agent, get the most up-to-date system prompt with all replacements
+            if self._agent_instance and hasattr(self._agent_instance, 'get_full_system_prompt'):
+                try:
+                    # Get the system prompt with all template variables replaced
+                    return self._agent_instance.get_full_system_prompt()
+                except Exception as e:
+                    logger.error(f"Error getting full system prompt: {str(e)}")
+            
+            # Fallback to the original system prompt if we can't get the filled version
+            return self.system_prompt
+        except Exception as e:
+            logger.error(f"Error in _get_current_system_prompt: {str(e)}")
+            return self.system_prompt 

@@ -233,6 +233,26 @@ async def run_agent(
         # Add session_name if provided
         if session_name:
             payload["session_name"] = session_name
+            
+            # Check if this is an existing session, so we can preserve its system_prompt
+            try:
+                # Make a call to get the session info first if it's an existing session
+                session_endpoint = get_api_endpoint(f"sessions/{session_name}")
+                session_response = requests.get(
+                    session_endpoint, 
+                    headers={"x-api-key": settings.AM_API_KEY} if settings.AM_API_KEY else {},
+                    timeout=10
+                )
+                if session_response.status_code == 200:
+                    session_data = session_response.json()
+                    if session_data.get("exists", False):
+                        # It's an existing session, add preserve_system_prompt flag
+                        payload["preserve_system_prompt"] = True
+                        if debug_mode:
+                            typer.echo("Adding preserve_system_prompt flag for existing session")
+            except Exception as e:
+                if debug_mode:
+                    typer.echo(f"Error checking session: {str(e)}")
 
         if debug_mode:
             typer.echo(f"Request payload: {json.dumps(payload, indent=2)}")
