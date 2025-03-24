@@ -61,6 +61,12 @@ Rewrite `simple_agent/agent.py` to:
 1. Update docstrings and comments
 2. Add usage examples for new utility files
 
+### Step 7: Enhance Base Agent Class
+1. Rename BaseAgent to AutomagikAgent
+2. Move common functionality from SimpleAgent to AutomagikAgent
+3. Make SimpleAgent inherit from AutomagikAgent
+4. Ensure backward compatibility
+
 ## Execution
 
 ### Step 1: Set Up Directory Structure ✅
@@ -105,6 +111,16 @@ Rewrite `simple_agent/agent.py` to:
 - The tests verify the functionality of each utility module
 - Future work could include expanding integration tests
 
+### Step 9: Create Enhanced Base Agent ✅
+- Created new `AutomagikAgent` base class with improved functionality
+- Moved common functionality from SimpleAgent to AutomagikAgent:
+  - Context management
+  - Memory variable initialization and fetching
+  - Tool registration
+  - System prompt filling
+- Updated SimpleAgent to inherit from AutomagikAgent
+- Added backward compatibility by re-exporting AutomagikAgent as BaseAgent
+
 ## Testing
 1. Unit tests for new utility modules ✅
    - Created comprehensive tests for message parsing, session management, dependencies helpers, etc.
@@ -112,10 +128,6 @@ Rewrite `simple_agent/agent.py` to:
 
 2. Integration tests (Future work)
    - Future iterations should include more comprehensive integration tests
-   - Current implementation maintains backward compatibility
-
-3. Regression testing (Future work)
-   - Additional testing should be performed to ensure no regressions in existing functionality
 
 ## Summary
 We have successfully refactored the agent architecture by:
@@ -135,6 +147,11 @@ We have successfully refactored the agent architecture by:
    - Enhanced readability by clearly separating concerns
    - Reduced complexity through consistent patterns
 
+4. Created enhanced AutomagikAgent base class:
+   - Moved common functionality from SimpleAgent to AutomagikAgent
+   - Made SimpleAgent implementation much cleaner
+   - Ensured backward compatibility with BaseAgent
+
 These changes promote code reuse and ensure consistent behavior across different agent implementations. The architecture is now more modular, making it easier to:
 
 1. Create new agent implementations that leverage the same utilities
@@ -143,7 +160,7 @@ These changes promote code reuse and ensure consistent behavior across different
 4. Test components in isolation
 
 Future improvements could include:
-1. Further refactoring of the BaseAgent class to use these common utilities
+1. Further refactoring of agent implementations to better utilize AutomagikAgent
 2. More comprehensive integration testing
 3. Adding documentation for how to create new agents with these utilities
 
@@ -153,8 +170,10 @@ Key files modified:
 - Created: `src/agents/common/dependencies_helper.py`
 - Created: `src/agents/common/__init__.py`
 - Created: `tests/test_agent_common_utils.py`
+- Created: `src/agents/models/automagik_agent.py`
 - Moved: `src/agents/common/prompt_builder.py`
 - Moved: `src/agents/common/memory_handler.py`
 - Moved: `src/agents/common/tool_registry.py`
 - Simplified: `src/agents/simple/simple_agent/agent.py`
-- Updated: `src/agents/simple/simple_agent/__init__.py` 
+- Updated: `src/agents/simple/simple_agent/__init__.py`
+- Updated: `src/agents/models/base_agent.py` (for backward compatibility) 
