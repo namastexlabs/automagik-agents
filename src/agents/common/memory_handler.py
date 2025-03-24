@@ -1,4 +1,4 @@
-"""Memory handler for SimpleAgent.
+"""Memory handler for agents.
 
 This module handles memory operations, variable initialization, and substitution.
 """
@@ -221,4 +221,4 @@ class MemoryHandler:
         except Exception as e:
             logger.error(f"Error fetching memory variables: {str(e)}")
             # Return empty values for all variables
-            return {var: "No data available" for var in template_vars if var != "run_id"}
+            return {var: "No data available" for var in template_vars if var != "run_id"} 
