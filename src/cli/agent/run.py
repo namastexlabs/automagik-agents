@@ -14,19 +14,9 @@ import requests
 from pathlib import Path
 import os
 import logging
-import re
-import argparse
-import cmd
-import tempfile
-import httpx
 
+# Import settings right at the beginning to ensure it's defined before use
 from src.config import settings
-from src.agents.models.agent_factory import AgentFactory
-from src.agents.models.dependencies import SimpleAgentDependencies
-from src.agents.simple.simple_agent.agent import SimpleAgent
-from src.constants import (
-    DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS
-)
 
 # Create app for the run command
 run_app = typer.Typer(no_args_is_help=True)
