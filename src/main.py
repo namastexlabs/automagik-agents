@@ -2,9 +2,11 @@ import logging
 from datetime import datetime
 import json
 import uuid
+import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
 from src.config import settings
 from src.utils.logging import configure_logging
@@ -13,9 +15,9 @@ from src.auth import APIKeyMiddleware
 from src.api.models import HealthResponse
 from src.api.routes import main_router as api_router
 from src.agents.models.agent_factory import AgentFactory
-from src.db import  ensure_default_user_exists
+from src.db import ensure_default_user_exists
 
-# Configure loggingg
+# Configure logging
 configure_logging()
 
 # Get our module's logger
@@ -56,11 +58,29 @@ def initialize_all_agents():
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Create FastAPI application
+    
+    # Get our module's logger
+    logger = logging.getLogger(__name__)
+    
+    # Configure API documentation
+    title = SERVICE_INFO["name"]
+    description = SERVICE_INFO["description"]
+    version = SERVICE_INFO["version"]
+    
+    # Set up lifespan context manager
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Initialize all agents at startup
+        initialize_all_agents()
+        yield
+        # Cleanup can be done here if needed
+    
+    # Create the FastAPI app
     app = FastAPI(
-        title=SERVICE_INFO["name"],
-        description=SERVICE_INFO["description"],
-        version=SERVICE_INFO["version"],
+        title=title,
+        description=description,
+        version=version,
+        lifespan=lifespan,
         docs_url=None,  # Disable default docs url
         redoc_url=None,  # Disable default redoc url
         openapi_url=None,  # Disable default openapi url
@@ -82,8 +102,11 @@ def create_app() -> FastAPI:
             },
         ]
     )
-
-    # Add CORS middleware
+    
+    # Setup API routes
+    setup_routes(app)
+    
+    # Configure CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # Allows all origins
@@ -94,12 +117,6 @@ def create_app() -> FastAPI:
 
     # Add authentication middleware
     app.add_middleware(APIKeyMiddleware)
-    
-    # Register startup event to initialize agents
-    @app.on_event("startup")
-    async def startup_event():
-        # Initialize all agents at startup
-        initialize_all_agents()
     
     # Set up database message store regardless of environment
     try:
@@ -257,6 +274,10 @@ def create_app() -> FastAPI:
     # Remove direct call since we're using the startup event
     # initialize_all_agents()
 
+    return app
+
+def setup_routes(app: FastAPI):
+    """Set up API routes for the application."""
     # Root and health endpoints (no auth required)
     @app.get("/", tags=["System"], summary="Root Endpoint", description="Returns service information and status")
     async def root():
@@ -276,8 +297,6 @@ def create_app() -> FastAPI:
 
     # Include API router (with versioned prefix)
     app.include_router(api_router, prefix="/api/v1")
-
-    return app
 
 # Create the app instance
 app = create_app()

@@ -2,7 +2,7 @@
 
 This module defines the Pydantic models for Evolution tool input and output.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Any, Dict, List
 
 class Message(BaseModel):
@@ -13,8 +13,9 @@ class Message(BaseModel):
     timestamp: str = Field(..., description="Timestamp of the message")
     type: str = Field(..., description="Type of message (incoming/outgoing)")
     
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(
+        populate_by_name=True
+    )
 
 class SendMessageResponse(BaseModel):
     """Response model for send_message."""
