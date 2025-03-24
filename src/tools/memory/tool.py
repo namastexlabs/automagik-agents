@@ -200,7 +200,6 @@ async def store_memory_tool(key: str, content: str, ctx: dict = None) -> str:
         model, usage, prompt = _create_mock_context()
         run_ctx = RunContext({}, model=model, usage=usage, prompt=prompt)
         logger.info(f"Create memory context: {run_ctx}")
-        logger.info(f"Context deps: {run_ctx.deps}")
         
         # Create default context if not provided
         if ctx is None:
@@ -266,7 +265,7 @@ async def store_memory_tool(key: str, content: str, ctx: dict = None) -> str:
             id=uuid.uuid4(),
             name=key,
             content=content,
-            description=f"Memory created by SimpleAgent",
+            description=f"Memory created by Agent {agent_id}",
             agent_id=agent_id,
             user_id=user_id,
             read_mode=read_mode,  # Use preserved read_mode
@@ -276,13 +275,19 @@ async def store_memory_tool(key: str, content: str, ctx: dict = None) -> str:
         # Store the memory
         memory_id = db_create_memory(memory)
         
+        # Format response in a standard way to avoid OpenAI pydantic-ai issues
         if memory_id:
-            return f"Memory stored with key '{key}'"
+            result = f"Memory stored with key '{key}'"
+            logger.info(result)
+            return result
         else:
-            return f"Failed to store memory with key '{key}'"
+            result = f"Failed to store memory with key '{key}'"
+            logger.error(result)
+            return result
     except Exception as e:
-        logger.error(f"Error storing memory: {str(e)}")
-        return f"Error storing memory with key '{key}': {str(e)}"
+        error_msg = f"Error storing memory with key '{key}': {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 async def list_memories_tool(prefix: Optional[str] = None) -> str:
     """List available memories, optionally filtered by prefix.
@@ -294,6 +299,8 @@ async def list_memories_tool(prefix: Optional[str] = None) -> str:
         List of memory keys as a string
     """
     try:
+        logger.info(f"Listing memories with prefix: {prefix if prefix else 'all'}")
+        
         # Get all memories
         memories = list_memories_in_db()
         
@@ -304,12 +311,17 @@ async def list_memories_tool(prefix: Optional[str] = None) -> str:
                 memory_names.append(memory.name)
         
         if not memory_names:
-            return "No memories found"
+            result = "No memories found"
+            logger.info(result)
+            return result
         
-        return "\n".join(memory_names)
+        result = "\n".join(memory_names)
+        logger.info(f"Found {len(memory_names)} memories")
+        return result
     except Exception as e:
-        logger.error(f"Error listing memories: {str(e)}")
-        return f"Error listing memories: {str(e)}"
+        error_msg = f"Error listing memories: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 @invalidate_memory_cache
 async def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None, 
@@ -337,10 +349,12 @@ async def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None,
         elif list_all:
             logger.info(f"Listing all memories for agent {agent_id}")
         else:
-            return MemoryReadResult(
+            result = MemoryReadResult(
                 success=False,
                 message="Either memory_id, name, or list_all must be provided"
             ).dict()
+            logger.info(f"Read memory result: {result}")
+            return result
         
         # Log context
         logger.info(f"Context: agent_id={agent_id}, user_id={user_id}, session_id={session_id}")
@@ -348,7 +362,7 @@ async def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None,
         # If list_all is True, return all memories
         if list_all:
             try:
-                # Use direct database call
+                # Use direct database call with proper parameter
                 memories = list_memories_in_db(agent_id=agent_id)
                 
                 # Convert to Memory objects
@@ -359,17 +373,21 @@ async def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None,
                         memory_objects.append(_convert_to_memory_object(memory_dict))
                 
                 # Return response
-                return MemoryReadResult(
+                result = MemoryReadResult(
                     success=True,
                     message=f"Found {len(memory_objects)} memories",
                     memories=memory_objects
                 ).dict()
+                logger.info(f"Read memory result: {result}")
+                return result
             except Exception as e:
                 logger.error(f"Error listing memories: {str(e)}")
-                return MemoryReadResult(
+                result = MemoryReadResult(
                     success=False,
                     message=f"Error listing memories: {str(e)}"
                 ).dict()
+                logger.info(f"Read memory result: {result}")
+                return result
         
         # Try to read specific memory
         try:
@@ -378,41 +396,49 @@ async def read_memory(ctx: RunContext[Dict], memory_id: Optional[str] = None,
                 # Get memory by ID
                 memory = get_memory_in_db(memory_id=memory_id)
             elif name:
-                # Get memory by name
-                memories = list_memories_in_db(agent_id=agent_id, name=name)
+                # Get memory by name - ensure we use name_pattern parameter
+                memories = list_memories_in_db(agent_id=agent_id, name_pattern=name)
                 memory = memories[0] if memories else None
             else:
                 memory = None
             
             # Check if memory was found
             if not memory:
-                return MemoryReadResult(
+                result = MemoryReadResult(
                     success=False,
                     message=f"Memory not found"
                 ).dict()
+                logger.info(f"Read memory result: {result}")
+                return result
             
             # Convert to Memory object
             memory_obj = _convert_to_memory_object(memory.__dict__)
             
             # Return response
-            return MemoryReadResult(
+            result = MemoryReadResult(
                 success=True,
                 message="Memory found",
                 content=memory_obj.content,
                 memory=memory_obj
             ).dict()
+            logger.info(f"Read memory result: {result}")
+            return result
         except Exception as e:
             logger.error(f"Error reading memory: {str(e)}")
-            return MemoryReadResult(
+            result = MemoryReadResult(
                 success=False,
                 message=f"Error reading memory: {str(e)}"
             ).dict()
+            logger.info(f"Read memory result: {result}")
+            return result
     except Exception as e:
         logger.error(f"Error in read_memory: {str(e)}")
-        return MemoryReadResult(
+        result = MemoryReadResult(
             success=False,
             message=f"Error in read_memory: {str(e)}"
         ).dict()
+        logger.info(f"Read memory result: {result}")
+        return result
 
 @invalidate_memory_cache
 async def create_memory(ctx: RunContext[Dict], name: str, content: Union[str, Dict[str, Any]], 
@@ -585,7 +611,7 @@ async def update_memory(ctx: RunContext[Dict], content: Union[str, Dict[str, Any
                 ).dict()
             elif name:
                 # Find memory by name
-                memories = list_memories_in_db(agent_id=agent_id, name=name)
+                memories = list_memories_in_db(agent_id=agent_id, name_pattern=name)
                 if not memories:
                     return MemoryUpdateResponse(
                         success=False,
