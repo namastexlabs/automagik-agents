@@ -10,10 +10,10 @@ from src.agents.models.agent_factory import AgentFactory
 from src.config import settings
 from src.memory.message_history import MessageHistory
 from src.api.models import AgentInfo, AgentRunRequest, MessageModel
-from src.db import execute_query, get_db_connection, get_agent_by_name
+from src.db import get_agent_by_name
 from src.db.models import Session
 from src.db.connection import generate_uuid, safe_uuid
-from src.db.repository.session import get_session_by_name
+from src.db.repository.session import get_session_by_name, create_session
 
 # Get our module's logger
 logger = logging.getLogger(__name__)
@@ -105,15 +105,13 @@ async def handle_agent_run(agent_name: str, request: AgentRunRequest) -> Dict[st
                     agent_id=agent_id
                 )
                 
-                # Insert directly into the database
-                with get_db_connection() as conn:
-                    execute_query(
-                        """
-                        INSERT INTO sessions (id, name, agent_id, created_at, updated_at) 
-                        VALUES (%s, %s, %s, NOW(), NOW())
-                        """,
-                        (str(session_id), request.session_name, agent_id)
-                    )
+                # Use repository function to create the session
+                created_id = create_session(session)
+                
+                # If session creation fails, log error and return 500
+                if not created_id:
+                    logger.error(f"Failed to create session with name {request.session_name}")
+                    raise HTTPException(status_code=500, detail="Failed to create session")
                 
                 message_history = MessageHistory(session_id=str(session_id))
         else:

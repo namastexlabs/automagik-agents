@@ -1,8 +1,7 @@
 import logging
 import json
 from fastapi import HTTPException
-from src.db import execute_query, get_db_connection, get_user_by_identifier, list_users, update_user
-from src.db.connection import generate_uuid, safe_uuid
+from src.db import get_user_by_identifier, list_users, update_user, create_user as db_create_user, delete_user as db_delete_user
 from src.api.models import UserCreate, UserUpdate, UserInfo, UserListResponse
 from src.db.models import User
 from typing import Optional, List
@@ -64,34 +63,29 @@ async def create_user(user_create: UserCreate) -> UserInfo:
             if existing_user:
                 raise HTTPException(status_code=400, detail=f"User with phone number {user_create.phone_number} already exists")
         
-        # Convert user_data dict to JSON string if it's not None
-        user_data_json = json.dumps(user_create.user_data) if user_create.user_data else None
-        
-        with get_db_connection() as conn:
-            # Note: We're not providing an ID here - let the database auto-increment it
-            result = execute_query(
-                """
-                INSERT INTO users (email, phone_number, user_data, created_at, updated_at) 
-                VALUES (%s, %s, %s, NOW(), NOW())
-                RETURNING id, created_at, updated_at
-                """,
-                (user_create.email, user_create.phone_number, user_data_json)
-            )
-            
-            if not result or len(result) == 0:
-                raise Exception("Failed to create user - no result returned")
-                
-            user_id = result[0]["id"]
-            created_at = result[0]["created_at"]
-            updated_at = result[0]["updated_at"]
-        
-        return UserInfo(
-            id=user_id,
+        # Create a User object
+        user = User(
             email=user_create.email,
             phone_number=user_create.phone_number,
-            user_data=user_create.user_data,
-            created_at=created_at,
-            updated_at=updated_at
+            user_data=user_create.user_data
+        )
+        
+        # Use repository function to create the user
+        user_id = db_create_user(user)
+        
+        if not user_id:
+            raise Exception("Failed to create user - no ID returned")
+        
+        # Get the newly created user
+        created_user = get_user_by_identifier(str(user_id))
+        
+        return UserInfo(
+            id=created_user.id,
+            email=created_user.email,
+            phone_number=created_user.phone_number,
+            user_data=created_user.user_data,
+            created_at=created_user.created_at,
+            updated_at=created_user.updated_at
         )
         
     except HTTPException:
@@ -180,12 +174,11 @@ async def delete_user(user_identifier: str) -> bool:
         if not existing_user:
             raise HTTPException(status_code=404, detail=f"User not found with identifier: {user_identifier}")
         
-        # Delete the user
-        with get_db_connection() as conn:
-            execute_query(
-                "DELETE FROM users WHERE id = %s",
-                (existing_user.id,)
-            )
+        # Delete the user using repository function
+        success = db_delete_user(existing_user.id)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to delete user: {user_identifier}")
         
         return True
         
