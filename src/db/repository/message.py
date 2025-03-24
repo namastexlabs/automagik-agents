@@ -5,9 +5,11 @@ import json
 import logging
 from typing import List, Optional, Dict, Any, Tuple, Union
 from datetime import datetime
+from pydantic import BaseModel
 
 from src.db.connection import execute_query
 from src.db.models import Message
+from src.db.repository.session import get_session
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -144,8 +146,8 @@ def create_message(message: Message) -> Optional[uuid.UUID]:
         system_prompt = message.system_prompt
         
         # Use current time if not provided
-        created_at = message.created_at or datetime.utcnow()
-        updated_at = message.updated_at or datetime.utcnow()
+        created_at = message.created_at or datetime.now()
+        updated_at = message.updated_at or datetime.now()
         
         query = """
             INSERT INTO messages (
@@ -225,7 +227,7 @@ def update_message(message: Message) -> Optional[uuid.UUID]:
         system_prompt = message.system_prompt
         
         # Use current time for updated_at
-        updated_at = datetime.utcnow()
+        updated_at = datetime.now()
         
         query = """
             UPDATE messages
@@ -369,3 +371,60 @@ def get_system_prompt(session_id: Union[uuid.UUID, str]) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error retrieving system prompt for session {session_id}: {str(e)}")
         return None
+
+
+def list_session_messages(session_id: uuid.UUID, page: int = 1, page_size: int = 100, sort_desc: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+    """List messages for a specific session with pagination.
+    
+    Args:
+        session_id: The session ID
+        page: Page number (1-indexed)
+        page_size: Number of messages per page
+        sort_desc: Sort by most recent first if True
+        
+    Returns:
+        Tuple of (list of messages, total count)
+    """
+    try:
+        # Calculate offset
+        offset = (page - 1) * page_size
+        
+        # Get total count
+        count_query = "SELECT COUNT(*) as count FROM messages WHERE session_id = %s"
+        count_result = execute_query(count_query, (str(session_id),))
+        total_count = count_result[0]["count"] if count_result else 0
+        
+        # Set up sort order
+        sort_direction = "DESC" if sort_desc else "ASC"
+        
+        # Get paginated results
+        query = f"""
+            SELECT * FROM messages 
+            WHERE session_id = %s 
+            ORDER BY created_at {sort_direction}
+            LIMIT %s OFFSET %s
+        """
+        
+        result = execute_query(query, (str(session_id), page_size, offset))
+        
+        # Convert rows to dictionaries
+        messages = []
+        for row in result:
+            message_dict = dict(row)
+            
+            # Parse JSON fields if present
+            for json_field in ["content", "metadata", "tool_calls", "tool_outputs"]:
+                if json_field in message_dict and message_dict[json_field]:
+                    try:
+                        if isinstance(message_dict[json_field], str):
+                            message_dict[json_field] = json.loads(message_dict[json_field])
+                    except json.JSONDecodeError:
+                        # Keep as string if not valid JSON
+                        pass
+            
+            messages.append(message_dict)
+        
+        return messages, total_count
+    except Exception as e:
+        logger.error(f"Error listing session messages: {str(e)}")
+        return [], 0

@@ -90,12 +90,13 @@ class AgentRunRequest(BaseResponseModel):
     session_origin: Optional[str] = "automagik-agent"
     agent_id: Optional[Any] = None  # Agent ID to store with messages, can be int or string
     preserve_system_prompt: Optional[bool] = False  # Whether to preserve the existing system prompt
+    parameters: Optional[Dict[str, Any]] = None  # Agent parameters
+    messages: Optional[List[Any]] = None  # Optional message history
+    no_history: Optional[bool] = False  # Whether to ignore message history
 
 class AgentInfo(BaseResponseModel):
     """Information about an available agent."""
     name: str
-    type: str
-    model: Optional[str] = None
     description: Optional[str] = None
 
 class HealthResponse(BaseResponseModel):
@@ -175,10 +176,18 @@ class SessionInfo(BaseResponseModel):
 class SessionListResponse(BaseResponseModel):
     """Response model for listing all sessions."""
     sessions: List[SessionInfo]
-    total_count: int
+    total: int
+    total_count: int = None  # Added for backward compatibility
     page: int = 1
     page_size: int = 50
     total_pages: int = 1
+    
+    # Make sure both total and total_count have the same value for backward compatibility
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Set total_count to total if only total is provided
+        if self.total_count is None and hasattr(self, 'total'):
+            self.total_count = self.total
 
 class UserCreate(BaseResponseModel):
     """Request model for creating a new user."""
@@ -204,7 +213,9 @@ class UserInfo(BaseResponseModel):
 class UserListResponse(BaseResponseModel):
     """Response model for listing users."""
     users: List[UserInfo]
-    total_count: int
+    total: int
     page: int = 1
     page_size: int = 50
-    total_pages: int = 1 
+    total_pages: int = 1
+    has_next: Optional[bool] = None
+    has_prev: Optional[bool] = None 

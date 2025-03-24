@@ -17,6 +17,7 @@ class AgentFactory:
     _agent_classes = {}
     _agent_creators = {
         "simple": create_simple_agent,
+        "simple_agent": create_simple_agent,  # Add this for backward compatibility
     }
     _initialized_agents = {}  # Store initialized agents for re-use
     
@@ -257,3 +258,28 @@ class AgentFactory:
             logger.error(f"Error linking agent {agent_name} to session {session_id_or_name}: {str(e)}")
             logger.error(traceback.format_exc())
             return False
+
+    @classmethod
+    def get_agent_class(cls, agent_type: str) -> Optional[Type[AutomagikAgent]]:
+        """Get the agent class for a given agent type.
+        
+        Args:
+            agent_type: The type of agent to get the class for
+            
+        Returns:
+            The agent class, or None if not found
+        """
+        # Check if we have a registered class
+        if agent_type in cls._agent_classes:
+            return cls._agent_classes[agent_type]
+            
+        # For creator functions, we need to instantiate one to get its class
+        if agent_type in cls._agent_creators:
+            try:
+                agent = cls._agent_creators[agent_type]({})
+                return agent.__class__
+            except Exception as e:
+                logger.error(f"Error creating agent to get class: {str(e)}")
+                return None
+                
+        return None
