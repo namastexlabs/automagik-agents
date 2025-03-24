@@ -1,6 +1,7 @@
-"""Prompt builder for SimpleAgent.
+"""Prompt builder for agent implementations.
 
-This module handles system prompt building and template variable substitution.
+This module handles system prompt building and template variable substitution
+for all agent implementations.
 """
 import logging
 import re
@@ -93,4 +94,4 @@ class PromptBuilder:
                 placeholder = f"{{{{{var}}}}}"
                 filled_prompt = filled_prompt.replace(placeholder, f"[No data for {var}]")
         
-        return filled_prompt
+        return filled_prompt 

@@ -1,3 +1,9 @@
+"""SimpleAgent implementation.
+
+This module provides the SimpleAgent implementation that uses the common utilities
+for message parsing, session management, and tool handling.
+"""
+
 from typing import Dict, Optional, Any
 import os
 import logging
@@ -15,39 +21,18 @@ try:
     
     # Standardized create_agent function
     def create_agent(config: Optional[Dict[str, str]] = None) -> Any:
-        """Create and initialize a SimpleAgent instance.
+        """Create a SimpleAgent instance.
         
         Args:
-            config: Optional configuration override
+            config: Optional configuration dictionary
             
         Returns:
-            Initialized SimpleAgent instance
+            SimpleAgent instance
         """
-        logger.info("Creating SimpleAgent with PydanticAI ")
+        if config is None:
+            config = {}
         
-        default_config = {
-            "model": "openai:gpt-4o-mini",  
-            "retries": "3"
-        }
-        
-        # Check for environment variables
-        if os.environ.get("OPENAI_API_KEY"):
-            default_config["openai_api_key"] = os.environ.get("OPENAI_API_KEY")
-         
-        # Apply user config overrides
-        if config:
-            default_config.update(config)
-        
-        # Initialize the agent
-        try:
-            logger.info(f"Initializing SimpleAgent with config: {default_config}")
-            agent = SimpleAgent(default_config)
-            logger.info(f"SimpleAgent initialized successfully: {agent}")
-            return agent
-        except Exception as e:
-            logger.error(f"Failed to initialize SimpleAgent: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return PlaceholderAgent({"name": "simple_agent_error", "error": str(e)})
+        return SimpleAgent(config)
     
 except Exception as e:
     logger.error(f"Failed to initialize SimpleAgent module: {str(e)}")

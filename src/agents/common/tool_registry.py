@@ -1,6 +1,6 @@
-"""Tool registry for SimpleAgent.
+"""Tool registry for agent implementations.
 
-This module handles tool registration and management for the SimpleAgent.
+This module handles tool registration and management for all agent implementations.
 """
 import logging
 from typing import Dict, Any, Optional, Callable, List
@@ -40,7 +40,7 @@ def _import_memory_tools():
         memory_tools_imported = True
 
 class ToolRegistry:
-    """Class for registering and managing tools for SimpleAgent."""
+    """Class for registering and managing tools for agent implementations."""
     
     def __init__(self):
         """Initialize the tool registry."""
@@ -258,4 +258,4 @@ class ToolRegistry:
         else:
             logger.warning("Could not update memory tools: not imported")
         
-        logger.info("Tool context updated")
+        logger.info("Tool context updated") 
