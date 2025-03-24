@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic_settings import BaseSettings
 import urllib.parse
 from pathlib import Path
@@ -69,10 +69,14 @@ class Settings(BaseSettings):
     LOGFIRE_TOKEN: Optional[str] = Field(None, description="Logfire token for logging service")
     LOGFIRE_IGNORE_NO_CONFIG: bool = Field(True, description="Suppress Logfire warning if no token")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"  # Allow extra fields in environment variables
+    # Suppress warnings from dependency conflict resolution (Poetry related)
+    PYTHONWARNINGS: Optional[str] = Field(None, description="Python warnings configuration")
+
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"  # Allow extra fields in environment variables
+    )
 
 def load_settings() -> Settings:
     """Load and validate settings from environment variables and .env file."""
