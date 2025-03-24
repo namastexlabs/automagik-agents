@@ -33,6 +33,7 @@ from src.db.repository import (
     delete_agent,
     increment_agent_run_id,
     link_session_to_agent,
+    register_agent,
     
     # User repository
     get_user,
