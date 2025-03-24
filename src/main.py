@@ -11,7 +11,7 @@ from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
 from src.auth import APIKeyMiddleware
 from src.api.models import HealthResponse
-from src.api.routes import router as api_router
+from src.api.routes import main_router as api_router
 from src.agents.models.agent_factory import AgentFactory
 from src.db import  ensure_default_user_exists
 
@@ -158,8 +158,8 @@ def create_app() -> FastAPI:
                     id=test_session_id,
                     user_id=test_user_id,
                     platform="verification_test",
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
                 )
                 
                 # Test inserting a test message
@@ -169,8 +169,8 @@ def create_app() -> FastAPI:
                     role="user",
                     text_content="Test database connection",
                     raw_payload={"content": "Test database connection"},
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow()
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
                 )
                 
                 # Create the session and message within the transaction
@@ -184,7 +184,7 @@ def create_app() -> FastAPI:
                         INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (safe_uuid(test_session_id), test_user_id, "verification_test", datetime.utcnow(), datetime.utcnow())
+                        (safe_uuid(test_session_id), test_user_id, "verification_test", datetime.now(), datetime.now())
                     )
                     
                     # Insert test message
@@ -200,8 +200,8 @@ def create_app() -> FastAPI:
                             "user",
                             "Test database connection",
                             json.dumps({"content": "Test database connection"}),
-                            datetime.utcnow(),
-                            datetime.utcnow()
+                            datetime.now(),
+                            datetime.now()
                         )
                     )
                     
@@ -269,7 +269,7 @@ def create_app() -> FastAPI:
     async def health_check() -> HealthResponse:
         return HealthResponse(
             status="healthy",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(),
             version=SERVICE_INFO["version"],
             environment=settings.AM_ENV
         )

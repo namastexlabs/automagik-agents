@@ -28,12 +28,14 @@ from src.db.repository.message import (
     get_message,
     list_messages,
     delete_session_messages,
-    get_system_prompt
+    get_system_prompt,
+    list_session_messages
 )
 from src.db.repository.session import (
     get_session,
     create_session,
-    update_session
+    update_session,
+    delete_session
 )
 from src.db.models import Message, Session
 
@@ -413,7 +415,7 @@ class MessageHistory:
         except Exception as e:
             logger.error(f"Error clearing session messages: {str(e)}")
     
-    async def add_message(self, message: Dict[str, Any]) -> ModelMessage:
+    def add_message(self, message: Dict[str, Any]) -> ModelMessage:
         """Add a message to the history based on a message dictionary.
         
         This method processes an incoming message dictionary and stores it
@@ -749,3 +751,108 @@ class MessageHistory:
                 model_messages.append(ModelResponse(parts=parts))
         
         return model_messages
+
+    def get_session_info(self) -> Optional[Dict[str, Any]]:
+        """Get information about the current session.
+        
+        Returns:
+            Dictionary with session information, or None if not found
+        """
+        try:
+            # Get session from database
+            session_uuid = uuid.UUID(self.session_id)
+            session = get_session(session_uuid)
+            
+            if not session:
+                return None
+                
+            # Convert session to dictionary
+            return {
+                "id": str(session.id),
+                "name": session.name,
+                "user_id": session.user_id,
+                "agent_id": session.agent_id,
+                "created_at": session.created_at.isoformat() if session.created_at else None,
+                "updated_at": session.updated_at.isoformat() if session.updated_at else None
+            }
+        except Exception as e:
+            logger.error(f"Error getting session info: {str(e)}")
+            return None
+            
+    def get_messages(self, page: int = 1, page_size: int = 50, sort_desc: bool = True) -> Tuple[List[Dict[str, Any]], int]:
+        """Get messages for the current session with pagination.
+        
+        Args:
+            page: Page number to retrieve (1-indexed)
+            page_size: Number of messages per page
+            sort_desc: Whether to sort by descending creation time (newest first)
+            
+        Returns:
+            Tuple of (list of messages, total message count)
+        """
+        try:
+            # Validate pagination parameters
+            page = max(1, page)  # Ensure page is at least 1
+            page_size = max(1, min(page_size, 100))  # Between 1 and 100
+            
+            # Get messages from database
+            session_uuid = uuid.UUID(self.session_id)
+            messages_tuple = list_session_messages(
+                session_uuid, 
+                page=page,
+                page_size=page_size,
+                sort_desc=sort_desc
+            )
+            
+            # Unpack the tuple from list_session_messages
+            messages, total_count = messages_tuple
+            
+            # Convert database messages to dictionaries
+            result = []
+            for msg in messages:
+                # Messages from list_session_messages are already dictionaries
+                message_dict = {
+                    "id": str(msg.get("id", "")),
+                    "role": msg.get("role", ""),
+                    "content": msg.get("text_content", ""),
+                    "created_at": msg.get("created_at", "").isoformat() if msg.get("created_at") else None
+                }
+                
+                # Add tool calls and outputs if present
+                if msg.get("tool_calls"):
+                    message_dict["tool_calls"] = msg["tool_calls"]
+                
+                if msg.get("tool_outputs"):
+                    message_dict["tool_outputs"] = msg["tool_outputs"]
+                    
+                result.append(message_dict)
+            
+            return result, total_count
+        except Exception as e:
+            logger.error(f"Error getting messages: {str(e)}")
+            return [], 0
+
+    def delete_session(self) -> bool:
+        """Delete the session and all its messages.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from src.db.repository.session import delete_session
+            from src.db.repository.message import delete_session_messages
+            import uuid
+            
+            # Convert session_id to UUID
+            session_uuid = uuid.UUID(self.session_id) if isinstance(self.session_id, str) else self.session_id
+            
+            # Delete all messages first
+            delete_session_messages(session_uuid)
+            
+            # Then delete the session itself
+            success = delete_session(session_uuid)
+            
+            return success
+        except Exception as e:
+            logger.error(f"Failed to delete session {self.session_id}: {str(e)}")
+            return False

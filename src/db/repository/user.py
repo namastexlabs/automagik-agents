@@ -248,8 +248,8 @@ def ensure_default_user_exists(user_id: int = 1, email: str = "admin@automagik")
         user = User(
             id=user_id,
             email=email,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(),
+            updated_at=datetime.now()
         )
         created_id = create_user(user)
         if created_id:
