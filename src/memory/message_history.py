@@ -413,6 +413,52 @@ class MessageHistory:
         except Exception as e:
             logger.error(f"Error clearing session messages: {str(e)}")
     
+    async def add_message(self, message: Dict[str, Any]) -> ModelMessage:
+        """Add a message to the history based on a message dictionary.
+        
+        This method processes an incoming message dictionary and stores it
+        in the database, handling both user and assistant messages.
+        
+        Args:
+            message: Dictionary containing the message details including 'role' and 'content'
+            
+        Returns:
+            The created ModelMessage object
+        """
+        try:
+            role = message.get("role", "")
+            content = message.get("content", "")
+            agent_id = message.get("agent_id")
+            
+            if role == "user":
+                # Handle user message
+                return self.add(content, agent_id=agent_id)
+            elif role == "assistant":
+                # Handle assistant message with potential tool calls and outputs
+                tool_calls = message.get("tool_calls", [])
+                tool_outputs = message.get("tool_outputs", [])
+                return self.add_response(
+                    content, 
+                    tool_calls=tool_calls, 
+                    tool_outputs=tool_outputs,
+                    agent_id=agent_id
+                )
+            elif role == "system":
+                # Handle system message
+                return self.add_system_prompt(content, agent_id=agent_id)
+            else:
+                logger.warning(f"Unknown message role: {role}")
+                # Default to user message if role is unknown
+                return self.add(content, agent_id=agent_id)
+        except Exception as e:
+            logger.error(f"Error adding message: {str(e)}")
+            # Create a basic message as fallback
+            if message.get("role") == "user":
+                return ModelRequest(parts=[UserPromptPart(content=message.get("content", ""))])
+            else:
+                # Default to a text response for non-user messages
+                return ModelResponse(parts=[TextPart(content=message.get("content", ""))])
+    
     # PydanticAI compatible methods
     
     def all_messages(self) -> List[ModelMessage]:
@@ -426,7 +472,8 @@ class MessageHistory:
         try:
             # Get all messages from the database
             logger.debug(f"Retrieving all messages for session {self.session_id}")
-            db_messages = list_messages(uuid.UUID(self.session_id))
+            # IMPORTANT: Use sort_desc=False to get messages in chronological order (oldest first)
+            db_messages = list_messages(uuid.UUID(self.session_id), sort_desc=False)
             
             # Convert to PydanticAI format - only log detailed info in debug mode
             messages = self._convert_db_messages_to_model_messages(db_messages)
@@ -475,6 +522,60 @@ class MessageHistory:
         """
         # For now, identical to all_messages_json since we don't track runs
         return self.all_messages_json()
+    
+    def get_formatted_pydantic_messages(self, limit: int = 20) -> List[ModelMessage]:
+        """Get formatted messages in PydanticAI format, limited to the most recent ones.
+        
+        This method is used by the SimpleAgent to get correctly formatted messages
+        for the PydanticAI agent. It retrieves the last N messages from the database
+        and formats them according to PydanticAI message structures.
+        
+        Args:
+            limit: Maximum number of messages to retrieve (default 20)
+            
+        Returns:
+            List of PydanticAI ModelMessage objects
+        """
+        try:
+            # Get the last N messages from the database (most recent first)
+            logger.debug(f"Retrieving latest {limit} messages for session {self.session_id}")
+            db_messages = list_messages(
+                uuid.UUID(self.session_id), 
+                sort_desc=True, 
+                limit=limit
+            )
+            
+            # Reverse the list to get chronological order (oldest first)
+            # This is important for proper context in conversation
+            db_messages.reverse()
+            
+            # Convert to PydanticAI format
+            messages = self._convert_db_messages_to_model_messages(db_messages)
+            logger.debug(f"Retrieved and converted {len(messages)} messages for session {self.session_id}")
+            
+            # Check if we have a system prompt
+            has_system_prompt = any(
+                isinstance(msg, ModelRequest) and 
+                any(isinstance(part, SystemPromptPart) for part in msg.parts)
+                for msg in messages
+            )
+            
+            # If no system prompt found, try to get it from session metadata
+            if not has_system_prompt:
+                try:
+                    system_prompt = get_system_prompt(uuid.UUID(self.session_id))
+                    if system_prompt:
+                        # Insert system prompt at the beginning
+                        messages.insert(0, ModelRequest(parts=[SystemPromptPart(content=system_prompt)]))
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve system prompt from metadata: {str(e)}")
+            
+            return messages
+        except Exception as e:
+            import traceback
+            logger.error(f"Error retrieving formatted pydantic messages: {str(e)}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
+            return []
     
     @classmethod
     def from_model_messages(cls, messages: List[ModelMessage], session_id: Optional[str] = None) -> 'MessageHistory':

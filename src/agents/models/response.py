@@ -15,3 +15,4 @@ class AgentResponse(BaseModel):
     tool_calls: Optional[List[Dict]] = None
     tool_outputs: Optional[List[Dict]] = None
     raw_message: Optional[Union[Dict, List]] = None 
+    system_prompt: Optional[str] = None
