@@ -20,7 +20,6 @@ from src.db import (
     update_memory as repo_update_memory,
     list_memories as repo_list_memories,
     delete_memory as repo_delete_memory,
-    execute_query
 )
 from src.config import settings
 from src.memory.message_history import MessageHistory
