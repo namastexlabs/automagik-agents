@@ -137,6 +137,21 @@ async def handle_agent_run(agent_name: str, request: AgentRunRequest) -> Dict[st
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent not found: {agent_name}")
         
+        # Link the agent to the session in the database if we have a persistent session
+        if session_id and not getattr(message_history, "no_auto_create", False):
+            # This will register the agent in the database and assign it a db_id
+            success = factory.link_agent_to_session(agent_name, session_id)
+            if success:
+                # Reload the agent by name to get its ID
+                agent_db = get_agent_by_name(db_agent_name)
+                if agent_db:
+                    # Set the db_id directly on the agent object
+                    agent.db_id = agent_db.id
+                    logger.info(f"Updated agent {agent_name} with database ID {agent_db.id}")
+            else:
+                logger.warning(f"Failed to link agent {agent_name} to session {session_id}")
+                # Continue anyway, as this is not a critical error
+        
         # Process multimodal content (if any)
         content = request.message_content
         multimodal_content = {}

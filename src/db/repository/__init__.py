@@ -13,7 +13,8 @@ from src.db.repository.agent import (
     update_agent,
     delete_agent,
     increment_agent_run_id,
-    link_session_to_agent
+    link_session_to_agent,
+    register_agent
 )
 
 # User repository functions

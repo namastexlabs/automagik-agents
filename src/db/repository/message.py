@@ -46,39 +46,44 @@ def get_message(message_id: Union[uuid.UUID, str]) -> Optional[Message]:
         return None
 
 
-def list_messages(session_id: uuid.UUID, page: int = 1, page_size: int = 100, 
-                 sort_desc: bool = True) -> List[Message]:
-    """List messages for a session with pagination.
+def list_messages(session_id: uuid.UUID, offset: int = 0, 
+                    limit: Optional[int] = None, sort_desc: bool = False) -> List[Message]:
+    """List messages for a session, optionally with offset, limit, and sort.
     
     Args:
-        session_id: The UUID of the session to get messages for
-        page: The page number to return (1-indexed)
-        page_size: The number of messages per page
-        sort_desc: Whether to sort by created_at in descending order (newest first)
+        session_id: The UUID of the session
+        offset: Number of messages to skip
+        limit: Maximum number of messages to return (None for all)
+        sort_desc: Sort by descending created_at if True
         
     Returns:
         List of Message objects
     """
     try:
-        order_dir = "DESC" if sort_desc else "ASC"
-        offset = (page - 1) * page_size
+        # Build query with pagination and sorting
+        sort_direction = "DESC" if sort_desc else "ASC"
+        query = f"SELECT * FROM messages WHERE session_id = %s ORDER BY created_at {sort_direction}"
+        params = [session_id]
         
-        query = f"""
-            SELECT * FROM messages 
-            WHERE session_id = %s
-            ORDER BY created_at {order_dir}
-            LIMIT %s OFFSET %s
-        """
-        
-        result = execute_query(query, [session_id, page_size, offset])
+        # Add limit clause if specified
+        if limit is not None:
+            query += " LIMIT %s"
+            params.append(limit)
+            
+        # Add offset clause if specified
+        if offset > 0:
+            query += " OFFSET %s"
+            params.append(offset)
+            
+        result = execute_query(query, params)
         
         messages = []
         if isinstance(result, list):
             for row in result:
-                messages.append(Message(**row))
+                messages.append(Message.from_db_row(row))
         elif isinstance(result, dict) and 'rows' in result:
             for row in result['rows']:
-                messages.append(Message(**row))
+                messages.append(Message.from_db_row(row))
                 
         return messages
     except Exception as e:

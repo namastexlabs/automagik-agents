@@ -195,7 +195,7 @@ def update_agent(agent: Agent) -> Optional[int]:
 
 
 def delete_agent(agent_id: int) -> bool:
-    """Delete an agent.
+    """Delete an agent from the database.
     
     Args:
         agent_id: The agent ID to delete
@@ -204,16 +204,74 @@ def delete_agent(agent_id: int) -> bool:
         True if successful, False otherwise
     """
     try:
-        execute_query(
-            "DELETE FROM agents WHERE id = %s",
-            (agent_id,),
-            fetch=False
-        )
-        logger.info(f"Deleted agent with ID {agent_id}")
+        execute_query("DELETE FROM agents WHERE id = %s", (agent_id,), fetch=False)
+        logger.info(f"Deleted agent {agent_id}")
         return True
     except Exception as e:
         logger.error(f"Error deleting agent {agent_id}: {str(e)}")
         return False
+
+
+def register_agent(name: str, agent_type: str, model: str, description: Optional[str] = None, config: Optional[Dict] = None) -> Optional[int]:
+    """Register an agent in the database or update an existing one.
+    
+    Args:
+        name: The agent name
+        agent_type: The agent type
+        model: The model used by the agent
+        description: Optional description
+        config: Optional configuration dictionary
+        
+    Returns:
+        The agent ID if successful, None otherwise
+    """
+    try:
+        # Check if agent already exists with this name
+        existing = get_agent_by_name(name)
+        if existing:
+            # Update existing agent
+            existing.type = agent_type
+            existing.model = model
+            existing.description = description or existing.description
+            if config:
+                existing.config = config
+                
+            # Use update_agent
+            return update_agent(existing)
+        
+        # Serialize config to JSON if needed
+        config_json = json.dumps(config) if config else None
+        
+        # Insert new agent
+        result = execute_query(
+            """
+            INSERT INTO agents (
+                name, type, model, description, config, active, 
+                version, run_id, system_prompt, created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, true, 
+                %s, 1, NULL, NOW(), NOW()
+            ) RETURNING id
+            """,
+            (
+                name, 
+                agent_type, 
+                model, 
+                description,
+                config_json, 
+                "1.0.0"  # Default version
+            )
+        )
+        
+        if result:
+            agent_id = result[0]["id"]
+            logger.info(f"Registered agent {name} with ID {agent_id}")
+            return agent_id
+        
+        return None
+    except Exception as e:
+        logger.error(f"Error registering agent {name}: {str(e)}")
+        return None
 
 
 def increment_agent_run_id(agent_id: int) -> bool:
@@ -1177,23 +1235,27 @@ def get_message(message_id: uuid.UUID) -> Optional[Message]:
         return None
 
 
-def list_messages(session_id: uuid.UUID, limit: int = 100, offset: int = 0) -> List[Message]:
+def list_messages(session_id: uuid.UUID, limit: int = 100, offset: int = 0, sort_desc: bool = False) -> List[Message]:
     """List messages for a session with pagination.
     
     Args:
         session_id: The session ID
         limit: Maximum number of messages to retrieve (default: 100)
         offset: Number of messages to skip (default: 0)
+        sort_desc: Whether to sort by descending creation time (newest first)
         
     Returns:
         List of Message objects
     """
     try:
+        # Set sort order
+        sort_direction = "DESC" if sort_desc else "ASC"
+        
         result = execute_query(
-            """
+            f"""
             SELECT * FROM messages 
             WHERE session_id = %s
-            ORDER BY created_at ASC, updated_at ASC
+            ORDER BY created_at {sort_direction}, updated_at {sort_direction}
             LIMIT %s OFFSET %s
             """,
             (str(session_id), limit, offset)
