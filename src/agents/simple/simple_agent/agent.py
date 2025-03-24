@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Union
 
 from pydantic_ai import Agent
 from src.agents.models.automagik_agent import AutomagikAgent
-from src.agents.models.dependencies import SimpleAgentDependencies
+from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
 from src.memory.message_history import MessageHistory
 
@@ -51,7 +51,7 @@ class SimpleAgent(AutomagikAgent):
         self._agent_instance: Optional[Agent] = None
         
         # Configure dependencies
-        self.dependencies = SimpleAgentDependencies(
+        self.dependencies = AutomagikAgentsDependencies(
             model_name=get_model_name(config),
             model_settings=parse_model_settings(config)
         )
@@ -90,7 +90,7 @@ class SimpleAgent(AutomagikAgent):
                 system_prompt=self.system_prompt,
                 tools=tools,
                 model_settings=model_settings,
-                deps_type=SimpleAgentDependencies
+                deps_type=AutomagikAgentsDependencies
             )
             
             logger.info(f"Initialized agent with model: {model_name} and {len(tools)} tools")
