@@ -6,15 +6,14 @@ import uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config import settings, Environment
+from src.config import settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
 from src.auth import APIKeyMiddleware
 from src.api.models import HealthResponse
 from src.api.routes import router as api_router
-from src.memory.message_history import MessageHistory
 from src.agents.models.agent_factory import AgentFactory
-from src.db import execute_query, get_connection_pool, ensure_default_user_exists, create_session, Session
+from src.db import  ensure_default_user_exists
 
 # Configure loggingg
 configure_logging()
