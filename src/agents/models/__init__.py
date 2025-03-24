@@ -1,7 +1,7 @@
 from typing import Dict, Type, Optional
-from src.agents.models.base_agent import BaseAgent
+from src.agents.models.automagik_agent import AutomagikAgent
 
-def initialize_agent(agent_class: Type[BaseAgent], config: Optional[Dict[str, str]] = None) -> BaseAgent:
+def initialize_agent(agent_class: Type[AutomagikAgent], config: Optional[Dict[str, str]] = None) -> AutomagikAgent:
     """Initialize an agent with configuration.
     
     Args:
