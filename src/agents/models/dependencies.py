@@ -243,7 +243,7 @@ class BaseDependencies:
 
 
 @dataclass
-class SimpleAgentDependencies(BaseDependencies):
+class AutomagikAgentsDependencies(BaseDependencies):
     """Dependencies for SimpleAgent.
     
     Extends the base dependencies with SimpleAgent-specific
