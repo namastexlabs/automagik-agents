@@ -4,7 +4,7 @@ import json
 import uuid
 import os
 
-from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
