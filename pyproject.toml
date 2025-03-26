@@ -48,6 +48,9 @@ dependencies = [
     "pip>=25.0.1",
     "pydantic[email]>=2.10.6",
     "pytest-asyncio>=0.26.0",
+    "google-api-python-client>=2.165.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.1",
 ]
 
 [project.urls]

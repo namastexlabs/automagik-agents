@@ -6,6 +6,7 @@ This package includes various tools used by Sofia.
 from .datetime import datetime_tools
 from .discord import discord_tools
 from .evolution import evolution_tools
+from .gmail import gmail_tools
 from .google_drive import google_drive_tools
 from .memory.tool import (
     read_memory,
@@ -27,6 +28,9 @@ __all__ = [
     
     # Evolution tools
     "evolution_tools",
+    
+    # Gmail tools
+    "gmail_tools",
     
     # Google Drive tools
     "google_drive_tools",
