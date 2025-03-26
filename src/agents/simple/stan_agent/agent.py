@@ -11,8 +11,10 @@ from pydantic_ai import Agent
 from src.agents.models.automagik_agent import AutomagikAgent
 from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
+from src.agents.simple.stan_agent.specialized.backoffice import backoffice_agent
+from src.agents.simple.stan_agent.specialized.onboarding import onboarding_agent
+from src.agents.simple.stan_agent.specialized.product import product_agent
 from src.memory.message_history import MessageHistory
-from src.agents.simple.stan_agent.specialized.simple_agent.agent import SimpleAgent
 
 # Import only necessary utilities
 from src.agents.common.message_parser import (
@@ -69,14 +71,10 @@ class StanAgentAgent(AutomagikAgent):
         # Register default tools
         self.tool_registry.register_default_tools(self.context)
         
-        # Initialize and register the specialized agent
-        specialized_agent = SimpleAgent(config)
-        async def call_specialized_agent(input_text: str) -> str:
-            agent_response = await specialized_agent.process_message(input_text)
-            logger.info(f"Specialized agent response: {agent_response}")
-            return agent_response
-        
-        self.tool_registry.register_tool(call_specialized_agent)
+        # Register specialized agents         
+        self.tool_registry.register_tool(backoffice_agent)
+        self.tool_registry.register_tool(product_agent)
+        self.tool_registry.register_tool(onboarding_agent)
         
         logger.info("StanAgentAgent initialized successfully")
     
