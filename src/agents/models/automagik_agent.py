@@ -303,7 +303,7 @@ class AutomagikAgent(ABC, Generic[T]):
             from src.agents.common.message_parser import format_message_for_db
             
             # Save user message
-            user_db_message = format_message_for_db(role="user", content=content, agent_id=self.db_id)
+            user_db_message = format_message_for_db(role="user", content=content, agent_id=self.db_id, channel_payload=channel_payload)
             message_history.add_message(message=user_db_message)
             
             # Save agent response
