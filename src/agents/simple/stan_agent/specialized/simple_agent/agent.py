@@ -1,6 +1,6 @@
-"""StanAgentAgent implementation with PydanticAI.
+"""SimpleAgent implementation with PydanticAI.
 
-This module provides a StanAgentAgent class that uses PydanticAI for LLM integration
+This module provides a SimpleAgent class that uses PydanticAI for LLM integration
 and inherits common functionality from AutomagikAgent.
 """
 import logging
@@ -12,7 +12,6 @@ from src.agents.models.automagik_agent import AutomagikAgent
 from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
 from src.memory.message_history import MessageHistory
-from src.agents.simple.stan_agent.specialized.simple_agent.agent import SimpleAgent
 
 # Import only necessary utilities
 from src.agents.common.message_parser import (
@@ -30,20 +29,20 @@ from src.agents.common.dependencies_helper import (
 
 logger = logging.getLogger(__name__)
 
-class StanAgentAgent(AutomagikAgent):
-    """StanAgentAgent implementation using PydanticAI.
+class SimpleAgent(AutomagikAgent):
+    """SimpleAgent implementation using PydanticAI.
     
     This agent provides a basic implementation that follows the PydanticAI
     conventions for multimodal support and tool calling.
     """
     
     def __init__(self, config: Dict[str, str]) -> None:
-        """Initialize the StanAgentAgent.
+        """Initialize the SimpleAgent.
         
         Args:
             config: Dictionary with configuration options
         """
-        from src.agents.simple.stan_agent.prompts.prompt import AGENT_PROMPT
+        from src.agents.simple.simple_agent.prompts.prompt import AGENT_PROMPT
         
         # Initialize the base agent
         super().__init__(config, AGENT_PROMPT)
@@ -69,16 +68,7 @@ class StanAgentAgent(AutomagikAgent):
         # Register default tools
         self.tool_registry.register_default_tools(self.context)
         
-        # Initialize and register the specialized agent
-        specialized_agent = SimpleAgent(config)
-        async def call_specialized_agent(input_text: str) -> str:
-            agent_response = await specialized_agent.process_message(input_text)
-            logger.info(f"Specialized agent response: {agent_response}")
-            return agent_response
-        
-        self.tool_registry.register_tool(call_specialized_agent)
-        
-        logger.info("StanAgentAgent initialized successfully")
+        logger.info("SimpleAgent initialized successfully")
     
     async def _initialize_pydantic_agent(self) -> None:
         """Initialize the underlying PydanticAI agent."""
