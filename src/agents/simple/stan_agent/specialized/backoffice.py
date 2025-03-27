@@ -13,7 +13,7 @@ from src.tools.blackpearl import (
 
 # Import Blackpearl schema
 from src.tools.blackpearl.schema import (
-    Cliente, StatusAprovacaoEnum
+    Cliente, Contato, StatusAprovacaoEnum
 )
 
 # Import Omie tools
@@ -88,7 +88,7 @@ async def make_lead_email(lead_information: str, extra_context: str = None) -> s
         Formatted HTML email content
     """
     email_agent = Agent(
-        'google-gla:gemini-2.0-flash-exp',
+        'openai:o3-mini',
         deps_type=Dict[str, Any],
         result_type=str,
         system_prompt=(
@@ -98,10 +98,7 @@ async def make_lead_email(lead_information: str, extra_context: str = None) -> s
             'Use appropriate HTML tags, styling, and formatting to create a visually appealing email.'
             'Ensure all information is properly organized and highlighted.'
             'The email should be suitable for business communication and maintain a professional tone.'
-        ),
-        tools=[
-            verificar_cnpj
-        ]
+        )
     )
     
     # Run the email formatting agent with the lead information
@@ -319,7 +316,6 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
             cliente_data["observacao"] = observacao
             
         # Get user information and add contact if available
-        user_id = getattr(ctx.deps, 'user_id', None)
         blackpearl_contact_id = None
         if user_id:
             user_info = get_user(user_id)
@@ -335,7 +331,12 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         logger.info(f"Cliente criado: {cliente_created}")
         
         if blackpearl_contact_id:
-            await update_contato(ctx.deps, blackpearl_contact_id, {"status_aprovacao": StatusAprovacaoEnum.PENDING_REVIEW, "detalhes_aprovacao": "Cliente criado, aguardando aprovação."})
+            updated_contato = Contato(
+                id=blackpearl_contact_id,
+                status_aprovacao=StatusAprovacaoEnum.PENDING_REVIEW,
+                detalhes_aprovacao="Cliente criado, aguardando aprovação."
+            )
+            await update_contato(ctx.deps, blackpearl_contact_id, updated_contato)
         
         return cliente_created
     
@@ -435,7 +436,6 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
                 cliente_data["observacao"] = observacao
                 
             # Get user information and add contact if not already present
-            user_id = getattr(ctx.deps, 'user_id', None)
             if user_id and not contatos:
                 user_info = get_user(user_id)
                 if user_info:
@@ -555,7 +555,7 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         """
         
         # Construct the email
-        subject = f"[STAN - Novo Lead]"
+        subject = f"[STAN] - Novo Lead"
         
         # Format the message properly in Portuguese
         message = "<html><body>"
