@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Dict, List, Any, Optional
 
 import google.auth.transport.requests
@@ -98,24 +99,47 @@ class GmailProvider:
             
         return {"authenticated": True, "credentials": credentials}
     
-    def _create_message(self, to: str, subject: str, message_text: str, cc: Optional[List[str]] = None) -> dict:
+    def _create_message(self, input: SendEmailInput) -> dict:
         """Create a message for an email.
         
         Args:
-            to: Recipient email address
-            subject: Email subject
-            message_text: Email body text
-            cc: Optional list of CC recipients
+            input: Email input parameters
             
         Returns:
             Raw message dictionary ready for Gmail API
         """
-        message = MIMEText(message_text)
-        message['to'] = to
-        message['subject'] = subject
+        # Determine if we're sending HTML or plain text
+        is_html = input.content_type and "html" in input.content_type.lower()
         
-        if cc and len(cc) > 0:
-            message['cc'] = ', '.join(cc)
+        # Combine message with extra content if provided
+        full_message = input.message
+        if input.extra_content:
+            if is_html:
+                full_message = f"{input.message}<br><br>{input.extra_content}"
+            else:
+                full_message = f"{input.message}\n\n{input.extra_content}"
+        
+        # For HTML emails with plain text alternative, create multipart message
+        if is_html and input.plain_text_alternative:
+            message = MIMEMultipart('alternative')
+            
+            # Add plain text part
+            text_part = MIMEText(input.plain_text_alternative, 'plain')
+            message.attach(text_part)
+            
+            # Add HTML part
+            html_part = MIMEText(full_message, 'html')
+            message.attach(html_part)
+        else:
+            # For simple emails (HTML-only or plain text)
+            subtype = 'html' if is_html else 'plain'
+            message = MIMEText(full_message, subtype)
+        
+        message['to'] = input.to
+        message['subject'] = input.subject
+        
+        if input.cc and len(input.cc) > 0:
+            message['cc'] = ', '.join(input.cc)
             
         return {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()}
     
@@ -139,18 +163,8 @@ class GmailProvider:
                     error=auth_status.get("error", "Authentication failed")
                 )
                 
-            # Combine message with extra content if provided
-            full_message = input.message
-            if input.extra_content:
-                full_message = f"{input.message}\n\n{input.extra_content}"
-                
             # Create the email message
-            message = self._create_message(
-                to=input.to,
-                subject=input.subject,
-                message_text=full_message,
-                cc=input.cc
-            )
+            message = self._create_message(input)
             
             try:
                 # Create Gmail API service

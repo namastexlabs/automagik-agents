@@ -84,11 +84,6 @@ class EvolutionMessagePayload(BaseModel):
         """Extract the user phone number from the payload."""
         user_number = None
         
-        # Try getting from sender field first (new format)
-        if self.sender and "@" in self.sender:
-            user_number = self.sender.split("@")[0]
-            
-        # Fallback to remoteJid in data.key
         if not user_number and hasattr(self.data, "key") and hasattr(self.data.key, "remoteJid"):
             remote_jid = self.data.key.remoteJid
             if remote_jid and "@" in remote_jid:

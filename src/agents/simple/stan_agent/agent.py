@@ -161,7 +161,8 @@ class StanAgent(AutomagikAgent):
                 self.context["blackpearl_contact_id"] = contato_blackpearl.get("id")
                 
                 cliente_blackpearl = await blackpearl.get_clientes(self.context, contatos_id=contato_blackpearl["id"])
-                cliente_blackpearl = cliente_blackpearl["results"][0]
+                if cliente_blackpearl and "results" in cliente_blackpearl and cliente_blackpearl["results"]:
+                    cliente_blackpearl = cliente_blackpearl["results"][0]
                 
                 if cliente_blackpearl:
                     self.context["blackpearl_cliente_id"] = cliente_blackpearl.get("id")
