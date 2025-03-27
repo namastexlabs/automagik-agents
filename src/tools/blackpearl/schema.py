@@ -121,16 +121,16 @@ class Cliente(BaseModel):
     ultima_atualizacao: Optional[datetime] = None
 
 class Contato(BaseModel):
-    id: int = Field(..., description="Unique identifier")
-    nome: str
-    telefone: str
-    wpp_session_id: str
-    ativo: bool
-    data_registro: datetime
-    status_aprovacao: StatusAprovacaoEnum
-    data_aprovacao: Optional[datetime]
-    detalhes_aprovacao: Optional[str]
-    ultima_atualizacao: Optional[datetime]
+    id: Optional[int] = Field(None, description="Unique identifier")
+    nome: Optional[str] = None
+    telefone: Optional[str] = None
+    wpp_session_id: Optional[str] = None
+    ativo: Optional[bool] = None
+    data_registro: Optional[datetime] = None
+    status_aprovacao: Optional[StatusAprovacaoEnum] = None
+    data_aprovacao: Optional[datetime] = None
+    detalhes_aprovacao: Optional[str] = None
+    ultima_atualizacao: Optional[datetime] = None
 
 class Vendedor(BaseModel):
     id: int = Field(..., description="Unique identifier")
