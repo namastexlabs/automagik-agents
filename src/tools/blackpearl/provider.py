@@ -67,9 +67,15 @@ class BlackpearlProvider:
         data = format_api_request(data) if data else None
         params = filter_none_params(params)
         
+        logger.info(f"BP - API Request: {method} {url}")
+        logger.info(f"BP - Request Payload: {data}")
+        logger.info(f"BP - Request Params: {params}")
+        
         async with self.session.request(method, url, json=data, params=params) as response:
             response.raise_for_status()
-            return await response.json()
+            result = await response.json()
+            logger.info(f"API Response: {result}")
+            return result
         
     @handle_api_error
     @validate_api_response
@@ -140,6 +146,7 @@ class BlackpearlProvider:
         Returns:
             Updated client data
         """
+        logger.info(f"Updating client {cliente_id} with data: {cliente.model_dump(exclude_unset=True)}")
         return await self._request(
             "PATCH",
             f"/api/v1/cadastro/clientes/{cliente_id}/",

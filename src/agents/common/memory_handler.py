@@ -109,6 +109,88 @@ class MemoryHandler:
             return False
     
     @staticmethod
+    def store_memory_sync(
+        name: str,
+        content: str,
+        agent_id: int,
+        user_id: Optional[int] = None,
+        description: Optional[str] = None,
+        read_mode: str = "system_prompt",
+        access: str = "read_write"
+    ) -> bool:
+        """Store or update a memory variable in the database.
+        
+        Uses direct repository calls to avoid async/await issues.
+        
+        Args:
+            name: Name of the memory variable
+            content: Content to store
+            agent_id: Agent ID to associate with memory variable
+            user_id: Optional user ID to associate with memory variable
+            description: Optional description of the memory variable
+            read_mode: How the memory should be read (default: system_prompt)
+            access: Access permissions for the memory (default: read_write)
+            
+        Returns:
+            True if storage was successful, False otherwise
+        """
+        if not agent_id:
+            logger.warning("Cannot store memory: No agent ID available")
+            return False
+            
+        try:
+            # Import the repository functions for direct database access
+            from src.db.repository.memory import get_memory_by_name, create_memory, update_memory
+            from src.db.models import Memory
+            
+            # Check if memory already exists
+            existing_memory = get_memory_by_name(name, agent_id=agent_id, user_id=user_id)
+            
+            if existing_memory:
+                # Update existing memory
+                logger.info(f"Updating existing memory: {name} for user: {user_id}")
+                existing_memory.content = content
+                
+                if description:
+                    existing_memory.description = description
+                
+                success = update_memory(existing_memory)
+                if success:
+                    logger.info(f"Updated memory: {name} for user: {user_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to update memory: {name}")
+                    return False
+            else:
+                # Create new memory
+                logger.info(f"Creating new memory: {name} for user: {user_id}")
+                
+                if not description:
+                    description = f"Memory variable created for agent"
+                
+                memory = Memory(
+                    name=name,
+                    content=content,
+                    description=description,
+                    agent_id=agent_id,
+                    user_id=user_id,
+                    read_mode=read_mode,
+                    access=access
+                )
+                
+                memory_id = create_memory(memory)
+                if memory_id:
+                    logger.info(f"Created memory: {name} with ID: {memory_id} for user: {user_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to create memory: {name}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error in store_memory_sync: {str(e)}")
+            return False
+    
+    @staticmethod
     def check_and_ensure_memory_variables(
         template_vars: List[str], 
         agent_id: int, 

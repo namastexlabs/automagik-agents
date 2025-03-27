@@ -94,31 +94,31 @@ class FamiliaDeProduto(BaseModel):
     nomeFamilia: str = Field(..., max_length=255, description="Family name")
 
 class Cliente(BaseModel):
-    id: int = Field(..., description="Unique identifier")
-    contatos: List[int] = Field(..., description="Contact IDs")
-    vendedores: List[int] = Field(..., description="Salesperson IDs")
-    telefone_comercial: str
-    tipo_operacao: str
-    numero_funcionarios: int
-    razao_social: str = Field(..., max_length=255)
-    nome_fantasia: str = Field(..., max_length=255)
-    cnpj: str = Field(..., max_length=18)
-    inscricao_estadual: str = Field(..., max_length=255)
-    email: str = Field(..., max_length=500)
-    endereco: str
+    id: Optional[int] = Field(None, description="Unique identifier")
+    contatos: Optional[List[int]] = Field(None, description="Contact IDs")
+    vendedores: Optional[List[int]] = Field(None, description="Salesperson IDs")
+    telefone_comercial: Optional[str] = None
+    tipo_operacao: Optional[str] = None
+    numero_funcionarios: Optional[int] = None
+    razao_social: Optional[str] = Field(None, max_length=255)
+    nome_fantasia: Optional[str] = Field(None, max_length=255)
+    cnpj: Optional[str] = Field(None, max_length=18)
+    inscricao_estadual: Optional[str] = Field(None, max_length=255)
+    email: Optional[str] = Field(None, max_length=500)
+    endereco: Optional[str] = None
     endereco_numero: Optional[str] = Field(None, max_length=16)
     endereco_complemento: Optional[str] = Field(None, max_length=255)
-    bairro: str = Field(..., max_length=255)
-    cidade: str = Field(..., max_length=255)
-    estado: str = Field(..., max_length=2)
-    cep: str = Field(..., max_length=9)
+    bairro: Optional[str] = Field(None, max_length=255)
+    cidade: Optional[str] = Field(None, max_length=255)
+    estado: Optional[str] = Field(None, max_length=2)
+    cep: Optional[str] = Field(None, max_length=9)
     codigo_cliente_omie: Optional[int] = Field(None, description="Omie client code")
-    status_aprovacao: StatusAprovacaoEnum
-    valor_limite_credito: int
-    data_aprovacao: Optional[datetime]
-    detalhes_aprovacao: Optional[str]
-    data_registro: datetime
-    ultima_atualizacao: Optional[datetime]
+    status_aprovacao: Optional[StatusAprovacaoEnum] = None
+    valor_limite_credito: Optional[int] = None
+    data_aprovacao: Optional[datetime] = None
+    detalhes_aprovacao: Optional[str] = None
+    data_registro: Optional[datetime] = None
+    ultima_atualizacao: Optional[datetime] = None
 
 class Contato(BaseModel):
     id: int = Field(..., description="Unique identifier")
