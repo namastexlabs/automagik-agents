@@ -43,7 +43,9 @@ async def get_or_create_contact(context: Dict[str, Any],
     # Check if we found any matching contacts
     if contacts_response and "results" in contacts_response and contacts_response["results"]:
         # Return the first matching contact
-        return contacts_response["results"][0]
+        contato = contacts_response["results"][0]
+        return contato
+            
     
     # No contact found, create a new one
     logger.info(f"Creating new contact for {user_name} with number {user_number}")

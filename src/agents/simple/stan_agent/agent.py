@@ -8,13 +8,15 @@ import traceback
 from typing import Dict, Any, Optional, Union, Tuple
 
 from pydantic_ai import Agent
+from src.agents.common import memory_handler
 from src.agents.models.automagik_agent import AutomagikAgent
 from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
 from src.agents.simple.stan_agent.models import EvolutionMessagePayload
 from src.agents.simple.stan_agent.specialized.backoffice import backoffice_agent
-from src.agents.simple.stan_agent.specialized.onboarding import onboarding_agent
 from src.agents.simple.stan_agent.specialized.product import product_agent
+from src.db.models import Memory
+from src.db.repository import create_memory
 from src.db.repository.user import update_user_data
 from src.memory.message_history import MessageHistory
 from src.agents.simple.stan_agent.utils import get_or_create_contact
@@ -33,10 +35,12 @@ from src.agents.common.dependencies_helper import (
     add_system_message_to_history
 )
 from src.tools import blackpearl
+from src.tools.blackpearl.schema import StatusAprovacaoEnum
+from src.tools.blackpearl import verificar_cnpj
 
 logger = logging.getLogger(__name__)
 
-class StanAgentAgent(AutomagikAgent):
+class StanAgent(AutomagikAgent):
     """StanAgentAgent implementation using PydanticAI.
     
     This agent provides a basic implementation that follows the PydanticAI
@@ -75,10 +79,8 @@ class StanAgentAgent(AutomagikAgent):
         # Register default tools
         self.tool_registry.register_default_tools(self.context)
         
-        # Register specialized agents         
-        self.tool_registry.register_tool(backoffice_agent)
-        self.tool_registry.register_tool(product_agent)
-        self.tool_registry.register_tool(onboarding_agent)
+        # Register BlackPearl CNPJ verification tool with context injection
+        self.tool_registry.register_tool_with_context(verificar_cnpj, self.context)
         
         logger.info("StanAgentAgent initialized successfully")
     
@@ -91,14 +93,22 @@ class StanAgentAgent(AutomagikAgent):
         model_name = self.dependencies.model_name
         model_settings = create_model_settings(self.dependencies.model_settings)
         
+        
+        # Register specialized agents         
+        logger.info(f"Current context: {self.context}")
+        # Register specialized agents using the simpler method
+        self.tool_registry.register_tool(backoffice_agent)
+        self.tool_registry.register_tool(product_agent)
+        
         # Convert tools to PydanticAI format
         tools = self.tool_registry.convert_to_pydantic_tools()
         logger.info(f"Prepared {len(tools)} tools for PydanticAI agent")
-                    
+        
+        
         try:
             # Create agent instance
             self._agent_instance = Agent(
-                model=model_name,
+                model="openai:gpt-4o",
                 system_prompt=self.system_prompt,
                 tools=tools,
                 model_settings=model_settings,
@@ -113,7 +123,9 @@ class StanAgentAgent(AutomagikAgent):
     async def run(self, input_text: str, *, multimodal_content=None, system_message=None, message_history_obj: Optional[MessageHistory] = None,
                  channel_payload: Optional[dict] = None,
                  message_limit: Optional[int] = 20) -> AgentResponse:
-                
+        
+        user_id = getattr(self.dependencies, 'user_id', None)
+        
         # Convert channel_payload to EvolutionMessagePayload if provided
         evolution_payload = None
         if channel_payload:
@@ -133,8 +145,8 @@ class StanAgentAgent(AutomagikAgent):
         
         # Get or create contact in BlackPearl
         contato_blackpearl = None
+        cliente_blackpearl = None
         if user_number:
-            user_id = getattr(self.dependencies, 'user_id', 'unknown')
             contato_blackpearl = await get_or_create_contact(
                 self.context, 
                 user_number, 
@@ -142,27 +154,69 @@ class StanAgentAgent(AutomagikAgent):
                 user_id,
                 self.db_id
             )
-            5
+            
             if contato_blackpearl:
                 user_name = contato_blackpearl.get("nome", user_name)
                 # Store contact_id in context for future use if needed
                 self.context["blackpearl_contact_id"] = contato_blackpearl.get("id")
                 
+                cliente_blackpearl = await blackpearl.get_clientes(self.context, contatos_id=contato_blackpearl["id"])
+                cliente_blackpearl = cliente_blackpearl["results"][0]
+                
+                if cliente_blackpearl:
+                    self.context["blackpearl_cliente_id"] = cliente_blackpearl.get("id")
+                    self.context["blackpearl_cliente_nome"] = cliente_blackpearl.get("razao_social")
+                    self.context["blackpearl_cliente_email"] = cliente_blackpearl.get("email")
+                    logger.info(f"🔮 BlackPearl Cliente ID: {self.context['blackpearl_cliente_id']} and Name: {self.context['blackpearl_cliente_nome']}")
+                    
                 # Set user information in dependencies if available
                 if hasattr(self.dependencies, 'set_user_info'):
                     self.dependencies.set_user_info({
                         "name": user_name,
                         "phone": user_number,
-                        "blackpearl_contact_id": contato_blackpearl.get("id")
+                        "blackpearl_contact_id": contato_blackpearl.get("id"),
+                        "blackpearl_cliente_id": self.context["blackpearl_cliente_id"]
                     })
-            update_user_data(user_id, {"blackpearl_contact_id": contato_blackpearl.get("id")})
+            update_user_data(user_id, {"blackpearl_contact_id": contato_blackpearl.get("id"), "blackpearl_cliente_id": self.context["blackpearl_cliente_id"]})
             
             logger.info(f"🔮 BlackPearl Contact ID: {contato_blackpearl.get('id')} and Name: {user_name}")
+
+        
+        # Handle different contact registration statuses
+        if contato_blackpearl:
+            status_aprovacao = contato_blackpearl.get("status_aprovacao")
+            user_info_memory = Memory(
+                name="user_information",
+                description="Informações do usuário",
+                content=f"- User Name: {user_name}\n- User Phone: {user_number}\n- User Status: {status_aprovacao}\n- User BlackPearl Contact ID: {contato_blackpearl.get('id')}\n- User BlackPearl Cliente ID: {self.context['blackpearl_cliente_id']} ",
+                session_id=self.context.get("session_id"),
+                agent_id=self.db_id,
+                user_id=user_id,
+                access="read",
+                read_mode="system_prompt"
+            )
+            create_memory(
+                user_info_memory
+            )
+            match status_aprovacao:
+                case StatusAprovacaoEnum.APPROVED:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} is approved")
+                case StatusAprovacaoEnum.PENDING_REVIEW:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} is pending approval")
+                case StatusAprovacaoEnum.REJECTED:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} was rejected")
+                case StatusAprovacaoEnum.NOT_REGISTERED:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} is not registered yet")
+                case StatusAprovacaoEnum.VERIFYING:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} is being verified")
+                case _:
+                    logger.info(f"🔮 Contact {contato_blackpearl.get('id')} has unknown status: {status_aprovacao}")
+        
         
         # Ensure memory variables are initialized
         if self.db_id:
             await self.initialize_memory_variables(getattr(self.dependencies, 'user_id', None))
-            
+    
         # Initialize the agent
         await self._initialize_pydantic_agent()
         
@@ -176,7 +230,7 @@ class StanAgentAgent(AutomagikAgent):
         try:
             # Get filled system prompt
             filled_system_prompt = await self.get_filled_system_prompt(
-                user_id=getattr(self.dependencies, 'user_id', None)
+                user_id=user_id
             )
             
             # Add system prompt to message history

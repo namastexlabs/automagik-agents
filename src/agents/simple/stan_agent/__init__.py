@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 try:
-    from src.agents.simple.stan_agent.agent import StanAgentAgent
+    from src.agents.simple.stan_agent.agent import StanAgent
     from src.agents.models.placeholder import PlaceholderAgent
     
     # Standardized create_agent function
@@ -32,7 +32,7 @@ try:
         if config is None:
             config = {}
         
-        return StanAgentAgent(config)
+        return StanAgent(config)
     
 except Exception as e:
     logger.error(f"Failed to initialize StanAgentAgent module: {str(e)}")

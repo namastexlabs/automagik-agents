@@ -1,14 +1,23 @@
+import os
+from dotenv import load_dotenv
 from pydantic_ai import Agent, RunContext
 import logging
 from typing import Dict, Any, Optional
 
 # Import Blackpearl tools
+from src.db.repository.user import get_user
 from src.tools.blackpearl import (
     get_clientes, get_cliente, create_cliente, update_cliente,
     get_contatos, get_contato
 )
 
+# Import Blackpearl schema
+from src.tools.blackpearl.schema import (
+    Cliente, StatusAprovacaoEnum
+)
+
 # Import Omie tools
+from src.tools.blackpearl.tool import update_contato, verificar_cnpj
 from src.tools.omie import (
     search_clients, 
     search_client_by_cnpj
@@ -21,15 +30,53 @@ from src.tools.gmail import (
 )
 
 # Import necessary schemas
-from src.tools.blackpearl.schema import (
-    Cliente
-)
 from src.tools.omie.schema import ClientSearchInput
 
 logger = logging.getLogger(__name__)
 
-# Path to
-async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = None) -> str:
+load_dotenv()
+
+ENVIRIONMENT_MODE = os.getenv("AM_ENV")
+
+async def make_conversation_summary(message_history) -> str:
+    """Make a summary of the conversation."""
+    if len(message_history) > 0:
+        summary_agent = Agent(
+            'google-gla:gemini-2.0-flash-exp',
+            deps_type=Dict[str, Any],
+        result_type=str,
+        system_prompt=(
+            'You are a specialized summary agent with expertise in summarizing information.'
+            'Condense all conversation information into a few bullet points with all relevand lead information.'
+        ),
+            )
+        
+        # Convert message history to string for summarization
+        # Convert message history to a string format for summarization
+        # Handle different message types (text, tool calls, etc.)
+        message_history_str = ""
+        for msg in message_history:
+            if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                # Standard text messages
+                message_history_str += f"{msg.role}: {msg.content}\n"
+            elif hasattr(msg, 'tool_name') and hasattr(msg, 'args'):
+                # Tool call messages
+                message_history_str += f"tool_call ({msg.tool_name}): {msg.args}\n"
+            elif hasattr(msg, 'part_kind') and msg.part_kind == 'text':
+                # Text part messages
+                message_history_str += f"assistant: {msg.content}\n"
+            else:
+                # Other message types
+                message_history_str += f"message: {str(msg)}\n"
+        # Run the summary agent with the message history
+        summary_result = await summary_agent.run(user_prompt=message_history_str)
+        summary_result_str = summary_result.data
+        logger.info(f"Summary result: {summary_result_str}")
+        return summary_result_str
+    else:
+        return ""
+
+async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> str:
     """Specialized backoffice agent with access to BlackPearl and Omie tools.
     
     Args:
@@ -39,8 +86,22 @@ async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = 
     Returns:
         Response from the agent
     """
-    if context is None:
-        context = {}
+    if ctx is None:
+        ctx = {}
+    
+    user_id = ctx.deps.user_id
+    stan_agent_id = ctx.deps._agent_id_numeric
+    
+    message_history = ctx.messages
+    logger.info(f"User ID: {user_id}")
+    logger.info(f"Stan Agent ID: {stan_agent_id}")
+    
+    summary_result_str = await make_conversation_summary(message_history)
+    
+    EXTRA_PROMPT = ""
+
+    if ENVIRIONMENT_MODE == "development":
+        EXTRA_PROMPT = 'WE ARE IN TEST MODE, WHILE IN TEST MODE CNPJs with situação "Baixada" will be valid Feel free to use this information to create a new client record.'
     
     # Initialize the agent with appropriate system prompt
     backoffice_agent = Agent(  
@@ -48,6 +109,7 @@ async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = 
         deps_type=Dict[str, Any],
         result_type=str,
         system_prompt=(
+            f'{EXTRA_PROMPT}'
             'You are a specialized backoffice agent with expertise in BlackPearl and Omie APIs, working in direct support of STAN. '
             'Your primary responsibilities include:\n'
             '1. Managing client information - finding, creating, and updating client records\n'
@@ -62,6 +124,11 @@ async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = 
             'Respond in a professional, straightforward manner without unnecessary explanations or apologies. '
             'Your role is to be efficient, accurate, and helpful in managing backend business operations.\n\n'
             'IMPORTANT: When writing emails or any external communications, ALWAYS use Portuguese as the default language.'
+            'Any problem that you encounter, please add as much information as possible to the error message so it can be fixed.'
+            'If info is missing, ask for it. If you dont have the info, say so.'
+            'If you need to verify a CNPJ, use the bp_get_info_cnpj tool.'
+
+            f'Here is a summary of the conversation so far: {summary_result_str}'
         ),
     )
     
@@ -108,121 +175,221 @@ async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = 
         return await get_cliente(ctx.deps, cliente_id)
     
     @backoffice_agent.tool
+    async def bp_get_info_cnpj(ctx: RunContext[Dict[str, Any]], cnpj: str) -> Dict[str, Any]:
+        """Get up to date information about a CNPJ. Before creating a new client record, use this tool to verify if the CNPJ is valid and up to date.
+        
+        Args:
+            cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
+        """
+        return await verificar_cnpj(ctx.deps, cnpj)
+    
+    @backoffice_agent.tool
     async def bp_create_cliente(
         ctx: RunContext[Dict[str, Any]], 
-        nome: str,
+        razao_social: str,
+        nome_fantasia: str,
         email: str,
-        telefone: str,
-        cnpj: Optional[str] = None,
-        endereco: Optional[str] = None,
-        cidade: Optional[str] = None,
-        estado: Optional[str] = None,
-        cep: Optional[str] = None,
-        inscricao_estadual: Optional[str] = None,
-        observacao: Optional[str] = None
+        telefone_comercial: str,
+        cnpj: str = None,
+        inscricao_estadual: str = None,
+        endereco: str = None,
+        endereco_numero: str = None,
+        endereco_complemento: str = None,
+        bairro: str = None,
+        cidade: str = None,
+        estado: str = None,
+        cep: str = None,
+        numero_funcionarios:int = None,
+        tipo_operacao: str = None,
+        observacao: str = None
     ) -> Dict[str, Any]:
         """Create a new client in BlackPearl.
         
         Args:
-            nome: Client name
+            razao_social: Company legal name
+            nome_fantasia: Company trading name
             email: Client email
-            telefone: Client phone number
-            cnpj: Client CNPJ (optional)
-            endereco: Client address (optional)
-            cidade: Client city (optional)
-            estado: Client state (optional)
-            cep: Client postal code (optional)
-            inscricao_estadual: Client state registration (optional)
-            observacao: Additional notes about the client (optional)
+            telefone_comercial: Client commercial phone number
+            cnpj: Client CNPJ 
+            inscricao_estadual: Client state registration
+            endereco: Street address
+            endereco_numero: Address number
+            endereco_complemento: Address complement
+            bairro: Neighborhood
+            cidade: Client city 
+            estado: Client state 
+            cep: Client postal code 
+            numero_funcionarios: Number of employees
+            tipo_operacao: Operation type
+            contatos: List of contact IDs associated with this client
+            observacao: Additional notes about the client 
         """
+        # Criar dicionário com os dados diretamente, sem usar o modelo Cliente
         cliente_data = {
-            "nome": nome,
+            "razao_social": razao_social,
+            "nome_fantasia": nome_fantasia,
             "email": email,
-            "telefone": telefone
+            "telefone_comercial": telefone_comercial,
+            "status_aprovacao": StatusAprovacaoEnum.PENDING_REVIEW  # Passa a string direto
         }
         
         # Add optional fields if provided
         if cnpj:
             cliente_data["cnpj"] = cnpj
+        if inscricao_estadual:
+            cliente_data["inscricao_estadual"] = inscricao_estadual
         if endereco:
             cliente_data["endereco"] = endereco
+        if endereco_numero:
+            cliente_data["endereco_numero"] = endereco_numero
+        if endereco_complemento:
+            cliente_data["endereco_complemento"] = endereco_complemento
+        if bairro:
+            cliente_data["bairro"] = bairro
         if cidade:
             cliente_data["cidade"] = cidade
         if estado:
             cliente_data["estado"] = estado
         if cep:
             cliente_data["cep"] = cep
-        if inscricao_estadual:
-            cliente_data["inscricao_estadual"] = inscricao_estadual
+        if numero_funcionarios is not None:
+            cliente_data["numero_funcionarios"] = numero_funcionarios
+        if tipo_operacao:
+            cliente_data["tipo_operacao"] = tipo_operacao
         if observacao:
             cliente_data["observacao"] = observacao
             
+        # Get user information and add contact if available
+        user_id = getattr(ctx.deps, 'user_id', None)
+        if user_id:
+            user_info = get_user(user_id)
+            if user_info:
+                user_data = user_info.user_data
+                blackpearl_contact_id = user_data.get("blackpearl_contact_id")
+                if blackpearl_contact_id:
+                    cliente_data["contatos"] = [blackpearl_contact_id]
+        
+        # Criar objeto Cliente corretamente
         cliente = Cliente(**cliente_data)
-        return await create_cliente(ctx.deps, cliente)
+        cliente_created = await create_cliente(ctx.deps, cliente)
+        logger.info(f"Cliente criado: {cliente_created}")
+        
+        await update_contato(ctx.deps, blackpearl_contact_id, {"status_aprovacao": StatusAprovacaoEnum.PENDING_REVIEW, "detalhes_aprovacao": "Cliente criado, aguardando aprovação."})
+        
+        return cliente_created
     
     @backoffice_agent.tool
     async def bp_update_cliente(
         ctx: RunContext[Dict[str, Any]], 
         cliente_id: int,
-        nome: Optional[str] = None,
+        razao_social: Optional[str] = None,
+        nome_fantasia: Optional[str] = None,
         email: Optional[str] = None,
-        telefone: Optional[str] = None,
+        telefone_comercial: Optional[str] = None,
         cnpj: Optional[str] = None,
+        inscricao_estadual: Optional[str] = None,
         endereco: Optional[str] = None,
+        endereco_numero: Optional[str] = None,
+        endereco_complemento: Optional[str] = None,
+        bairro: Optional[str] = None,
         cidade: Optional[str] = None,
         estado: Optional[str] = None,
         cep: Optional[str] = None,
-        inscricao_estadual: Optional[str] = None,
+        numero_funcionarios: Optional[int] = None,
+        tipo_operacao: Optional[str] = None,
+        status_aprovacao: Optional[str] = None,
+        contatos: Optional[list] = None,
         observacao: Optional[str] = None
     ) -> Dict[str, Any]:
         """Update a client in BlackPearl.
         
         Args:
             cliente_id: The client ID
-            nome: Client name (optional)
+            razao_social: Company legal name (optional)
+            nome_fantasia: Company trading name (optional)
             email: Client email (optional)
-            telefone: Client phone number (optional)
+            telefone_comercial: Client commercial phone number (optional)
             cnpj: Client CNPJ (optional)
-            endereco: Client address (optional)
+            inscricao_estadual: Client state registration (optional)
+            endereco: Street address (optional)
+            endereco_numero: Address number (optional)
+            endereco_complemento: Address complement (optional)
+            bairro: Neighborhood (optional)
             cidade: Client city (optional)
             estado: Client state (optional)
             cep: Client postal code (optional)
-            inscricao_estadual: Client state registration (optional)
+            numero_funcionarios: Number of employees (optional)
+            tipo_operacao: Operation type (optional)
+            status_aprovacao: Approval status (NOT_REGISTERED, REJECTED, APPROVED, VERIFYING) (optional)
+            contatos: List of contact IDs associated with this client (optional)
             observacao: Additional notes (optional)
         """
-        # First get the current client data
-        current_cliente = await get_cliente(ctx.deps, cliente_id)
-        
-        # Update with new values if provided
-        cliente_data = {}
-        for key, value in current_cliente.items():
-            if key != "id" and key != "created_at" and key != "updated_at":
-                cliente_data[key] = value
-                
-        # Update fields with new values if provided
-        if nome:
-            cliente_data["nome"] = nome
-        if email:
-            cliente_data["email"] = email
-        if telefone:
-            cliente_data["telefone"] = telefone
-        if cnpj:
-            cliente_data["cnpj"] = cnpj
-        if endereco:
-            cliente_data["endereco"] = endereco
-        if cidade:
-            cliente_data["cidade"] = cidade
-        if estado:
-            cliente_data["estado"] = estado
-        if cep:
-            cliente_data["cep"] = cep
-        if inscricao_estadual:
-            cliente_data["inscricao_estadual"] = inscricao_estadual
-        if observacao:
-            cliente_data["observacao"] = observacao
+        try:
+            # First get the current client data
+            current_cliente = await get_cliente(ctx.deps, cliente_id)
             
-        cliente = Cliente(**cliente_data)
-        return await update_cliente(ctx.deps, cliente_id, cliente)
+            # Update with new values if provided
+            cliente_data = {}
+            for key, value in current_cliente.items():
+                if key != "id" and key != "created_at" and key != "updated_at":
+                    cliente_data[key] = value
+                    
+            # Update fields with new values if provided
+            if razao_social:
+                cliente_data["razao_social"] = razao_social
+            if nome_fantasia:
+                cliente_data["nome_fantasia"] = nome_fantasia
+            if email:
+                cliente_data["email"] = email
+            if telefone_comercial:
+                cliente_data["telefone_comercial"] = telefone_comercial
+            if cnpj:
+                cliente_data["cnpj"] = cnpj
+            if inscricao_estadual:
+                cliente_data["inscricao_estadual"] = inscricao_estadual
+            if endereco:
+                cliente_data["endereco"] = endereco
+            if endereco_numero:
+                cliente_data["endereco_numero"] = endereco_numero
+            if endereco_complemento:
+                cliente_data["endereco_complemento"] = endereco_complemento
+            if bairro:
+                cliente_data["bairro"] = bairro
+            if cidade:
+                cliente_data["cidade"] = cidade
+            if estado:
+                cliente_data["estado"] = estado
+            if cep:
+                cliente_data["cep"] = cep
+            if numero_funcionarios is not None:
+                cliente_data["numero_funcionarios"] = numero_funcionarios
+            if tipo_operacao:
+                cliente_data["tipo_operacao"] = tipo_operacao
+            if status_aprovacao:
+                # Simplesmente passa a string diretamente
+                cliente_data["status_aprovacao"] = status_aprovacao
+            if contatos:
+                cliente_data["contatos"] = contatos
+            if observacao:
+                cliente_data["observacao"] = observacao
+                
+            # Get user information and add contact if not already present
+            user_id = getattr(ctx.deps, 'user_id', None)
+            if user_id and not contatos:
+                user_info = get_user(user_id)
+                if user_info:
+                    user_data = user_info.user_data
+                    blackpearl_contact_id = user_data.get("blackpearl_contact_id")
+                    if blackpearl_contact_id:
+                        cliente_data["contatos"] = [blackpearl_contact_id]
+            
+            # Criar objeto Cliente corretamente
+            cliente = Cliente(**cliente_data)
+            return await update_cliente(ctx.deps, cliente_id, cliente)
+            
+        except Exception as e:
+            logger.error(f"Erro ao atualizar cliente: {str(e)}")
+            return {"error": str(e)}
     
     # Register BlackPearl contact tools
     @backoffice_agent.tool
@@ -367,7 +534,7 @@ async def backoffice_agent(input_text: str, context: Optional[Dict[str, Any]] = 
 
     # Execute the agent
     try:
-        result = await backoffice_agent.run(input_text, deps=context)
+        result = await backoffice_agent.run(input_text, deps=ctx)
         logger.info(f"Backoffice agent response: {result}")
         return result.data
     except Exception as e:
