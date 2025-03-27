@@ -76,6 +76,65 @@ async def make_conversation_summary(message_history) -> str:
     else:
         return ""
 
+
+async def make_lead_email(lead_information: str, extra_context: str = None) -> str:
+    """Make a lead email."""
+    """Format lead information into a properly formatted HTML email.
+    
+    Args:
+        lead_information: Information about the lead
+        
+    Returns:
+        Formatted HTML email content
+    """
+    email_agent = Agent(
+        'google-gla:gemini-2.0-flash-exp',
+        deps_type=Dict[str, Any],
+        result_type=str,
+        system_prompt=(
+            'You are a specialized email formatting agent with expertise in creating professional HTML emails.'
+            'Your task is to take lead information and format it into a clean, professional HTML email in Portuguese.'
+            'The email should have proper styling, clear sections, and be easy to read.'
+            'Use appropriate HTML tags, styling, and formatting to create a visually appealing email.'
+            'Ensure all information is properly organized and highlighted.'
+            'The email should be suitable for business communication and maintain a professional tone.'
+        ),
+        tools=[
+            verificar_cnpj
+        ]
+    )
+    
+    # Run the email formatting agent with the lead information
+    email_prompt = (
+        f"Format the following lead information into a professional HTML email in Portuguese:\n\n"
+        f"{lead_information}\n\n"
+        f"Use the cnpj_verification tool to grab more relevant information about the company."
+        f"The email should include:\n"
+        f"- A clear header with the Solid logo or name\n"
+        f"- Well-organized sections for different types of information\n"
+        f"- Proper styling (colors, fonts, spacing)\n"
+        f"- A professional closing\n"
+        f"- Any contact information highlighted\n"
+        f"Please provide only the HTML code without explanations."
+        f"Here is some extra context that might be relevant to the lead: {extra_context}"
+        f"It should follow some structure, like: "
+        f"BlackPearl Cliente ID: 1234567890"
+        f"Nome: João Silva"
+        f"CNPJ: 12.345.678/0001-00"
+        f"Email: joao.silva@exemplo.com"
+        f"Telefone: +5511987654321"
+        f"Empresa: Exemplo Ltda."
+        f"Endereço: Rua Exemplo, 123 - São Paulo/SP"
+        f"Detalhes: Algumas informações adicionais"
+        f"Interesses: Algumas informações sobre os interesses do lead"
+    )
+    
+    email_result = await email_agent.run(user_prompt=email_prompt)
+    formatted_email = email_result.data
+    
+    logger.info("Email formatted successfully")
+    return formatted_email
+
 async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> str:
     """Specialized backoffice agent with access to BlackPearl and Omie tools.
     
@@ -261,6 +320,7 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
             
         # Get user information and add contact if available
         user_id = getattr(ctx.deps, 'user_id', None)
+        blackpearl_contact_id = None
         if user_id:
             user_info = get_user(user_id)
             if user_info:
@@ -274,7 +334,8 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         cliente_created = await create_cliente(ctx.deps, cliente)
         logger.info(f"Cliente criado: {cliente_created}")
         
-        await update_contato(ctx.deps, blackpearl_contact_id, {"status_aprovacao": StatusAprovacaoEnum.PENDING_REVIEW, "detalhes_aprovacao": "Cliente criado, aguardando aprovação."})
+        if blackpearl_contact_id:
+            await update_contato(ctx.deps, blackpearl_contact_id, {"status_aprovacao": StatusAprovacaoEnum.PENDING_REVIEW, "detalhes_aprovacao": "Cliente criado, aguardando aprovação."})
         
         return cliente_created
     
@@ -479,7 +540,7 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
            Consolidate all information in a proper format, in portuguese, and send to the solid team.
            Example: 
 
-                BlackPearl User ID: 100
+                BlackPearl Cliente ID: 100
                 Nome: João Silva
                 Email: joao.silva@exemplo.com
                 Telefone: +5511987654321
@@ -488,7 +549,6 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
                 Interesses: Algumas informações sobre os interesses do lead
                 CNPJ: 12.345.678/0001-00
                 Endereço: Rua Exemplo, 123 - São Paulo/SP 
-                
         
         Args:
             lead_information: Information about the lead
@@ -497,18 +557,28 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         # Construct the email
         subject = f"[STAN - Novo Lead]"
         
-        message = "A new lead has been registered with the following details:\n\n"
-        message += "\n".join(lead_information)
-        message += "\n\nPlease follow up with this lead as soon as possible."
+        # Format the message properly in Portuguese
+        message = "<html><body>"
         
+        # Convert simple line breaks to HTML paragraphs
+        
+        email_body = await make_lead_email(lead_information, extra_context=summary_result_str)
+        
+        message += email_body
+        
+        message += "</body></html>"
+        
+        plain_text = email_body.replace("<html><body>", "").replace("</body></html>", "")
         # Determine recipient email
         recipient = "cezar@namastex.ai"
         
-        # Create email input
+        # Create email input with HTML formatting
         email_input = SendEmailInput(
             to=recipient,
             subject=subject,
-            message=message
+            message=message,
+            content_type="text/html",
+            plain_text_alternative=plain_text
         )
         
         # Send the email using Gmail API
@@ -518,18 +588,18 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
             if result["success"]:
                 return {
                     "success": True,
-                    "message": f"Lead information has been sent to the solid team",
+                    "message": f"Informações do lead foram enviadas para a equipe da Solid",
                     "email_id": result["message_id"]
                 }
             else:
                 return {
                     "success": False,
-                    "error": f"Failed to send lead email: {result['error']}"
+                    "error": f"Falha ao enviar email do lead: {result['error']}"
                 }
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Error sending lead email: {str(e)}"
+                "error": f"Erro ao enviar email do lead: {str(e)}"
             }
 
     # Execute the agent

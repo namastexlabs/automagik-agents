@@ -11,6 +11,8 @@ class SendEmailInput(BaseModel):
     cc: Optional[List[str]] = Field(None, description="List of email addresses to CC")
     subject: str = Field(..., description="Subject of the email")
     message: str = Field(..., description="Content of the email")
+    content_type: Optional[str] = Field("text/plain", description="Content type of the email: text/plain or text/html")
+    plain_text_alternative: Optional[str] = Field(None, description="Plain text alternative for HTML emails")
     extra_content: Optional[str] = Field(None, description="Additional content to append to the email message")
 
 class SendEmailResult(BaseModel):
