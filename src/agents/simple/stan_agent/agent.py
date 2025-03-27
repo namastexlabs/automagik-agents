@@ -15,6 +15,7 @@ from src.agents.simple.stan_agent.models import EvolutionMessagePayload
 from src.agents.simple.stan_agent.specialized.backoffice import backoffice_agent
 from src.agents.simple.stan_agent.specialized.onboarding import onboarding_agent
 from src.agents.simple.stan_agent.specialized.product import product_agent
+from src.db.repository.user import update_user_data
 from src.memory.message_history import MessageHistory
 from src.agents.simple.stan_agent.utils import get_or_create_contact
 
@@ -154,6 +155,8 @@ class StanAgentAgent(AutomagikAgent):
                         "phone": user_number,
                         "blackpearl_contact_id": contato_blackpearl.get("id")
                     })
+            update_user_data(user_id, {"blackpearl_contact_id": contato_blackpearl.get("id")})
+            
             logger.info(f"🔮 BlackPearl Contact ID: {contato_blackpearl.get('id')} and Name: {user_name}")
         
         # Ensure memory variables are initialized
