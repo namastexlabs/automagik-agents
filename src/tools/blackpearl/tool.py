@@ -470,4 +470,24 @@ async def update_regra_negocio(ctx: Dict[str, Any], regra_id: int, regra: RegraD
     """
     provider = BlackpearlProvider()
     async with provider:
-        return await provider.update_regra_negocio(regra_id, regra) 
+        return await provider.update_regra_negocio(regra_id, regra)
+
+async def verificar_cnpj(ctx: Dict[str, Any], cnpj: str) -> Dict[str, Any]:
+    """Verify a CNPJ number in the Blackpearl API.
+    
+    This tool validates a CNPJ (Brazilian company registration number) and returns
+    information about the company if the CNPJ is valid.
+    
+    Args:
+        ctx: Agent context
+        cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
+        
+    Returns:
+        CNPJ verification result containing:
+        - is_valid: Boolean indicating if the CNPJ is valid
+        - company_info: Company information if the CNPJ is valid (name, address, etc.)
+        - status: Verification status message
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.verificar_cnpj(cnpj) 

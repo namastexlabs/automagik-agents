@@ -574,4 +574,24 @@ class BlackpearlProvider:
             "PATCH",
             f"/api/v1/regras/negocio/{regra_id}/",
             data=regra.model_dump(exclude_unset=True)
-        ) 
+        )
+        
+    @handle_api_error
+    @validate_api_response
+    async def verificar_cnpj(self, cnpj: str) -> Dict[str, Any]:
+        """Verify a CNPJ in the Blackpearl API.
+        
+        Args:
+            cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
+            
+        Returns:
+            CNPJ verification result containing validation status and company information if valid
+        """
+        # Clean the CNPJ string to ensure consistent format
+        cleaned_cnpj = ''.join(filter(str.isdigit, cnpj))
+        
+        data = {
+            "cnpj": cleaned_cnpj
+        }
+        
+        return await self._request("POST", "/api/tools/cnpj/verificar/", data=data) 

@@ -33,6 +33,7 @@ from src.tools.blackpearl.tool import (
     get_regra_negocio,
     create_regra_negocio,
     update_regra_negocio,
+    verificar_cnpj,
 )
 
 __all__ = [
@@ -65,4 +66,5 @@ __all__ = [
     'get_regra_negocio',
     'create_regra_negocio',
     'update_regra_negocio',
+    'verificar_cnpj',
 ] 
