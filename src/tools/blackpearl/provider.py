@@ -4,7 +4,7 @@ This module provides the API client implementation for interacting with the Blac
 """
 import logging
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import aiohttp
 from src.tools.blackpearl.interface import validate_api_response, handle_api_error, format_api_request, filter_none_params
 from src.tools.blackpearl.schema import (
@@ -126,7 +126,7 @@ class BlackpearlProvider:
         Returns:
             Created client data
         """
-        return await self._request("POST", "/api/v1/cadastro/clientes/", data=cliente.dict())
+        return await self._request("POST", "/api/v1/cadastro/clientes/", data=cliente.model_dump())
         
     @handle_api_error
     @validate_api_response
@@ -143,7 +143,7 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/cadastro/clientes/{cliente_id}/",
-            data=cliente.dict(exclude_unset=True)
+            data=cliente.model_dump(exclude_unset=True)
         )
         
     @handle_api_error
@@ -199,16 +199,22 @@ class BlackpearlProvider:
         
     @handle_api_error
     @validate_api_response
-    async def create_contato(self, contato: Contato) -> Dict[str, Any]:
+    async def create_contato(self, contato: Union[Contato, Dict[str, Any]]) -> Dict[str, Any]:
         """Create a new contact.
         
         Args:
-            contato: Contact data
+            contato: Contact data (either Contato object or dictionary)
             
         Returns:
             Created contact data
         """
-        return await self._request("POST", "/api/v1/cadastro/contatos/", data=contato.dict())
+        # Handle both Contato objects and dictionaries
+        if isinstance(contato, Contato):
+            data = contato.model_dump()
+        else:
+            data = contato
+            
+        return await self._request("POST", "/api/v1/cadastro/contatos/", data=data)
         
     @handle_api_error
     @validate_api_response
@@ -225,7 +231,7 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/cadastro/contatos/{contato_id}/",
-            data=contato.dict(exclude_unset=True)
+            data=contato.model_dump(exclude_unset=True)
         )
         
     @handle_api_error
@@ -290,7 +296,7 @@ class BlackpearlProvider:
         Returns:
             Created salesperson data
         """
-        return await self._request("POST", "/api/v1/cadastro/vendedores/", data=vendedor.dict())
+        return await self._request("POST", "/api/v1/cadastro/vendedores/", data=vendedor.model_dump())
         
     @handle_api_error
     @validate_api_response
@@ -307,7 +313,7 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/cadastro/vendedores/{vendedor_id}/",
-            data=vendedor.dict(exclude_unset=True)
+            data=vendedor.model_dump(exclude_unset=True)
         )
         
     @handle_api_error
@@ -406,7 +412,7 @@ class BlackpearlProvider:
         Returns:
             Created order data
         """
-        return await self._request("POST", "/api/v1/pedidos/vendas/", data=pedido.dict())
+        return await self._request("POST", "/api/v1/pedidos/vendas/", data=pedido.model_dump())
         
     @handle_api_error
     @validate_api_response
@@ -423,7 +429,7 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/pedidos/vendas/{pedido_id}/",
-            data=pedido.dict(exclude_unset=True)
+            data=pedido.model_dump(exclude_unset=True)
         )
         
     @handle_api_error
@@ -478,7 +484,7 @@ class BlackpearlProvider:
         Returns:
             Created shipping rule data
         """
-        return await self._request("POST", "/api/v1/regras/frete/", data=regra.dict())
+        return await self._request("POST", "/api/v1/regras/frete/", data=regra.model_dump())
         
     @handle_api_error
     @validate_api_response
@@ -495,7 +501,7 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/regras/frete/{regra_id}/",
-            data=regra.dict(exclude_unset=True)
+            data=regra.model_dump(exclude_unset=True)
         )
         
     @handle_api_error
@@ -550,7 +556,7 @@ class BlackpearlProvider:
         Returns:
             Created business rule data
         """
-        return await self._request("POST", "/api/v1/regras/negocio/", data=regra.dict())
+        return await self._request("POST", "/api/v1/regras/negocio/", data=regra.model_dump())
         
     @handle_api_error
     @validate_api_response
@@ -567,5 +573,5 @@ class BlackpearlProvider:
         return await self._request(
             "PATCH",
             f"/api/v1/regras/negocio/{regra_id}/",
-            data=regra.dict(exclude_unset=True)
+            data=regra.model_dump(exclude_unset=True)
         ) 

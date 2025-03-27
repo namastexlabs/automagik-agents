@@ -410,4 +410,12 @@ class AutomagikAgentsDependencies(BaseDependencies):
         """
         # This is now a placeholder method that does nothing
         # We'll let errors occur naturally if the model doesn't support the modality
-        pass 
+        pass
+        
+    def set_user_info(self, user_info: Dict[str, Any]) -> None:
+        """Set user information for the current session.
+        
+        Args:
+            user_info: Dictionary with user information including name, phone, etc.
+        """
+        self.user_info = user_info 

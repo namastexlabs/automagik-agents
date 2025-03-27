@@ -4,7 +4,7 @@ This module provides tools for interacting with the Blackpearl API.
 """
 import logging
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from src.tools.blackpearl.provider import BlackpearlProvider
 from src.tools.blackpearl.schema import (
     Cliente, Contato, Vendedor, Produto, PedidoDeVenda, ItemDePedido,
@@ -129,12 +129,12 @@ async def get_contato(ctx: Dict[str, Any], contato_id: int) -> Dict[str, Any]:
     async with provider:
         return await provider.get_contato(contato_id)
 
-async def create_contato(ctx: Dict[str, Any], contato: Contato) -> Dict[str, Any]:
+async def create_contato(ctx: Dict[str, Any], contato: Union[Contato, Dict[str, Any]]) -> Dict[str, Any]:
     """Create a new contact in the Blackpearl API.
     
     Args:
         ctx: Agent context
-        contato: Contact data
+        contato: Contact data (either a Contato object or a dictionary)
         
     Returns:
         Created contact data

@@ -5,16 +5,18 @@ and inherits common functionality from AutomagikAgent.
 """
 import logging
 import traceback
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Tuple
 
 from pydantic_ai import Agent
 from src.agents.models.automagik_agent import AutomagikAgent
 from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
+from src.agents.simple.stan_agent.models import EvolutionMessagePayload
 from src.agents.simple.stan_agent.specialized.backoffice import backoffice_agent
 from src.agents.simple.stan_agent.specialized.onboarding import onboarding_agent
 from src.agents.simple.stan_agent.specialized.product import product_agent
 from src.memory.message_history import MessageHistory
+from src.agents.simple.stan_agent.utils import get_or_create_contact
 
 # Import only necessary utilities
 from src.agents.common.message_parser import (
@@ -29,6 +31,7 @@ from src.agents.common.dependencies_helper import (
     get_model_name,
     add_system_message_to_history
 )
+from src.tools import blackpearl
 
 logger = logging.getLogger(__name__)
 
@@ -107,38 +110,66 @@ class StanAgentAgent(AutomagikAgent):
             raise
         
     async def run(self, input_text: str, *, multimodal_content=None, system_message=None, message_history_obj: Optional[MessageHistory] = None,
-                 channel_payload: Optional[Dict] = None,
+                 channel_payload: Optional[dict] = None,
                  message_limit: Optional[int] = 20) -> AgentResponse:
-        """Run the agent with the given input.
+                
+        # Convert channel_payload to EvolutionMessagePayload if provided
+        evolution_payload = None
+        if channel_payload:
+            try:
+                # Convert the dictionary to EvolutionMessagePayload model
+                evolution_payload = EvolutionMessagePayload(**channel_payload)
+                logger.debug("Successfully converted channel_payload to EvolutionMessagePayload")
+            except Exception as e:
+                logger.error(f"Failed to convert channel_payload to EvolutionMessagePayload: {str(e)}")
         
-        Args:
-            input_text: Text input for the agent
-            multimodal_content: Optional multimodal content
-            system_message: Optional system message for this run (ignored in favor of template)
-            message_history_obj: Optional MessageHistory instance for DB storage
-            
-        Returns:
-            AgentResponse object with result and metadata
-        """
+        # Extract user information
+        user_number, user_name = None, None
+        if evolution_payload:
+            user_number = evolution_payload.get_user_number()
+            user_name = evolution_payload.get_user_name()
+            logger.debug(f"Extracted user info: number={user_number}, name={user_name}")
+        
+        # Get or create contact in BlackPearl
+        contato_blackpearl = None
+        if user_number:
+            user_id = getattr(self.dependencies, 'user_id', 'unknown')
+            contato_blackpearl = await get_or_create_contact(
+                self.context, 
+                user_number, 
+                user_name,
+                user_id,
+                self.db_id
+            )
+            5
+            if contato_blackpearl:
+                user_name = contato_blackpearl.get("nome", user_name)
+                # Store contact_id in context for future use if needed
+                self.context["blackpearl_contact_id"] = contato_blackpearl.get("id")
+                
+                # Set user information in dependencies if available
+                if hasattr(self.dependencies, 'set_user_info'):
+                    self.dependencies.set_user_info({
+                        "name": user_name,
+                        "phone": user_number,
+                        "blackpearl_contact_id": contato_blackpearl.get("id")
+                    })
+            logger.info(f"🔮 BlackPearl Contact ID: {contato_blackpearl.get('id')} and Name: {user_name}")
+        
         # Ensure memory variables are initialized
         if self.db_id:
             await self.initialize_memory_variables(getattr(self.dependencies, 'user_id', None))
-                
+            
         # Initialize the agent
         await self._initialize_pydantic_agent()
+        
         
         # Get message history in PydanticAI format
         pydantic_message_history = []
         if message_history_obj:
             pydantic_message_history = message_history_obj.get_formatted_pydantic_messages(limit=message_limit)
         
-        # Prepare user input (handle multimodal content)
         user_input = input_text
-        if multimodal_content:
-            if hasattr(self.dependencies, 'configure_for_multimodal'):
-                self.dependencies.configure_for_multimodal(True)
-            user_input = {"text": input_text, "multimodal_content": multimodal_content}
-        
         try:
             # Get filled system prompt
             filled_system_prompt = await self.get_filled_system_prompt(
