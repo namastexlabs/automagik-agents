@@ -156,11 +156,11 @@ class ToolRegistry:
                     # Use the PydanticAI tool definition if available
                     tool = func.get_pydantic_tool()
                     tools.append(tool)
-                    logger.info(f"Converted to PydanticAI tool: {name}")
+                    logger.debug(f"Converted to PydanticAI tool: {name}")
                 elif isinstance(func, PydanticTool):
                     # If it's already a PydanticTool instance, use it directly
                     tools.append(func)
-                    logger.info(f"Added existing PydanticTool: {name}")
+                    logger.debug(f"Added existing PydanticTool: {name}")
                 elif hasattr(func, "__doc__") and callable(func):
                     # Create a basic wrapper for regular functions
                     doc = func.__doc__ or f"Tool for {name}"
@@ -171,13 +171,13 @@ class ToolRegistry:
                         function=func
                     )
                     tools.append(tool)
-                    logger.info(f"Created PydanticTool for function: {name}")
+                    logger.debug(f"Created PydanticTool for function: {name}")
                 else:
                     logger.warning(f"Could not convert tool {name}: not a function or missing documentation")
             except Exception as e:
                 logger.error(f"Error converting tool {name}: {str(e)}")
                 
-        logger.info(f"Converted {len(tools)} tools to PydanticAI tools")
+        logger.debug(msg=f"Converted {len(tools)} tools to PydanticAI tools")
         return tools
 
     def update_context(self, new_context: Dict[str, Any]) -> None:
