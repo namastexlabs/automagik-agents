@@ -475,61 +475,29 @@ async def update_regra_negocio(ctx: Dict[str, Any], regra_id: int, regra: RegraD
         return await provider.update_regra_negocio(regra_id, regra)
 
 async def verificar_cnpj(ctx: Dict[str, Any], cnpj: str) -> Dict[str, Any]:
-    """Verify a CNPJ number in the Blackpearl API.
-    
-    This tool validates a CNPJ (Brazilian company registration number) and returns
-    information about the company if the CNPJ is valid.
+    """Verify a CNPJ in the Blackpearl API.
     
     Args:
         ctx: Agent context
         cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
         
     Returns:
-        CNPJ verification result containing:
-        - is_valid: Boolean indicating if the CNPJ is valid
-        - company_info: Company information if the CNPJ is valid (name, address, etc.)
-        - status: Verification status message
+        CNPJ verification result containing validation status and company information if valid
     """
-    import logging
-    logger = logging.getLogger(__name__)
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.verificar_cnpj(cnpj)
+
+async def finalizar_cadastro(ctx: Dict[str, Any], cliente_id: int) -> Dict[str, Any]:
+    """Finalize client registration in Omie API.
     
-    # Basic CNPJ validation before making the API call
-    # Strip any non-numeric characters
-    cleaned_cnpj = ''.join(filter(str.isdigit, cnpj))
-    
-    # Check if CNPJ has the correct length
-    if len(cleaned_cnpj) != 14:
-        logger.warning(f"Invalid CNPJ format: {cnpj} (cleaned: {cleaned_cnpj}) - incorrect length")
-        return {
-            "is_valid": False,
-            "status": "invalid_format",
-            "message": "CNPJ inválido: formato incorreto. O CNPJ deve ter 14 dígitos numéricos."
-        }
-    
-    try:
-        provider = BlackpearlProvider()
-        async with provider:
-            result = await provider.verificar_cnpj(cnpj)
-            return {
-                "is_valid": True,
-                "company_info": result,
-                "status": "success"
-            }
-    except Exception as e:
-        logger.error(f"Error verifying CNPJ {cnpj}: {str(e)}")
+    Args:
+        ctx: Agent context
+        cliente_id: Client ID
         
-        # Check if it's a 400 Bad Request (likely invalid CNPJ)
-        if "400" in str(e) and "Bad Request" in str(e):
-            return {
-                "is_valid": False,
-                "status": "invalid_cnpj",
-                "message": "CNPJ inválido ou não encontrado na Receita Federal."
-            }
-        
-        # For other errors
-        return {
-            "is_valid": False,
-            "status": "api_error",
-            "message": f"Erro ao verificar CNPJ: {str(e)}",
-            "error": str(e)
-        } 
+    Returns:
+        Registration result with codigo_cliente_omie
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.finalizar_cadastro(cliente_id) 

@@ -586,19 +586,25 @@ class BlackpearlProvider:
     @handle_api_error
     @validate_api_response
     async def verificar_cnpj(self, cnpj: str) -> Dict[str, Any]:
-        """Verify a CNPJ in the Blackpearl API.
+        """Verify CNPJ.
         
         Args:
-            cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
+            cnpj: CNPJ to verify
             
         Returns:
-            CNPJ verification result containing validation status and company information if valid
+            Verification result
         """
-        # Clean the CNPJ string to ensure consistent format
-        cleaned_cnpj = ''.join(filter(str.isdigit, cnpj))
+        return await self._request("POST", "/api/tools/cnpj/verificar/", data={"cnpj": cnpj})
         
-        data = {
-            "cnpj": cleaned_cnpj
-        }
+    @handle_api_error
+    @validate_api_response
+    async def finalizar_cadastro(self, cliente_id: int) -> Dict[str, Any]:
+        """Finalize client registration in Omie API.
         
-        return await self._request("POST", "/api/tools/cnpj/verificar/", data=data) 
+        Args:
+            cliente_id: Client ID
+            
+        Returns:
+            Registration result with codigo_cliente_omie
+        """
+        return await self._request("GET", f"/api/v1/cadastro/finalizar/{cliente_id}/") 
