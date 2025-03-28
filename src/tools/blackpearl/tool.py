@@ -38,7 +38,7 @@ async def get_clientes(
     async with provider:
         return await provider.get_clientes(limit, offset, search, ordering, **filters)
 
-async def get_cliente(ctx: Dict[str, Any], cliente_id: int) -> Dict[str, Any]:
+async def get_cliente(ctx: Dict[str, Any], cliente_id: int) -> Cliente:
     """Get a specific client from the Blackpearl API.
     
     Args:
@@ -50,7 +50,8 @@ async def get_cliente(ctx: Dict[str, Any], cliente_id: int) -> Dict[str, Any]:
     """
     provider = BlackpearlProvider()
     async with provider:
-        return await provider.get_cliente(cliente_id)
+        cliente = await provider.get_cliente(cliente_id)
+        return Cliente(**cliente)
 
 async def create_cliente(ctx: Dict[str, Any], cliente: Cliente) -> Dict[str, Any]:
     """Create a new client in the Blackpearl API.
@@ -115,7 +116,7 @@ async def get_contatos(
     async with provider:
         return await provider.get_contatos(limit, offset, search, ordering)
 
-async def get_contato(ctx: Dict[str, Any], contato_id: int) -> Dict[str, Any]:
+async def get_contato(ctx: Dict[str, Any], contato_id: int) -> Contato:
     """Get a specific contact from the Blackpearl API.
     
     Args:
@@ -127,7 +128,8 @@ async def get_contato(ctx: Dict[str, Any], contato_id: int) -> Dict[str, Any]:
     """
     provider = BlackpearlProvider()
     async with provider:
-        return await provider.get_contato(contato_id)
+        contato = await provider.get_contato(contato_id)
+        return Contato(**contato)
 
 async def create_contato(ctx: Dict[str, Any], contato: Union[Contato, Dict[str, Any]]) -> Dict[str, Any]:
     """Create a new contact in the Blackpearl API.
