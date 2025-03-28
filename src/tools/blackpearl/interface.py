@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Dict, Any, Optional, Callable
 from functools import wraps
+from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ def handle_api_error(func):
     return wrapper
 
 def format_api_request(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Format request data by removing None values.
+    """Format request data by removing None values and converting datetime to ISO format.
     
     Args:
         data: Request data
@@ -57,7 +59,19 @@ def format_api_request(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if data is None:
         return {}
         
-    return {k: v for k, v in data.items() if v is not None}
+    formatted_data = {}
+    for k, v in data.items():
+        if v is not None:
+            if isinstance(v, datetime):
+                # Ensure datetime is timezone-aware
+                if v.tzinfo is None:
+                    v = pytz.timezone('America/Sao_Paulo').localize(v)
+                # Format with microseconds and timezone offset
+                formatted_data[k] = v.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+            else:
+                formatted_data[k] = v
+                
+    return formatted_data
 
 def filter_none_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Filter out None values from request parameters.
