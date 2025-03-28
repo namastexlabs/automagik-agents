@@ -51,7 +51,7 @@ async def get_or_create_contact(context: Dict[str, Any],
     logger.info(f"Creating new contact for {user_name} with number {user_number}")
     
     # Generate wpp_session_id using user_id and agent_id
-    wpp_session_id = f"{user_id}_{agent_id}"
+    wpp_session_id = f"{user_id}_{agent_id}_devmode"
     
     try:
         # Create current time as ISO format string

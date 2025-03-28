@@ -115,6 +115,7 @@ class StanEmailAgent(AutomagikAgent):
                 default=""
             )
             
+            
         try:
             # Create agent instance
             self._agent_instance = Agent(
@@ -315,7 +316,6 @@ class StanEmailAgent(AutomagikAgent):
                         
                         await blackpearl.finalizar_cadastro(ctx=self.context, cliente_id=black_pearl_client.id)
                     
-                    #TODO: fix blackpearl update contato and cliente
                     try:
                         await blackpearl.update_contato(ctx=self.context, contato_id=black_pearl_contact.id, contato=black_pearl_contact)
                     except Exception as e:

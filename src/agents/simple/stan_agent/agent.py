@@ -91,7 +91,6 @@ class StanAgent(AutomagikAgent):
             
         # Get model configuration
         model_name = self.dependencies.model_name
-        model_settings = create_model_settings(self.dependencies.model_settings)
         
         
         # Register specialized agents         
@@ -108,10 +107,9 @@ class StanAgent(AutomagikAgent):
         try:
             # Create agent instance
             self._agent_instance = Agent(
-                model="openai:gpt-4o",
+                model="openai:o3-mini",
                 system_prompt=self.system_prompt,
                 tools=tools,
-                model_settings=model_settings,
                 deps_type=AutomagikAgentsDependencies
             )
             
@@ -124,8 +122,8 @@ class StanAgent(AutomagikAgent):
                  channel_payload: Optional[dict] = None,
                  message_limit: Optional[int] = 20) -> AgentResponse:
         
-        user_id = getattr(self.dependencies, 'user_id', None)
-        
+        user_id = self.context.get("user_id")
+        logger.info(f"Context User ID: {user_id}")
         # Convert channel_payload to EvolutionMessagePayload if provided
         evolution_payload = None
         if channel_payload:
@@ -216,7 +214,7 @@ class StanAgent(AutomagikAgent):
         
         # Ensure memory variables are initialized
         if self.db_id:
-            await self.initialize_memory_variables(getattr(self.dependencies, 'user_id', None))
+            await self.initialize_memory_variables(user_id)
     
         # Initialize the agent
         await self._initialize_pydantic_agent()
