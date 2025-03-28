@@ -2,8 +2,9 @@
 
 This module defines the Pydantic models for Blackpearl API request and response validation.
 """
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field, EmailStr
+
 from datetime import datetime
 from enum import Enum
 
@@ -95,8 +96,8 @@ class FamiliaDeProduto(BaseModel):
 
 class Cliente(BaseModel):
     id: Optional[int] = Field(None, description="Unique identifier")
-    contatos: Optional[List[int]] = Field(None, description="Contact IDs")
-    vendedores: Optional[List[int]] = Field(None, description="Salesperson IDs")
+    contatos: Optional[List[Union[int, Dict[str, Any]]]] = Field(None, description="Contact IDs")
+    vendedores: Optional[List[Union[int, Dict[str, Any]]]] = Field(None, description="Salesperson IDs")
     telefone_comercial: Optional[str] = None
     tipo_operacao: Optional[str] = None
     numero_funcionarios: Optional[int] = None
