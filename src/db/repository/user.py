@@ -3,6 +3,7 @@
 import json
 import logging
 from typing import List, Optional, Dict, Any, Tuple
+import copy
 
 from src.db.connection import execute_query
 from src.db.models import User
@@ -261,3 +262,93 @@ def ensure_default_user_exists(user_id: int = 1, email: str = "admin@automagik")
     except Exception as e:
         logger.error(f"Error ensuring default user exists: {str(e)}")
         return False
+
+
+def update_user_data(user_id: int, data_updates: Dict[str, Any], path: Optional[str] = None) -> bool:
+    """Update specific fields in a user's user_data JSONB without affecting other existing fields.
+    
+    This function allows updating nested dictionary values while preserving the rest of the structure.
+    For example, updating {'preferences': {'theme': 'dark'}} will only change the theme value
+    without affecting other preference settings or other top-level keys.
+    
+    Args:
+        user_id: The user ID to update
+        data_updates: Dictionary containing the key-value pairs to update
+        path: Optional JSON path for nested updates (e.g., 'preferences' to update within that object)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Get current user data
+        user = get_user(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found for data update")
+            return False
+            
+        # Start with existing user_data or empty dict if None
+        current_data = copy.deepcopy(user.user_data) if user.user_data else {}
+        
+        # Update strategy depends on whether we're updating a nested path or top-level
+        if path:
+            # Handle nested path update
+            path_parts = path.split('.')
+            target = current_data
+            
+            # Navigate to the nested location
+            for i, part in enumerate(path_parts):
+                # Create missing dictionary nodes
+                if part not in target:
+                    target[part] = {}
+                    
+                # Move to next level except for the last part
+                if i < len(path_parts) - 1:
+                    target = target[part]
+                else:
+                    # At the last level, we merge the dictionaries
+                    if isinstance(target[part], dict) and isinstance(data_updates, dict):
+                        # Deep merge for dictionaries
+                        _deep_update(target[part], data_updates)
+                    else:
+                        # Direct assignment for non-dict values
+                        target[part] = data_updates
+        else:
+            # Top-level update - merge with existing data
+            _deep_update(current_data, data_updates)
+        
+        # Update the user record with the merged data
+        execute_query(
+            """
+            UPDATE users 
+            SET user_data = %s, updated_at = NOW()
+            WHERE id = %s
+            """,
+            (json.dumps(current_data), user_id),
+            fetch=False
+        )
+        
+        logger.info(f"Updated user_data for user {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user_data for user {user_id}: {str(e)}")
+        return False
+
+
+def _deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Helper function to recursively update nested dictionaries.
+    
+    This performs a deep merge, preserving all keys in the target while updating
+    values from the source. If both target and source have a dict at the same key,
+    the dicts are merged recursively.
+    
+    Args:
+        target: The target dictionary to update
+        source: The source dictionary with updates
+    """
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            # Recursively update nested dictionaries
+            _deep_update(target[key], value)
+        else:
+            # Update or add the value
+            target[key] = value
