@@ -12,7 +12,7 @@ from pydantic_ai import Agent
 from src.agents.models.automagik_agent import AutomagikAgent
 from src.agents.models.dependencies import AutomagikAgentsDependencies
 from src.agents.models.response import AgentResponse
-from src.agents.simple.stan_agent.prompts.prompt import AGENT_PROMPT
+from src.agents.simple.stan_email_agent.prompts.prompt import AGENT_PROMPT
 from src.agents.simple.stan_email_agent.specialized import lead_message_generator
 from src.db.repository import list_messages, list_sessions, update_user
 from src.db.repository.message import get_message
@@ -307,7 +307,6 @@ class StanEmailAgent(AutomagikAgent):
                     message = await lead_message_generator.generate_approval_status_message(message_text)
                     
                     await evolution.send_message(ctx=self.context, phone=user.user_data['whatsapp_id'], message=message)
-                    
                     
                     if black_pearl_contact.status_aprovacao == StatusAprovacaoEnum.APPROVED:
                         data_aprovacao = datetime.datetime.now()
