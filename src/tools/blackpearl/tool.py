@@ -276,6 +276,109 @@ async def get_produto(ctx: Dict[str, Any], produto_id: int) -> Dict[str, Any]:
     async with provider:
         return await provider.get_produto(produto_id)
 
+async def get_familias_de_produtos(
+    ctx: Dict[str, Any],
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    search: Optional[str] = None,
+    ordering: Optional[str] = None,
+    **filters
+) -> Dict[str, Any]:
+    """Get list of product families from the Blackpearl API.
+    
+    Args:
+        ctx: Agent context
+        limit: Number of results to return
+        offset: Starting position
+        search: Search term
+        ordering: Order by field
+        **filters: Additional filters
+        
+    Returns:
+        List of product families
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.get_familias_de_produtos(limit, offset, search, ordering, **filters)
+
+async def get_familia_de_produto(ctx: Dict[str, Any], familia_id: int) -> Dict[str, Any]:
+    """Get a specific product family from the Blackpearl API.
+    
+    Args:
+        ctx: Agent context
+        familia_id: Product family ID
+        
+    Returns:
+        Product family data
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.get_familia_de_produto(familia_id)
+
+async def get_marcas(
+    ctx: Dict[str, Any],
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    search: Optional[str] = None,
+    ordering: Optional[str] = None,
+    **filters
+) -> Dict[str, Any]:
+    """Get list of brands from the Blackpearl API.
+    
+    Args:
+        ctx: Agent context
+        limit: Number of results to return
+        offset: Starting position
+        search: Search term
+        ordering: Order by field
+        **filters: Additional filters
+        
+    Returns:
+        List of brands
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.get_marcas(limit, offset, search, ordering, **filters)
+
+async def get_marca(ctx: Dict[str, Any], marca_id: int) -> Dict[str, Any]:
+    """Get a specific brand from the Blackpearl API.
+    
+    Args:
+        ctx: Agent context
+        marca_id: Brand ID
+        
+    Returns:
+        Brand data
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.get_marca(marca_id)
+
+async def get_imagens_de_produto(
+    ctx: Dict[str, Any],
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    search: Optional[str] = None,
+    ordering: Optional[str] = None,
+    **filters
+) -> Dict[str, Any]:
+    """Get list of product images from the Blackpearl API.
+    
+    Args:
+        ctx: Agent context
+        limit: Number of results to return
+        offset: Starting position
+        search: Search term
+        ordering: Order by field
+        **filters: Additional filters
+        
+    Returns:
+        List of product images
+    """
+    provider = BlackpearlProvider()
+    async with provider:
+        return await provider.get_imagens_de_produto(limit, offset, search, ordering, **filters)
+
 async def get_pedidos(
     ctx: Dict[str, Any],
     limit: Optional[int] = None,

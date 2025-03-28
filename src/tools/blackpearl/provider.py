@@ -369,6 +369,125 @@ class BlackpearlProvider:
         
     @handle_api_error
     @validate_api_response
+    async def get_familias_de_produtos(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        search: Optional[str] = None,
+        ordering: Optional[str] = None,
+        **filters
+    ) -> Dict[str, Any]:
+        """Get list of product families.
+        
+        Args:
+            limit: Number of results to return
+            offset: Starting position
+            search: Search term
+            ordering: Order by field
+            **filters: Additional filters
+            
+        Returns:
+            List of product families
+        """
+        params = {
+            "limit": limit,
+            "offset": offset,
+            "search": search,
+            "ordering": ordering,
+            **filters
+        }
+        return await self._request("GET", "/api/v1/catalogo/familiadeprodutos/", params=params)
+        
+    @handle_api_error
+    @validate_api_response
+    async def get_familia_de_produto(self, familia_id: int) -> Dict[str, Any]:
+        """Get a specific product family.
+        
+        Args:
+            familia_id: Product family ID
+            
+        Returns:
+            Product family data
+        """
+        return await self._request("GET", f"/api/v1/catalogo/familiadeprodutos/{familia_id}/")
+        
+    @handle_api_error
+    @validate_api_response
+    async def get_marcas(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        search: Optional[str] = None,
+        ordering: Optional[str] = None,
+        **filters
+    ) -> Dict[str, Any]:
+        """Get list of brands.
+        
+        Args:
+            limit: Number of results to return
+            offset: Starting position
+            search: Search term
+            ordering: Order by field
+            **filters: Additional filters
+            
+        Returns:
+            List of brands
+        """
+        params = {
+            "limit": limit,
+            "offset": offset,
+            "search": search,
+            "ordering": ordering,
+            **filters
+        }
+        return await self._request("GET", "/api/v1/catalogo/marcas/", params=params)
+        
+    @handle_api_error
+    @validate_api_response
+    async def get_marca(self, marca_id: int) -> Dict[str, Any]:
+        """Get a specific brand.
+        
+        Args:
+            marca_id: Brand ID
+            
+        Returns:
+            Brand data
+        """
+        return await self._request("GET", f"/api/v1/catalogo/marcas/{marca_id}/")
+        
+    @handle_api_error
+    @validate_api_response
+    async def get_imagens_de_produto(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        search: Optional[str] = None,
+        ordering: Optional[str] = None,
+        **filters
+    ) -> Dict[str, Any]:
+        """Get list of product images.
+        
+        Args:
+            limit: Number of results to return
+            offset: Starting position
+            search: Search term
+            ordering: Order by field
+            **filters: Additional filters
+            
+        Returns:
+            List of product images
+        """
+        params = {
+            "limit": limit,
+            "offset": offset,
+            "search": search,
+            "ordering": ordering,
+            **filters
+        }
+        return await self._request("GET", "/api/v1/catalogo/imagensdeproduto/", params=params)
+        
+    @handle_api_error
+    @validate_api_response
     async def get_pedidos(
         self,
         limit: Optional[int] = None,
