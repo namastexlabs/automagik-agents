@@ -56,6 +56,82 @@ class ToolRegistry:
         self._registered_tools[name] = tool_func
         logger.info(f"Registered tool: {name}")
     
+    def register_tool_with_context(self, tool_func: Callable, context: Dict[str, Any]) -> None:
+        """Register a tool with the registry, automatically injecting context.
+        
+        This method is useful for tools that require a context parameter. It automatically
+        creates a wrapper function that injects the provided context as the first parameter.
+        
+        Args:
+            tool_func: The tool function to register
+            context: Context to inject into the tool
+        """
+        name = getattr(tool_func, "__name__", str(tool_func))
+        
+        # Special handling for verificar_cnpj which has caused issues
+        if name == "verificar_cnpj":
+            # Create a dedicated wrapper for verificar_cnpj with explicit signature
+            async def verificar_cnpj_wrapper(cnpj: str) -> Dict[str, Any]:
+                """Verify a CNPJ number in the Blackpearl API.
+                
+                This tool validates a CNPJ (Brazilian company registration number) and returns
+                information about the company if the CNPJ is valid.
+                
+                Args:
+                    cnpj: The CNPJ number to verify (format: xx.xxx.xxx/xxxx-xx or clean numbers)
+                    
+                Returns:
+                    CNPJ verification result containing company information if valid
+                """
+                return await tool_func(context, cnpj)
+            
+            # Register the wrapper
+            self._registered_tools[name] = verificar_cnpj_wrapper
+            logger.info(f"Registered custom wrapper for {name}")
+            return
+        
+        # For other tools, use the regular approach
+        # Get the original function's signature
+        import inspect
+        sig = inspect.signature(tool_func)
+        params = list(sig.parameters.values())
+        
+        # Check if the first parameter is likely for context
+        if params and params[0].name in ['ctx', 'context']:
+            # Create a generic wrapper that passes context
+            async def wrapped_tool(*args, **kwargs):
+                """Wrapped version of the original tool with context injection."""
+                return await tool_func(context, *args, **kwargs)
+                
+            # Copy over metadata
+            wrapped_tool.__name__ = name
+            wrapped_tool.__doc__ = tool_func.__doc__
+            
+            # Register the wrapped version
+            self._registered_tools[name] = wrapped_tool
+            logger.info(f"Registered tool with context injection: {name}")
+        else:
+            # Register the original if it doesn't need context
+            self._registered_tools[name] = tool_func
+            logger.info(f"Registered tool without context injection: {name}")
+    
+    def register_agent_as_tool(self, agent, context: Dict[str, Any]) -> None:
+        """A simpler method specifically for registering agents as tools with context.
+        
+        This is a convenience method that handles the common case of registering 
+        specialized agents as tools, ensuring they have the proper context.
+        
+        Args:
+            agent: The agent to register as a tool
+            context: Context to inject into the agent's tool functions
+        """
+        # Get the agent name for logging
+        agent_name = getattr(agent, "__name__", str(agent))
+        
+        # Register the agent with context
+        self.register_tool_with_context(agent, context)
+        logger.info(f"Registered agent {agent_name} as tool with context")
+    
     def register_default_tools(self, context: Dict[str, Any]) -> None:
         """Register the default set of tools for the agent.
         
@@ -156,11 +232,11 @@ class ToolRegistry:
                     # Use the PydanticAI tool definition if available
                     tool = func.get_pydantic_tool()
                     tools.append(tool)
-                    logger.info(f"Converted to PydanticAI tool: {name}")
+                    logger.debug(f"Converted to PydanticAI tool: {name}")
                 elif isinstance(func, PydanticTool):
                     # If it's already a PydanticTool instance, use it directly
                     tools.append(func)
-                    logger.info(f"Added existing PydanticTool: {name}")
+                    logger.debug(f"Added existing PydanticTool: {name}")
                 elif hasattr(func, "__doc__") and callable(func):
                     # Create a basic wrapper for regular functions
                     doc = func.__doc__ or f"Tool for {name}"
@@ -168,16 +244,17 @@ class ToolRegistry:
                     tool = PydanticTool(
                         name=name,
                         description=doc,
-                        function=func
+                        function=func,
+                        max_retries=6
                     )
                     tools.append(tool)
-                    logger.info(f"Created PydanticTool for function: {name}")
+                    logger.debug(f"Created PydanticTool for function: {name}")
                 else:
                     logger.warning(f"Could not convert tool {name}: not a function or missing documentation")
             except Exception as e:
                 logger.error(f"Error converting tool {name}: {str(e)}")
                 
-        logger.info(f"Converted {len(tools)} tools to PydanticAI tools")
+        logger.debug(msg=f"Converted {len(tools)} tools to PydanticAI tools")
         return tools
 
     def update_context(self, new_context: Dict[str, Any]) -> None:
