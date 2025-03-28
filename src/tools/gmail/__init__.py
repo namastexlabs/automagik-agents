@@ -6,13 +6,20 @@ Provides tools for sending emails via Gmail API.
 # Import from tool module
 from src.tools.gmail.tool import (
     send_email,
-    get_send_email_description
+    get_send_email_description,
+    fetch_emails,
+    get_fetch_emails_description,
+    mark_emails_read,
+    get_mark_emails_read_description
 )
 
 # Import schema models
 from src.tools.gmail.schema import (
     SendEmailInput,
-    SendEmailResult
+    SendEmailResult,
+    FetchEmailsInput,
+    FetchEmailsResult,
+    EmailMessage
 )
 
 # Import interface
@@ -25,13 +32,20 @@ from src.tools.gmail.interface import (
 __all__ = [
     # Tool functions
     'send_email',
+    'fetch_emails',
+    'mark_emails_read',
     
     # Description functions
     'get_send_email_description',
+    'get_fetch_emails_description',
+    'get_mark_emails_read_description',
     
     # Schema models
     'SendEmailInput',
     'SendEmailResult',
+    'FetchEmailsInput',
+    'FetchEmailsResult',
+    'EmailMessage',
     
     # Interface
     'GmailTools',
