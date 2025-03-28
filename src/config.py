@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     GOOGLE_DRIVE_TOKEN: Optional[str] = Field(None, description="Google Drive API token")
     
     # Evolution
-    EVOLUTION_TOKEN: Optional[str] = Field(None, description="Evolution API token")
+    EVOLUTION_API_KEY: Optional[str] = Field(None, description="Evolution API key")
     EVOLUTION_API_URL: Optional[str] = Field(None, description="Evolution API URL")
     EVOLUTION_INSTANCE: str = Field("agent", description="Evolution API instance name")
 
