@@ -11,10 +11,67 @@ from src.tools.blackpearl import (
     get_marcas, get_marca,
     get_imagens_de_produto
 )
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+
+
+def get_tabela_files_from_supabase():
+    """
+    Fetch the latest TABELA files from Supabase database.
+    Returns a dictionary with filenames as keys and URLs as values.
+    """
+    from supabase import create_client, Client
+    
+    # Target files to fetch
+    target_files = [
+        'TABELA_REDRAGON_2025.xlsx',
+        'TABELA_SOLID_MARCAS_2025.xlsx'
+    ]
+    
+    # Results dictionary
+    result = {}
+    
+    try:
+        # Initialize Supabase client using settings
+        supabase: Client = create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_SERVICE_ROLE_KEY
+        )
+        
+        # Query the database
+        response = supabase.table('product_files').select('*').execute()
+        
+        if not response.data:
+            print("No files found in database")
+            return result
+            
+        # Filter for target files and add to result
+        for link in response.data:
+            filename = link.get('file_name')
+            if filename in target_files:
+                url = link.get('file_url')
+                
+                # Ensure URL has dl=1 parameter for direct download
+                if url.endswith('dl=0'):
+                    url = url.replace('dl=0', 'dl=1')
+                elif not url.endswith('dl=1'):
+                    url = f"{url}&dl=1" if '?' in url else f"{url}?dl=1"
+                    
+                result[filename] = url
+                
+        if not result:
+            print("No target files found in database")
+            
+        return result
+        
+    except Exception as e:
+        print(f"Error fetching files from Supabase: {str(e)}")
+        return result
+ 
 
 async def make_conversation_summary(message_history) -> str:
     """Make a summary of the conversation focused on product interests."""
@@ -77,6 +134,12 @@ async def product_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> str
     summary_result_str = await make_conversation_summary(message_history)
     
     # Initialize the agent with appropriate system prompt
+    
+    files = get_tabela_files_from_supabase()
+    parsed_text_input = f"Here are the product files for price consultation: {files}"
+   
+    
+    
     product_catalog_agent = Agent(  
         'openai:gpt-4o',
         deps_type=Dict[str, Any],
@@ -123,6 +186,8 @@ async def product_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> str
             'Lembre-se: Se não encontrar resultados para uma consulta específica, explique o que tentou buscar '
             'e sugira alternativas ou pergunte por mais detalhes para refinar a busca.'
             
+            'Caso o usuário peça a tabela de preços dos produtos, aqui estão os links:'
+            f'{parsed_text_input}'
             f'\n\nResumo da conversa até o momento: {summary_result_str}'
         ),
     )
