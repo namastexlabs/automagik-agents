@@ -156,30 +156,23 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
     
     EXTRA_PROMPT = ""
 
-    if ENVIRIONMENT_MODE == "development":
-        EXTRA_PROMPT = 'WE ARE IN TEST MODE, WHILE IN TEST MODE CNPJs with situação "Baixada" will be valid Feel free to use this information to create a new client record.'
-    
     # Initialize the agent with appropriate system prompt
     backoffice_agent = Agent(  
         'openai:gpt-4o',
         deps_type=Dict[str, Any],
         result_type=str,
         system_prompt=(
-            f'{EXTRA_PROMPT}'
             'You are a specialized backoffice agent with expertise in BlackPearl and Omie APIs, working in direct support of STAN. '
             'Your primary responsibilities include:\n'
             '1. Managing client information - finding, creating, and updating client records\n'
             '2. Processing lead information when received from STAN\n'
             '3. Creating BlackPearl client records with complete information\n'
-            '4. Sending lead notifications to the solid team via email\n'
-            '5. Retrieving and providing product information\n'
-            '6. Managing orders and sales processes\n'
+            '4. Retrieving and providing product information\n'
+            '5. Managing orders and sales processes\n'
             'Always use the most appropriate BlackPearl or Omie tool based on the specific request from STAN. '
             'Provide complete yet concise information, focusing on exactly what STAN needs. '
-            'When creating new client records, automatically send lead information to the solid team. '
             'Respond in a professional, straightforward manner without unnecessary explanations or apologies. '
             'Your role is to be efficient, accurate, and helpful in managing backend business operations.\n\n'
-            'IMPORTANT: When writing emails or any external communications, ALWAYS use Portuguese as the default language.'
             'Any problem that you encounter, please add as much information as possible to the error message so it can be fixed.'
             'If info is missing, ask for it. If you dont have the info, say so.'
             'If you need to verify a CNPJ, use the bp_get_info_cnpj tool.'
@@ -259,7 +252,9 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         tipo_operacao: str = None,
         observacao: str = None
     ) -> Dict[str, Any]:
-        """Create a new client in BlackPearl.
+        """Create a new client in BlackPearl. 
+           This tool should be used as soon as we have all the information about the client.
+           When creating a new client, the tool will automatically send a lead email to the solid team.
         
         Args:
             razao_social: Company legal name
@@ -338,6 +333,21 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
             )
             await update_contato(ctx.deps, blackpearl_contact_id, updated_contato)
         
+        lead_information = f"BlackPearl Cliente ID: {cliente_created['id']}\n"
+        lead_information += f"Nome: {cliente_created['razao_social']}\n"
+        lead_information += f"Email: {cliente_created['email']}\n"
+        lead_information += f"Telefone: {cliente_created['telefone_comercial']}\n"
+        lead_information += f"Empresa: {cliente_created['razao_social']}\n"
+        lead_information += f"Endereço: {cliente_created['endereco']} {cliente_created['endereco_numero']} {cliente_created['endereco_complemento']} {cliente_created['bairro']} {cliente_created['cidade']} {cliente_created['estado']} {cliente_created['cep']}\n"
+        lead_information += f"CNPJ: {cliente_created['cnpj']}\n"
+        lead_information += f"Inscrição Estadual: {cliente_created['inscricao_estadual']}\n"
+        lead_information += f"Número de Funcionários: {cliente_created['numero_funcionarios']}\n"
+        lead_information += f"Tipo de Operação: {cliente_created['tipo_operacao']}\n"
+        lead_information += f"Observação: {cliente_created['observacao']}\n"
+        lead_information += f"Detalhes: {summary_result_str}\n"
+        
+        # Send lead email
+        await send_lead_email(ctx, lead_information=lead_information)
         return cliente_created
     
     @backoffice_agent.tool
@@ -530,8 +540,6 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         """
         return await search_client_by_cnpj(ctx, cnpj)
 
-    # Gmail lead email tool
-    @backoffice_agent.tool
     async def send_lead_email(
         ctx: RunContext[Dict[str, Any]],
         lead_information: str
