@@ -93,13 +93,17 @@ class FamiliaDeProduto(BaseModel):
     id: int = Field(..., description="Unique identifier")
     codigo: int = Field(..., description="Product family code in Omie")
     nomeFamilia: str = Field(..., max_length=255, description="Family name")
+class TipoOperacaoEnum(str, Enum):
+    ONLINE = "Online"
+    FISICA = "Fisica"
+    AMBOS = "Ambos"
 
 class Cliente(BaseModel):
     id: Optional[int] = Field(None, description="Unique identifier")
     contatos: Optional[List[Union[int, Dict[str, Any]]]] = Field(None, description="Contact IDs")
     vendedores: Optional[List[Union[int, Dict[str, Any]]]] = Field(None, description="Salesperson IDs")
     telefone_comercial: Optional[str] = None
-    tipo_operacao: Optional[str] = None
+    tipo_operacao: Optional[TipoOperacaoEnum] = None
     numero_funcionarios: Optional[int] = None
     razao_social: Optional[str] = Field(None, max_length=255)
     nome_fantasia: Optional[str] = Field(None, max_length=255)

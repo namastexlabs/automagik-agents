@@ -41,8 +41,15 @@ def handle_api_error(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            return await func(*args, **kwargs)
+            result = await func(*args, **kwargs)
+            # If result is a tuple with status code 204, it's a successful deletion
+            if isinstance(result, tuple) and len(result) == 2 and result[0] == 204:
+                return None
+            return result
         except Exception as e:
+            # If the error is about 204 response, it's actually a success
+            if "204" in str(e) and "Attempt to decode JSON with unexpected mimetype" in str(e):
+                return None
             logger.error(f"API error in {func.__name__}: {str(e)}")
             raise
     return wrapper
