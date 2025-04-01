@@ -5,6 +5,7 @@ This module provides tools for interacting with the Blackpearl API.
 import logging
 import os
 from typing import Optional, Dict, Any, List, Union
+from src.config import Environment, settings
 from src.tools.blackpearl.provider import BlackpearlProvider
 from src.tools.blackpearl.schema import (
     Cliente, Contato, Vendedor, Produto, PedidoDeVenda, ItemDePedido,
@@ -589,7 +590,19 @@ async def verificar_cnpj(ctx: Dict[str, Any], cnpj: str) -> Dict[str, Any]:
     """
     provider = BlackpearlProvider()
     async with provider:
-        return await provider.verificar_cnpj(cnpj)
+        print(f"Verifying CNPJ: {cnpj}")
+        verification_result = await provider.verificar_cnpj(cnpj)
+        
+        # Create a modified result without status and reason fields if they exist
+        # Only remove these fields in development environment
+        
+        if isinstance(verification_result, dict) and settings.AM_ENV == Environment.DEVELOPMENT:
+            if 'status' in verification_result:
+                verification_result.pop('status', None)
+            if 'reason' in verification_result:
+                verification_result.pop('reason', None)
+                
+        return verification_result
 
 async def finalizar_cadastro(ctx: Dict[str, Any], cliente_id: int) -> Dict[str, Any]:
     """Finalize client registration in Omie API.
