@@ -96,7 +96,7 @@ class FamiliaDeProduto(BaseModel):
 class TipoOperacaoEnum(str, Enum):
     ONLINE = "Online"
     FISICA = "Fisica"
-    AMBOS = "Ambos"
+    HIBRIDO = "Hibrido"
 
 class Cliente(BaseModel):
     id: Optional[int] = Field(None, description="Unique identifier")
