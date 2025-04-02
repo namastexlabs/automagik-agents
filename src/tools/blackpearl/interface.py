@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Callable
 from functools import wraps
 from datetime import datetime
 import pytz
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,12 @@ def handle_api_error(func):
     """
     @wraps(func)
     async def wrapper(*args, **kwargs):
+        # Check if we're in development mode and debug log level
+        is_dev_debug = (
+            settings.AM_ENV.value == "development" and
+            settings.AM_LOG_LEVEL.value == "DEBUG"
+        )
+        
         try:
             result = await func(*args, **kwargs)
             # If result is a tuple with status code 204, it's a successful deletion
@@ -50,7 +57,38 @@ def handle_api_error(func):
             # If the error is about 204 response, it's actually a success
             if "204" in str(e) and "Attempt to decode JSON with unexpected mimetype" in str(e):
                 return None
-            logger.error(f"API error in {func.__name__}: {str(e)}")
+                
+            # Enhanced error logging in development/debug mode
+            if is_dev_debug:
+                # Extract function call details for better debugging
+                func_name = func.__name__
+                cls_name = args[0].__class__.__name__ if args and hasattr(args[0], '__class__') else None
+                endpoint = None
+                
+                # Try to extract the endpoint from the function code or docstring
+                if func.__doc__ and "endpoint" in func.__doc__.lower():
+                    doc_lines = func.__doc__.splitlines()
+                    for line in doc_lines:
+                        if "endpoint" in line.lower():
+                            endpoint = line.strip()
+                            break
+                
+                # Log detailed error information
+                logger.debug(f"BP - API Error Details:")
+                logger.debug(f"BP - Function: {cls_name}.{func_name}" if cls_name else f"BP - Function: {func_name}")
+                if endpoint:
+                    logger.debug(f"BP - Endpoint: {endpoint}")
+                logger.debug(f"BP - Error Type: {type(e).__name__}")
+                logger.debug(f"BP - Error Message: {str(e)}")
+                
+                # Log function arguments (with sensitive info redacted)
+                safe_args = [f"<{type(arg).__name__}>" if i > 0 else arg for i, arg in enumerate(args)]
+                safe_kwargs = {k: "<REDACTED>" if k.lower() in ("password", "token", "key", "secret") else v 
+                              for k, v in kwargs.items()}
+                logger.debug(f"BP - Function Args: {safe_args}")
+                logger.debug(f"BP - Function Kwargs: {safe_kwargs}")
+            else:
+                logger.error(f"API error in {func.__name__}: {str(e)}")
             raise
     return wrapper
 

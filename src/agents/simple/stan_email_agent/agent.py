@@ -283,6 +283,20 @@ class StanEmailAgent(AutomagikAgent):
                     user = get_user(user_id=user_id) if user_id else None
                     user.email = black_pearl_client.email
                     
+                    # Check if we've already sent a BP analysis email to this user
+                    if hasattr(user, 'user_data') and user.user_data and user.user_data.get('bp_analysis_email_message_sent'):
+                        logger.info(f"User {user_id} has already received BP analysis email. Skipping message.")
+                        
+                        # Still mark the thread as processed
+                        thread['processed'] = True
+                        continue
+                    
+                    # Update user_data to include bp_analysis_email_message_sent flag
+                    # while preserving all existing values
+                    if not hasattr(user, 'user_data') or user.user_data is None:
+                        user.user_data = {}
+                    user.user_data['bp_analysis_email_message_sent'] = True
+                    
                     # Prepare string with user information and approval status
                     user_info = f"Nome: {black_pearl_contact.nome} Email: {black_pearl_client.email} Telefone: {user.phone_number}"
                     approval_status_info = f"Status de aprovação: {result.data.approval_status}"
@@ -314,7 +328,12 @@ class StanEmailAgent(AutomagikAgent):
                         black_pearl_contact.data_aprovacao = data_aprovacao
                         black_pearl_client.data_aprovacao = data_aprovacao
                         
-                        await blackpearl.finalizar_cadastro(ctx=self.context, cliente_id=black_pearl_client.id)
+                        # Check if cliente already has codigo_cliente_omie before finalizing
+                        if not black_pearl_client.codigo_cliente_omie:
+                            logger.info(f"Finalizing client registration for client_id: {black_pearl_client.id}")
+                            await blackpearl.finalizar_cadastro(ctx=self.context, cliente_id=black_pearl_client.id)
+                        else:
+                            logger.info(f"Client already has codigo_cliente_omie: {black_pearl_client.codigo_cliente_omie}, skipping finalization")
                     
                     try:
                         await blackpearl.update_contato(ctx=self.context, contato_id=black_pearl_contact.id, contato=black_pearl_contact)

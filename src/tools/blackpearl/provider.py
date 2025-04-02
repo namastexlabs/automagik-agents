@@ -11,6 +11,7 @@ from src.tools.blackpearl.schema import (
     Cliente, Contato, Vendedor, Produto, PedidoDeVenda, ItemDePedido,
     RegraDeFrete, RegraDeNegocio
 )
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +68,56 @@ class BlackpearlProvider:
         data = format_api_request(data) if data else None
         params = filter_none_params(params)
         
-        logger.info(f"BP - API Request: {method} {url}")
-        logger.info(f"BP - Request Payload: {data}")
-        logger.info(f"BP - Request Params: {params}")
+        # Check if we're in development mode and debug log level
+        is_dev_debug = (
+            settings.AM_ENV.value == "development" and
+            settings.AM_LOG_LEVEL.value == "DEBUG"
+        )
         
-        async with self.session.request(method, url, json=data, params=params) as response:
-            response.raise_for_status()
-            result = await response.json()
-            logger.info(f"API Response: {result}")
-            return result
+        logger.info(f"BP - API Request: {method} {url}")
+        if is_dev_debug:
+            logger.debug(f"BP - Request Payload (detailed): {data}")
+            logger.debug(f"BP - Request Params (detailed): {params}")
+        else:
+            logger.info(f"BP - Request Payload: {data}")
+            logger.info(f"BP - Request Params: {params}")
+        
+        try:
+            async with self.session.request(method, url, json=data, params=params) as response:
+                response.raise_for_status()
+                result = await response.json()
+                
+                # Enhanced logging for API responses in development/debug mode
+                if is_dev_debug:
+                    logger.debug(f"BP - API Response Status: {response.status}")
+                    logger.debug(f"BP - API Response Headers: {dict(response.headers)}")
+                    logger.debug(f"BP - API Response (detailed): {result}")
+                    
+                    # Check if there are any error messages in the response
+                    if isinstance(result, dict) and result.get('error'):
+                        logger.debug(f"BP - API Error Message: {result.get('error')}")
+                        if result.get('message'):
+                            logger.debug(f"BP - API Error Details: {result.get('message')}")
+                else:
+                    logger.info(f"BP - API Response Status: {response.status}")
+                
+                return result
+        except aiohttp.ClientResponseError as e:
+            # Enhanced error logging in development/debug mode
+            if is_dev_debug:
+                logger.debug(f"BP - API Error: {str(e)}")
+                logger.debug(f"BP - API Error Status: {e.status}")
+                logger.debug(f"BP - API Error Message: {e.message}")
+                
+                # Try to get the response body for more details
+                try:
+                    if hasattr(e, 'history') and e.history:
+                        response_text = await e.history[0].text()
+                        logger.debug(f"BP - API Error Response: {response_text}")
+                except Exception as text_error:
+                    logger.debug(f"BP - Could not read error response: {str(text_error)}")
+            
+            raise
         
     @handle_api_error
     @validate_api_response
