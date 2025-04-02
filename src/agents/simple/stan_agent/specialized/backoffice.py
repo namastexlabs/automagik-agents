@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 
 # Import Blackpearl tools
-from src.db.repository.user import get_user
+from src.db.repository.user import get_user, update_user_data
 from src.tools.blackpearl import (
     get_clientes, get_cliente, create_cliente, update_cliente,
     get_contatos, get_contato
@@ -13,7 +13,7 @@ from src.tools.blackpearl import (
 
 # Import Blackpearl schema
 from src.tools.blackpearl.schema import (
-    Cliente, Contato, StatusAprovacaoEnum
+    Cliente, Contato, StatusAprovacaoEnum, TipoOperacaoEnum
 )
 
 # Import Omie tools
@@ -249,7 +249,7 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         estado: str = None,
         cep: str = None,
         numero_funcionarios:int = None,
-        tipo_operacao: str = None,
+        tipo_operacao: TipoOperacaoEnum = None,
         observacao: str = None
     ) -> Dict[str, Any]:
         """Create a new client in BlackPearl. 
@@ -260,8 +260,8 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
             razao_social: Company legal name
             nome_fantasia: Company trading name
             email: Client email
-            telefone_comercial: Client commercial phone number
-            cnpj: Client CNPJ 
+            telefone_comercial: Client commercial phone number, numbers only, no formatting
+            cnpj: Client CNPJ Numbers only, no formatting
             inscricao_estadual: Client state registration
             endereco: Street address
             endereco_numero: Address number
@@ -343,11 +343,22 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         lead_information += f"Inscrição Estadual: {cliente_created['inscricao_estadual']}\n"
         lead_information += f"Número de Funcionários: {cliente_created['numero_funcionarios']}\n"
         lead_information += f"Tipo de Operação: {cliente_created['tipo_operacao']}\n"
-        lead_information += f"Observação: {cliente_created['observacao']}\n"
         lead_information += f"Detalhes: {summary_result_str}\n"
         
         # Send lead email
         await send_lead_email(ctx, lead_information=lead_information)
+        
+        # Set bp_analysis_email_message_sent to False in user data if a user is associated
+        if user_id:
+            user_info = get_user(user_id)
+            if user_info:
+                # Update only the bp_analysis_email_message_sent field while preserving all other data
+                update_user_data(
+                    user_id=user_id,
+                    data_updates={"bp_analysis_email_message_sent": False}
+                )
+                logger.info(f"Set bp_analysis_email_message_sent=False for user {user_id}")
+                
         return cliente_created
     
     @backoffice_agent.tool
@@ -582,7 +593,7 @@ async def backoffice_agent(ctx: RunContext[Dict[str, Any]], input_text: str) -> 
         
         # Create email input with HTML formatting
         email_input = SendEmailInput(
-            cc=['andre@theroscreations.com', 'marcos@theroscreations.com', 'chris@theroscreations.com', 'felipe@theroscreations.com'],
+            cc=['andre@theroscreations.com', 'marcos@theroscreations.com', 'chris@theroscreations.com'],
             to=recipient,
             subject=subject,
             message=message,
