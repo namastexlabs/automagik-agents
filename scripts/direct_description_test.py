@@ -41,22 +41,38 @@ def main():
     
     # To directly access tool descriptions, let's use the same code from agent.py
     from src.tools.memory_tools import read_memory, write_memory
-    from src.utils.db import execute_query
+    from src.db import list_memories
     import inspect
     
-    # Query to get all available memories (same as in SimpleAgent)
-    query = "SELECT id, name, description FROM memories ORDER BY name ASC"
-    result = execute_query(query)
-    if isinstance(result, list):
-        memories = result
-    else:
-        memories = result.get('rows', [])
-    memory_count = len(memories)
+    # Get all available memories using repository function
+    memories = list_memories()
+    
+    # Convert memory models to dictionaries for consistent access
+    memory_dicts = []
+    for memory in memories:
+        if hasattr(memory, 'model_dump'):
+            # For Pydantic v2 models
+            memory_dicts.append(memory.model_dump())
+        elif hasattr(memory, 'dict'):
+            # For Pydantic v1 models
+            memory_dicts.append(memory.dict())
+        elif isinstance(memory, dict):
+            # Already a dict
+            memory_dicts.append(memory)
+        else:
+            # Extract attributes directly
+            memory_dicts.append({
+                'id': getattr(memory, 'id', None),
+                'name': getattr(memory, 'name', 'Unknown'),
+                'description': getattr(memory, 'description', None)
+            })
+    
+    memory_count = len(memory_dicts)
     
     print(f"Found {memory_count} memories in database")
     
     # Extract memory names for reference
-    memory_names = [memory.get('name', 'Unknown') for memory in memories]
+    memory_names = [memory.get('name', 'Unknown') for memory in memory_dicts]
     print(f"Memory names: {', '.join(memory_names)}")
 
     
@@ -77,7 +93,7 @@ def main():
         memories_added = 0
         memory_names_str = ""
         
-        for memory in memories:
+        for memory in memory_dicts:
             mem_name = memory.get('name', 'Unknown')
             memory_entry = f"- {mem_name}\n"
             
@@ -126,7 +142,7 @@ def main():
         memories_added = 0
         memory_names_str = ""
         
-        for memory in memories:
+        for memory in memory_dicts:
             mem_name = memory.get('name', 'Unknown')
             memory_entry = f"- {mem_name}\n"
             

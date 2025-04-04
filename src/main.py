@@ -2,20 +2,20 @@ import logging
 from datetime import datetime
 import json
 import uuid
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
-from src.config import settings, Environment
+from src.config import settings
 from src.utils.logging import configure_logging
 from src.version import SERVICE_INFO
 from src.auth import APIKeyMiddleware
 from src.api.models import HealthResponse
-from src.api.routes import router as api_router
-from src.memory.message_history import MessageHistory
-from src.memory.pg_message_store import PostgresMessageStore
+from src.api.routes import main_router as api_router
 from src.agents.models.agent_factory import AgentFactory
-from src.utils.db import execute_query
+from src.db import ensure_default_user_exists
 
 # Configure logging
 configure_logging()
@@ -58,11 +58,29 @@ def initialize_all_agents():
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Create FastAPI application
+    
+    # Get our module's logger
+    logger = logging.getLogger(__name__)
+    
+    # Configure API documentation
+    title = SERVICE_INFO["name"]
+    description = SERVICE_INFO["description"]
+    version = SERVICE_INFO["version"]
+    
+    # Set up lifespan context manager
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Initialize all agents at startup
+        initialize_all_agents()
+        yield
+        # Cleanup can be done here if needed
+    
+    # Create the FastAPI app
     app = FastAPI(
-        title=SERVICE_INFO["name"],
-        description=SERVICE_INFO["description"],
-        version=SERVICE_INFO["version"],
+        title=title,
+        description=description,
+        version=version,
+        lifespan=lifespan,
         docs_url=None,  # Disable default docs url
         redoc_url=None,  # Disable default redoc url
         openapi_url=None,  # Disable default openapi url
@@ -84,8 +102,11 @@ def create_app() -> FastAPI:
             },
         ]
     )
-
-    # Add CORS middleware
+    
+    # Setup API routes
+    setup_routes(app)
+    
+    # Configure CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # Allows all origins
@@ -97,18 +118,12 @@ def create_app() -> FastAPI:
     # Add authentication middleware
     app.add_middleware(APIKeyMiddleware)
     
-    # Register startup event to initialize agents
-    @app.on_event("startup")
-    async def startup_event():
-        # Initialize all agents at startup
-        initialize_all_agents()
-    
     # Set up database message store regardless of environment
     try:
-        logger.info("🔧 Initializing PostgreSQL message store for persistent storage")
+        logger.info("🔧 Initializing database connection for message storage")
         
         # First test database connection
-        from src.utils.db import get_connection_pool, execute_query
+        from src.db.connection import get_connection_pool
         pool = get_connection_pool()
         
         # Test the connection with a simple query
@@ -134,53 +149,59 @@ def create_app() -> FastAPI:
             
         logger.info("✅ Database connection pool initialized successfully")
         
-        # Initialize PostgreSQL message store
-        pg_store = PostgresMessageStore()
-        
         # Verify database functionality without creating persistent test data
-        logger.info("🔍 Performing verification test of PostgresMessageStore without creating persistent sessions...")
+        logger.info("🔍 Performing verification test of message storage without creating persistent sessions...")
         test_user_id = 1  # Use numeric ID instead of string
         
-        # First ensure the default user exists
-        default_user_exists = execute_query(
-            "SELECT COUNT(*) as count FROM users WHERE id = %s",
-            (test_user_id,)
-        )
-        
-        if not default_user_exists or default_user_exists[0]["count"] == 0:
-            logger.warning(f"⚠️ Default user '{test_user_id}' not found, creating it...")
-            execute_query(
-                """
-                INSERT INTO users (id, email, created_at, updated_at) 
-                VALUES (%s, %s, %s, %s)
-                """,
-                (test_user_id, "admin@automagik", datetime.utcnow(), datetime.utcnow()),
-                fetch=False
-            )
-            logger.info(f"✅ Created default user '{test_user_id}'")
-        else:
-            logger.info(f"✅ Default user '{test_user_id}' already exists")
+        # First ensure the default user exists using repository function
+        ensure_default_user_exists(user_id=test_user_id, email="admin@automagik")
         
         # Verify message store functionality without creating test sessions
         # Use a transaction that we'll roll back to avoid persisting test data
         try:
-            logger.info("Testing database message store functionality with transaction rollback...")
+            logger.info("Testing database message storage functionality with transaction rollback...")
             with pool.getconn() as conn:
                 conn.autocommit = False  # Start a transaction
                 
                 # Generate test UUIDs
-                test_session_id = str(uuid.uuid4())
-                test_message_id = str(uuid.uuid4())
+                test_session_id = uuid.uuid4()
+                test_message_id = uuid.uuid4()
                 
-                # Test inserting temporary session and message
+                # Test inserting temporary session
+                from src.db import create_session, Session, create_message, Message
+                
+                # Create a test session
+                test_session = Session(
+                    id=test_session_id,
+                    user_id=test_user_id,
+                    platform="verification_test",
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                
+                # Test inserting a test message
+                test_message = Message(
+                    id=test_message_id,
+                    session_id=test_session_id,
+                    role="user",
+                    text_content="Test database connection",
+                    raw_payload={"content": "Test database connection"},
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
+                
+                # Create the session and message within the transaction
                 with conn.cursor() as cur:
+                    # Import safe_uuid to handle UUID objects
+                    from src.db.connection import safe_uuid
+                    
                     # Insert test session
                     cur.execute(
                         """
                         INSERT INTO sessions (id, user_id, platform, created_at, updated_at) 
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (test_session_id, test_user_id, "verification_test", datetime.utcnow(), datetime.utcnow())
+                        (safe_uuid(test_session_id), test_user_id, "verification_test", datetime.now(), datetime.now())
                     )
                     
                     # Insert test message
@@ -191,21 +212,21 @@ def create_app() -> FastAPI:
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
-                            test_message_id,
-                            test_session_id,
+                            safe_uuid(test_message_id),
+                            safe_uuid(test_session_id),
                             "user",
                             "Test database connection",
                             json.dumps({"content": "Test database connection"}),
-                            datetime.utcnow(),
-                            datetime.utcnow()
+                            datetime.now(),
+                            datetime.now()
                         )
                     )
                     
                     # Verify we can read the data back
-                    cur.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (test_session_id,))
+                    cur.execute("SELECT COUNT(*) FROM sessions WHERE id = %s", (safe_uuid(test_session_id),))
                     session_count = cur.fetchone()[0]
                     
-                    cur.execute("SELECT COUNT(*) FROM messages WHERE id = %s", (test_message_id,))
+                    cur.execute("SELECT COUNT(*) FROM messages WHERE id = %s", (safe_uuid(test_message_id),))
                     message_count = cur.fetchone()[0]
                     
                     if session_count > 0 and message_count > 0:
@@ -233,26 +254,30 @@ def create_app() -> FastAPI:
             logger.error(f"Detailed error: {traceback.format_exc()}")
             raise
         
-        # Set PostgresMessageStore as the message store for MessageHistory
-        MessageHistory.set_message_store(pg_store)
-        
         # Log success
-        logger.info("✅ PostgreSQL message store initialized and set for MessageHistory")
+        logger.info("✅ Database message storage initialized successfully")
+        
+        # Configure MessageHistory to use database by default
+        from src.memory.message_history import MessageHistory
+        logger.info("✅ MessageHistory configured to use database storage")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize PostgreSQL message store: {str(e)}")
+        logger.error(f"❌ Failed to initialize database connection for message storage: {str(e)}")
         logger.error("⚠️ Application will fall back to in-memory message store")
         # Include traceback for debugging
         import traceback
         logger.error(f"Detailed error: {traceback.format_exc()}")
         
-        # Explicitly set CacheMessageStore to make it clear we're falling back
-        from src.memory.message_store import CacheMessageStore
-        MessageHistory.set_message_store(CacheMessageStore())
-        logger.warning("⚠️ Using in-memory CacheMessageStore as fallback - MESSAGES WILL NOT BE PERSISTED!")
+        # Create an in-memory message history as fallback
+        # Don't reference the non-existent message_store module
+        logger.warning("⚠️ Using in-memory storage as fallback - MESSAGES WILL NOT BE PERSISTED!")
     
     # Remove direct call since we're using the startup event
     # initialize_all_agents()
 
+    return app
+
+def setup_routes(app: FastAPI):
+    """Set up API routes for the application."""
     # Root and health endpoints (no auth required)
     @app.get("/", tags=["System"], summary="Root Endpoint", description="Returns service information and status")
     async def root():
@@ -265,15 +290,13 @@ def create_app() -> FastAPI:
     async def health_check() -> HealthResponse:
         return HealthResponse(
             status="healthy",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(),
             version=SERVICE_INFO["version"],
             environment=settings.AM_ENV
         )
 
     # Include API router (with versioned prefix)
     app.include_router(api_router, prefix="/api/v1")
-
-    return app
 
 # Create the app instance
 app = create_app()

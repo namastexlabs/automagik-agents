@@ -194,3 +194,9 @@ uv.lock
 .git
 
 *.md
+
+tasks/*
+
+tests/*
+
+scripts/*

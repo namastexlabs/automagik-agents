@@ -197,12 +197,15 @@ async def run_agent(agent_name: str, input_message: str, session_name: str = Non
             "message_content": input_message,
             "user_id": user_id,
             "context": {"debug": debug_mode},
-            "session_origin": "cli"
+            "session_origin": "cli"  # Always include session_origin for consistency
         }
         
         # Add session_name if provided
         if session_name:
             payload["session_name"] = session_name
+            # Include debugging info
+            if debug_mode:
+                console.print(f"Using session name: {session_name}")
         
         if debug_mode:
             console.print(f"Request payload: {json.dumps(payload, indent=2)}")
@@ -241,6 +244,31 @@ async def run_agent(agent_name: str, input_message: str, session_name: str = Non
                     # Detect specific errors related to session name uniqueness
                     if "duplicate key value violates unique constraint" in error_data.get("detail", "") and "sessions_name_key" in error_data.get("detail", ""):
                         error_msg = f"Session name '{session_name}' is already in use but with a different agent. Please use a different session name."
+                    
+                    # Detect session agent mismatch errors
+                    elif "already associated with a different agent" in error_data.get("detail", ""):
+                        if debug_mode:
+                            console.print(f"Session agent mismatch error. Will retry with agent ID from the existing session.", style="yellow")
+                        # For CLI usage, we want to recover and use the session anyway
+                        # Retry without specifying an agent_id to let the server use the existing one
+                        retry_payload = payload.copy()
+                        # Remove any agent_id if present in context
+                        if "agent_id" in retry_payload:
+                            del retry_payload["agent_id"]
+                        if debug_mode:
+                            console.print(f"Retrying with payload: {json.dumps(retry_payload, indent=2)}")
+                        
+                        # Make the retry request
+                        retry_response = requests.post(endpoint, json=retry_payload, headers=headers, timeout=30)
+                        if retry_response.status_code == 200:
+                            retry_result = retry_response.json()
+                            if debug_mode:
+                                console.print(f"Retry successful!", style="green")
+                            return retry_result
+                        else:
+                            error_msg = f"API Error on retry: {retry_response.status_code}"
+                            if debug_mode:
+                                console.print(f"Retry failed: {retry_response.text}", style="red")
             except Exception:
                 error_msg = f"API Error: {response.text}"
             
