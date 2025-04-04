@@ -11,13 +11,22 @@ import json
 import typer
 from typing import Dict, List, Optional, Any
 import requests
+from pathlib import Path
 import os
+import logging
 
+# Import settings right at the beginning to ensure it's defined before use
 from src.config import settings
 
 # Create app for the run command
 run_app = typer.Typer(no_args_is_help=True)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 @run_app.callback()
 def run_callback(
@@ -33,6 +42,11 @@ def run_callback(
 
     Example:
       automagik-agents agent run message --agent simple --message "Hello, how are you?"
+
+    For multimodal content:
+      automagik-agents agent run message --agent simple --message "Describe this image" --image-url "https://example.com/image.jpg"
+      automagik-agents agent run message --agent simple --message "What does this audio say?" --audio-url "https://example.com/audio.mp3"
+      automagik-agents agent run message --agent simple --message "Summarize this document" --document-url "https://example.com/document.pdf"
     """
     # If debug flag is set, ensure AM_LOG_LEVEL is set to DEBUG
     if debug:
@@ -41,17 +55,22 @@ def run_callback(
 
 def get_api_endpoint(path: str) -> str:
     """Build a consistent API endpoint URL with the correct prefix."""
-    # Use slicing and string concatenation for more efficient operations
+    # Ensure the path doesn't start with a slash
     if path.startswith("/"):
         path = path[1:]
 
-    # Combine conditions to reduce the number of checks
-    path = f"api/v1/{path}" if not path.startswith("api/v1/") else path
+    # Always use /api/v1/ prefix
+    if not path.startswith("api/v1/"):
+        path = f"api/v1/{path}"
 
-    # Efficiently build the server URL
-    server = f"http://{settings.AM_HOST}:{settings.AM_PORT}/"
+    # Build the full URL with server from settings
+    # The host and port values are stored in AM_HOST and AM_PORT
+    server = f"http://{settings.AM_HOST}:{settings.AM_PORT}"
+    if not server.endswith('/'):
+        server = f"{server}/"
+    url = f"{server}{path}"
 
-    return f"{server}{path}"
+    return url
 
 
 def get_available_agents() -> List[Dict[str, Any]]:
@@ -96,7 +115,7 @@ def get_available_agents() -> List[Dict[str, Any]]:
 
                     # If model is missing, provide a default
                     if "model" not in agent or not agent["model"]:
-                        agent["model"] = "unknown"
+                        agent["model"] = "openai:gpt-4o-mini"  # Updated default model
 
                 return agents
             else:
@@ -169,7 +188,8 @@ async def get_user_by_id(user_id: int) -> Dict[str, Any]:
 
 
 async def run_agent(
-    agent_name: str, input_message: str, session_name: str = None, user_id: int = 1
+    agent_name: str, input_message: str, session_name: str = None, user_id: int = 1,
+    multimodal_content: Dict[str, str] = None
 ) -> dict:
     """Run the agent with the given message using the API."""
     try:
@@ -193,9 +213,30 @@ async def run_agent(
             "session_origin": "cli",
         }
 
+        # Add multimodal content if provided
+        if multimodal_content:
+            payload["multimodal_content"] = multimodal_content
+
+            if debug_mode:
+                typer.echo(f"Adding multimodal content: {json.dumps(multimodal_content, indent=2)}")
+
         # Add session_name if provided
         if session_name:
             payload["session_name"] = session_name
+            
+            # Check if this is an existing session, so we can preserve its system_prompt
+            try:
+                # Make a call to get the session info first if it's an existing session
+                session_endpoint = get_api_endpoint(f"sessions/{session_name}")
+                session_response = requests.get(
+                    session_endpoint, 
+                    headers={"x-api-key": settings.AM_API_KEY} if settings.AM_API_KEY else {},
+                    timeout=10
+                )
+               
+            except Exception as e:
+                if debug_mode:
+                    typer.echo(f"Error checking session: {str(e)}")
 
         if debug_mode:
             typer.echo(f"Request payload: {json.dumps(payload, indent=2)}")
@@ -301,108 +342,66 @@ def display_message(
 
 
 async def process_single_message(
-    agent_name: str, message: str, session_name: str = None, user_id: int = 1
+    agent_name: str, message: str, session_name: str = None, user_id: int = 1,
+    multimodal_content: Dict[str, str] = None
 ) -> None:
-    """Process a single message exchange and exit."""
-    # Check if debug mode is enabled either via settings or directly from environment variable
+    """Run a single message through an agent and display the response.
+    
+    Args:
+        agent_name: Name of the agent to use
+        message: Message to send to the agent
+        session_name: Optional session name for continuity
+        user_id: User ID to associate with this run
+        multimodal_content: Optional multimodal content dictionary
+    """
+    # Check if debug mode is enabled
     debug_mode = (settings.AM_LOG_LEVEL == "DEBUG") or (
         os.environ.get("AM_LOG_LEVEL") == "DEBUG"
     )
 
-    # First, check if the agent exists
-    agents = get_available_agents()
-    agent = next((a for a in agents if a["name"].lower() == agent_name.lower()), None)
-
-    if not agent:
-        typer.echo(f"Error: Agent '{agent_name}' not found", err=True)
-        raise typer.Exit(code=1)
-
-    # Get user info
-    user = await get_user_by_id(user_id)
-
     if debug_mode:
-        if session_name:
-            typer.echo(f"Using session: {session_name}")
-        typer.echo(f"Using agent: {agent_name}")
+        typer.echo(f"Processing message: {message}")
+        if multimodal_content:
+            typer.echo(f"With multimodal content: {json.dumps(multimodal_content, indent=2)}")
 
-    # Check if we have a message to process
-    if not message:
-        typer.echo("Error: No message provided", err=True)
-        raise typer.Exit(code=1)
-
-    # Display user message
-    typer.echo(f"user: {message}")
-
-    # Process the message
+    # Extract model override if provided
+    model_override = None
+    if multimodal_content and "model_override" in multimodal_content:
+        model_override = multimodal_content["model_override"]
+        # Remove the model_override from multimodal_content as it's not actual content
+        del multimodal_content["model_override"]
+        if debug_mode:
+            typer.echo(f"Using model override: {model_override}")
+    
+    # Use API to run the agent
     try:
-        response = await run_agent(agent_name, message, session_name, user_id)
-
-        if "error" in response and response["error"]:
-            typer.echo(f"Error: {response['error']}", err=True)
-
-            # Add helpful advice for session name errors
-            if session_name and "already in use" in response["error"]:
-                typer.echo("\nTIP: To see existing sessions, you can run:", err=True)
-                api_url = f"http://{settings.AM_HOST}:{settings.AM_PORT}"
-                typer.echo(
-                    f"  curl {api_url}/api/v1/sessions -H 'x-api-key: {settings.AM_API_KEY}'",
-                    err=True,
-                )
-                typer.echo("\nOr use a different session name:", err=True)
-                typer.echo(
-                    f'  automagik-agents agent run message --agent {agent_name} --session new-session-name --message "{message}"',
-                    err=True,
-                )
-
-            raise typer.Exit(code=1)
-
-        # Extract response parts
-        message_content = ""
-        tool_calls = []
-        tool_outputs = []
-
-        # Check for different response formats and adapt accordingly
-        if "message" in response:
-            # Direct message in response
-            message_content = response.get("message", "")
-            # Look for tool information in history
-            if "history" in response and "messages" in response["history"]:
-                # Find the last assistant message in history
-                messages = response["history"]["messages"]
-
-                for msg in reversed(messages):
-                    if msg.get("role") == "assistant":
-                        # If we find a more complete assistant message with tools, use that
-                        tool_calls = msg.get("tool_calls", [])
-                        tool_outputs = msg.get("tool_outputs", [])
-                        break
-        elif "history" in response and "messages" in response["history"]:
-            # If no direct message, look in history
-            messages = response["history"]["messages"]
-
-            # Find only the assistant message we care about - skip user messages entirely
-            assistant_msgs = [msg for msg in messages if msg.get("role") == "assistant"]
-            if assistant_msgs:
-                # Get the last assistant message
-                last_assistant_msg = assistant_msgs[-1]
-                message_content = last_assistant_msg.get("content", "")
-                tool_calls = last_assistant_msg.get("tool_calls", [])
-                tool_outputs = last_assistant_msg.get("tool_outputs", [])
-
-        # Display assistant response
-        display_message(message_content, "assistant", tool_calls, tool_outputs)
-
-        # Display session info for reference
-        if session_name and not debug_mode:
-            typer.echo(f"\nSession '{session_name}' updated successfully")
-        elif debug_mode and "session_id" in response:
-            typer.echo(
-                f"\nSession '{session_name}' with ID: {response['session_id']} updated successfully"
+        if debug_mode:
+            typer.echo(f"Using API at {settings.AM_HOST}:{settings.AM_PORT}")
+        
+        response = await run_agent(
+            agent_name, message, session_name, user_id,
+            multimodal_content=multimodal_content
+        )
+        
+        # Check if the response is valid
+        if response and "message" in response:
+            # Display the message with proper formatting
+            display_message(
+                message=response["message"],
+                role="assistant",
+                tool_calls=response.get("tool_calls", []),
+                tool_outputs=response.get("tool_outputs", [])
             )
-
+        else:
+            typer.echo("Error: Invalid response from API", err=True)
+            if debug_mode and response:
+                typer.echo(f"API response: {json.dumps(response, indent=2)}", err=True)
+            
     except Exception as e:
-        typer.echo(f"Error: {str(e)}", err=True)
-        raise typer.Exit(code=1)
+        typer.echo(f"Error running agent through API: {str(e)}", err=True)
+        if debug_mode:
+            import traceback
+            typer.echo(traceback.format_exc(), err=True)
 
 
 @run_app.command()
@@ -418,6 +417,10 @@ def message(
         "-m",
         help="Message to send (if not provided, will read from stdin)",
     ),
+    image_url: Optional[str] = typer.Option(None, "--image-url", help="URL to an image for multimodal processing"),
+    audio_url: Optional[str] = typer.Option(None, "--audio-url", help="URL to an audio file for multimodal processing"),
+    document_url: Optional[str] = typer.Option(None, "--document-url", help="URL to a document for multimodal processing"),
+    model: Optional[str] = typer.Option(None, "--model", help="Model to use (overrides agent's default)"),
     debug: bool = typer.Option(
         False, "--debug", help="Enable debug mode", is_flag=True, hidden=True
     ),
@@ -425,32 +428,56 @@ def message(
     """
     Run a single message through an agent and get the response.
 
-    If no message is provided, it will be read from stdin.
-    Sessions are preserved between calls with the same session name.
+    This command sends a message to an agent and displays the response.
+    It can include multimodal content like images, audio, and documents.
+
+    Example:
+      automagik-agents agent run message --agent simple --message "Hello, how are you?"
+      automagik-agents agent run message --agent simple --message "Describe this image" --image-url "https://example.com/image.jpg"
+      automagik-agents agent run message --agent simple --message "What does this audio say?" --audio-url "https://example.com/audio.mp3"
+      automagik-agents agent run message --agent simple --message "Summarize this document" --document-url "https://example.com/document.pdf"
     """
     # If debug flag is set, ensure AM_LOG_LEVEL is set to DEBUG
     if debug:
         os.environ["AM_LOG_LEVEL"] = "DEBUG"
+        typer.echo(f"Debug mode enabled. Using endpoint: {settings.AM_HOST}:{settings.AM_PORT}")
 
-    # Get the message from command line or stdin
-    input_message = message
-    if not input_message:
-        # Read message from stdin
-        if sys.stdin.isatty():
-            typer.echo("Enter message: ", nl=False)
-        input_message = input().strip()
+    # If message is not provided, read from stdin
+    if not message:
+        typer.echo("Enter your message (Ctrl+D to submit):", err=True)
+        message = ""
+        for line in sys.stdin:
+            message += line
+        message = message.strip()
+        if not message:
+            typer.echo("Error: Message cannot be empty", err=True)
+            sys.exit(1)
 
-    # Check if debug mode is enabled either via settings or directly from environment variable
-    debug_mode = (settings.AM_LOG_LEVEL == "DEBUG") or (
-        os.environ.get("AM_LOG_LEVEL") == "DEBUG"
-    )
+    # Ensure agent name is valid
+    if not agent:
+        typer.echo("Error: Agent name is required", err=True)
+        sys.exit(1)
 
-    if debug_mode:
-        typer.echo(f"Processing message: {input_message}")
+    # Prepare multimodal content
+    multimodal_content = {}
+    if image_url:
+        multimodal_content["image_url"] = image_url
+    if audio_url:
+        multimodal_content["audio_url"] = audio_url
+    if document_url:
+        multimodal_content["document_url"] = document_url
 
+    # If model is specified, update the agent's model
+    if model:
+        # Setting the model requires API access, we'll include it in the request payload
+        typer.echo(f"Using custom model: {model}")
+        multimodal_content["model_override"] = model
+
+    # Run the agent and display the response
     asyncio.run(
         process_single_message(
-            agent_name=agent, message=input_message, session_name=session, user_id=user
+            agent, message, session_name=session, user_id=user, 
+            multimodal_content=multimodal_content if multimodal_content else None
         )
     )
 
@@ -485,7 +512,7 @@ def list_available_agents() -> None:
     for i, agent in enumerate(agents, 1):
         name = agent.get("name", "Unknown")
         description = agent.get("description", "No description")
-        model = agent.get("model", "Unknown model")
+        model = agent.get("model", "openai:gpt-4o-mini")  # Updated default model
 
         typer.echo(f"{i}. {name} - {description} (Model: {model})")
 
@@ -493,6 +520,10 @@ def list_available_agents() -> None:
     typer.echo(
         '  automagik-agents agent run message --agent <agent_name> --message "Your message here"'
     )
+    typer.echo("\nFor multimodal content:")
+    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Describe this image\" --image-url \"https://example.com/image.jpg\"")
+    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Transcribe this audio\" --audio-url \"https://example.com/audio.mp3\"")
+    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Summarize this document\" --document-url \"https://example.com/document.pdf\"")
 
 
 @run_app.command()

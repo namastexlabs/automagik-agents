@@ -42,7 +42,7 @@ class HistoryModel(BaseModel):
         
         return cls(messages=messages)
 
-class AgentBaseResponse(BaseModel):
+class AgentBaseResponse_v2(BaseModel):
     message: str
     history: Dict
     error: Optional[str] = None
@@ -57,7 +57,7 @@ class AgentBaseResponse(BaseModel):
         tool_calls: List[Dict] = [],
         tool_outputs: List[Dict] = [],
         session_id: str = None
-    ) -> "AgentBaseResponse":
+    ) -> "AgentBaseResponse_v2":
         """Create an AgentBaseResponse from the agent's response components.
         
         Args:

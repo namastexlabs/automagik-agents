@@ -1,7 +1,7 @@
 import os
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic_settings import BaseSettings
 import urllib.parse
 from pathlib import Path
@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     BLACKPEARL_TOKEN: Optional[str] = Field(None, description="BlackPearl API token")
     OMIE_TOKEN: Optional[str] = Field(None, description="Omie API token")
     GOOGLE_DRIVE_TOKEN: Optional[str] = Field(None, description="Google Drive API token")
-    EVOLUTION_TOKEN: Optional[str] = Field(None, description="Evolution API token")
+    
+    # Evolution
+    EVOLUTION_API_KEY: Optional[str] = Field(None, description="Evolution API key")
+    EVOLUTION_API_URL: Optional[str] = Field(None, description="Evolution API URL")
+    EVOLUTION_INSTANCE: str = Field("agent", description="Evolution API instance name")
 
     # BlackPearl API URL and DB URI
     BLACKPEARL_API_URL: Optional[str] = Field(None, description="BlackPearl API URL")
@@ -65,13 +69,18 @@ class Settings(BaseSettings):
 
     # Logging
     AM_LOG_LEVEL: LogLevel = Field(LogLevel.INFO, description="Logging level")
+    AM_VERBOSE_LOGGING: bool = Field(False, description="Enable verbose logging with additional details")
     LOGFIRE_TOKEN: Optional[str] = Field(None, description="Logfire token for logging service")
     LOGFIRE_IGNORE_NO_CONFIG: bool = Field(True, description="Suppress Logfire warning if no token")
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"  # Allow extra fields in environment variables
+    # Suppress warnings from dependency conflict resolution (Poetry related)
+    PYTHONWARNINGS: Optional[str] = Field(None, description="Python warnings configuration")
+
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"  # Allow extra fields in environment variables
+    )
 
 def load_settings() -> Settings:
     """Load and validate settings from environment variables and .env file."""

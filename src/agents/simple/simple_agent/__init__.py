@@ -1,26 +1,40 @@
-from typing import Dict, Optional
-from src.agents.simple.simple_agent.agent import SimpleAgent
-from src.agents.models import initialize_agent
-from src.config import settings
+"""SimpleAgent implementation.
 
-def create_simple_agent(config: Optional[Dict[str, str]] = None) -> SimpleAgent:
-    """Create and initialize a SimpleAgent instance.
+This module provides the SimpleAgent implementation that uses the common utilities
+for message parsing, session management, and tool handling.
+"""
+
+from typing import Dict, Optional, Any
+import os
+import logging
+import traceback
+
+from src.agents.simple.simple_agent.prompts.prompt import AGENT_PROMPT
+
+# Setup logging first
+logger = logging.getLogger(__name__)
+
+
+try:
+    from src.agents.simple.simple_agent.agent import SimpleAgent
+    from src.agents.models.placeholder import PlaceholderAgent
     
-    Args:
-        config: Optional configuration override
+    # Standardized create_agent function
+    def create_agent(config: Optional[Dict[str, str]] = None) -> Any:
+        """Create a SimpleAgent instance.
         
-    Returns:
-        Initialized SimpleAgent instance
-    """
-    default_config = {
-        "model": "openai:gpt-4o-mini",  # Specific model for SimpleAgent
-        "retries": 3
-    }
+        Args:
+            config: Optional configuration dictionary
+            
+        Returns:
+            SimpleAgent instance
+        """
+        if config is None:
+            config = {}
+        
+        return SimpleAgent(config)
     
-    if config:
-        default_config.update(config)
+except Exception as e:
+    logger.error(f"Failed to initialize SimpleAgent module: {str(e)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
     
-    return initialize_agent(SimpleAgent, default_config)
-
-# Default instance
-default_agent = create_simple_agent()
