@@ -5,7 +5,7 @@ and inherits common functionality from AutomagikAgent.
 """
 import logging
 import traceback
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Optional
 import asyncio
 
 from pydantic_ai import Agent
@@ -49,7 +49,7 @@ class SimpleAgent(AutomagikAgent):
         super().__init__(config)
         
         # Load and register the code-defined prompt
-        from src.agents.simple.simple_agent.prompts.prompt import AGENT_PROMPT
+        from src.agents.simple.simple.prompts.prompt import AGENT_PROMPT
         
         # Register the code-defined prompt for this agent
         # This call is asynchronous but we're in a synchronous __init__,
@@ -92,7 +92,7 @@ class SimpleAgent(AutomagikAgent):
                 self._mcp_client_manager = await get_mcp_client_manager()
             
             # Get servers assigned to this agent (using agent name)
-            agent_name = self.name if hasattr(self, 'name') else 'simple_agent'
+            agent_name = self.name if hasattr(self, 'name') else 'simple'
             servers = self._mcp_client_manager.get_servers_for_agent(agent_name)
             
             # Convert to PydanticAI format
@@ -197,30 +197,29 @@ class SimpleAgent(AutomagikAgent):
                 self.dependencies.set_context(self.context)
         
             # Run the agent with concurrency limit and retry logic
-            # Use the official PydanticAI MCP context manager
+            # MCP servers are now properly managed by our MCPServerManager
             from src.agents.models.automagik_agent import get_llm_semaphore
             semaphore = get_llm_semaphore()
             retries = settings.LLM_RETRY_ATTEMPTS
             last_exc: Optional[Exception] = None
             
             async with semaphore:
-                async with self._agent_instance.run_mcp_servers():  # Official PydanticAI MCP context manager
-                    for attempt in range(1, retries + 1):
-                        try:
-                            result = await self._agent_instance.run(
-                                user_input,
-                                message_history=pydantic_message_history,
-                                usage_limits=getattr(self.dependencies, "usage_limits", None),
-                                deps=self.dependencies
-                            )
-                            break  # success
-                        except Exception as e:
-                            last_exc = e
-                            logger.warning(f"LLM call attempt {attempt}/{retries} failed: {e}")
-                            if attempt < retries:
-                                await asyncio.sleep(2 ** (attempt - 1))
-                            else:
-                                raise
+                for attempt in range(1, retries + 1):
+                    try:
+                        result = await self._agent_instance.run(
+                            user_input,
+                            message_history=pydantic_message_history,
+                            usage_limits=getattr(self.dependencies, "usage_limits", None),
+                            deps=self.dependencies
+                        )
+                        break  # success
+                    except Exception as e:
+                        last_exc = e
+                        logger.warning(f"LLM call attempt {attempt}/{retries} failed: {e}")
+                        if attempt < retries:
+                            await asyncio.sleep(2 ** (attempt - 1))
+                        else:
+                            raise
             
             # Extract tool calls and outputs
             all_messages = extract_all_messages(result)

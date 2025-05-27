@@ -9,14 +9,14 @@ import os
 import logging
 import traceback
 
-from src.agents.simple.simple_agent.prompts.prompt import AGENT_PROMPT
+from src.agents.simple.simple.prompts.prompt import AGENT_PROMPT
 
 # Setup logging first
 logger = logging.getLogger(__name__)
 
 
 try:
-    from src.agents.simple.simple_agent.agent import SimpleAgent
+    from src.agents.simple.simple.agent import SimpleAgent
     from src.agents.models.placeholder import PlaceholderAgent
     
     # Standardized create_agent function

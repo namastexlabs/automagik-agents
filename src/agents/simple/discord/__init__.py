@@ -12,7 +12,7 @@ import traceback
 logger = logging.getLogger(__name__)
 
 try:
-    from src.agents.simple.discord_agent.agent import DiscordAgent
+    from src.agents.simple.discord.agent import DiscordAgent
     
     # Standardized create_agent function (required by the API)
     def create_agent(config: Optional[Dict[str, str]] = None) -> Any:

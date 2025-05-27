@@ -1,11 +1,11 @@
-"""PromptMakerAgent implementation with PydanticAI.
+"""SummaryAgentAgent implementation with PydanticAI.
 
-This module provides a PromptMakerAgent class that uses PydanticAI for LLM integration
+This module provides a SummaryAgentAgent class that uses PydanticAI for LLM integration
 and inherits common functionality from AutomagikAgent.
 """
 import logging
 import traceback
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Optional
 
 from pydantic_ai import Agent
 from src.agents.models.automagik_agent import AutomagikAgent
@@ -29,15 +29,15 @@ from src.agents.common.dependencies_helper import (
 
 logger = logging.getLogger(__name__)
 
-class PromptMakerAgent(AutomagikAgent):
-    """PromptMakerAgent implementation using PydanticAI.
+class SummaryAgentAgent(AutomagikAgent):
+    """SummaryAgentAgent implementation using PydanticAI.
     
     This agent provides a basic implementation that follows the PydanticAI
     conventions for multimodal support and tool calling.
     """
     
     def __init__(self, config: Dict[str, str]) -> None:
-        """Initialize the PromptMakerAgent.
+        """Initialize the SummaryAgentAgent.
         
         Args:
             config: Dictionary with configuration options
@@ -46,7 +46,7 @@ class PromptMakerAgent(AutomagikAgent):
         super().__init__(config)
         
         # Load and register the code-defined prompt
-        from src.agents.simple.prompt_maker_agent.prompts.prompt import AGENT_PROMPT
+        from src.agents.simple.summary.prompts.prompt import AGENT_PROMPT
         
         # Register the code-defined prompt for this agent
         # This call is asynchronous but we're in a synchronous __init__,
@@ -75,7 +75,7 @@ class PromptMakerAgent(AutomagikAgent):
         # Register default tools
         self.tool_registry.register_default_tools(self.context)
         
-        logger.info("PromptMakerAgent initialized successfully")
+        logger.info("SummaryAgentAgent initialized successfully")
     
     async def _initialize_pydantic_agent(self) -> None:
         """Initialize the underlying PydanticAI agent."""
@@ -83,7 +83,7 @@ class PromptMakerAgent(AutomagikAgent):
             return
             
         # Get model configuration
-        model_name = self.dependencies.model_name
+        model_name = "gemini-2.5-flash-preview-04-17"
         model_settings = create_model_settings(self.dependencies.model_settings)
         
         # Convert tools to PydanticAI format

@@ -3,6 +3,6 @@
 This package contains the prompts used by the Discord agent.
 """
 
-from src.agents.simple.discord_agent.prompts.prompt import AGENT_PROMPT
+from src.agents.simple.discord.prompts.prompt import AGENT_PROMPT
 
 __all__ = ["AGENT_PROMPT"]
