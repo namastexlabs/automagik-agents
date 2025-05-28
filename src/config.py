@@ -112,22 +112,17 @@ class Settings(BaseSettings):
     # Notion (Optional)
     NOTION_TOKEN: Optional[str] = Field(None, description="Notion integration token")
 
-    # BlackPearl, Omie, Google Drive, Evolution (Optional)
-    BLACKPEARL_TOKEN: Optional[str] = Field(None, description="BlackPearl API token")
-    OMIE_TOKEN: Optional[str] = Field(None, description="Omie API token")
+    # Gmail (Optional)
+    GMAIL_DELEGATED_SUBJECT: Optional[str] = Field(None, description="Subject for Gmail delegation")
+    GMAIL_CREDENTIALS_PATH: Optional[str] = Field(None, description="Path to Gmail credentials JSON file")
+
+    # Google Drive, Evolution (Optional)
     GOOGLE_DRIVE_TOKEN: Optional[str] = Field(None, description="Google Drive API token")
     
     # Evolution
     EVOLUTION_API_KEY: Optional[str] = Field(None, description="Evolution API key")
     EVOLUTION_API_URL: Optional[str] = Field(None, description="Evolution API URL")
     EVOLUTION_INSTANCE: str = Field("agent", description="Evolution API instance name")
-
-    # BlackPearl API URL and DB URI
-    BLACKPEARL_API_URL: Optional[str] = Field(None, description="BlackPearl API URL")
-    BLACKPEARL_DB_URI: Optional[str] = Field(None, description="BlackPearl database URI")
-
-    FLASHED_API_KEY: Optional[str] = Field(None, description="Flashed API key")
-    FLASHED_API_URL: Optional[str] = Field(None, description="Flashed API URL")
 
     # Discord
     DISCORD_BOT_TOKEN: str = Field(..., description="Discord bot token for authentication")

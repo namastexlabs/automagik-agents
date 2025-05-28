@@ -13,10 +13,6 @@ project_root = Path(__file__).parent.parent
 env_path = project_root / '.env'
 load_dotenv(env_path)
 
-# Verify OMIE credentials are loaded
-if not os.getenv("OMIE_APP_KEY") or not os.getenv("OMIE_APP_SECRET"):
-    print("Warning: OMIE credentials not found in .env file")
-
 @pytest.fixture
 def optimized_test_dependencies():
     """Create optimized dependencies for testing that skip expensive operations."""
@@ -35,15 +31,6 @@ def mock_graphiti_client():
     mock_client.add_episode = AsyncMock(return_value={"success": True, "episode_id": "test-episode"})
     mock_client.search = AsyncMock(return_value={"nodes": [], "edges": []})
     return mock_client
-
-@pytest.fixture
-def mock_blackpearl_api():
-    """Mock BlackPearl API to avoid external calls during testing."""
-    mock_api = Mock()
-    mock_api.search_contacts = Mock(return_value={"count": 0, "results": []})
-    mock_api.create_contact = Mock(return_value={"id": 999, "name": "Test Contact"})
-    mock_api.search_clients = Mock(return_value={"count": 0, "results": []})
-    return mock_api
 
 @pytest.fixture(autouse=True)
 def fast_test_environment():
