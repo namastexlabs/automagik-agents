@@ -11,7 +11,6 @@ import json
 import typer
 from typing import Dict, List, Optional, Any
 import requests
-from pathlib import Path
 import os
 import logging
 
@@ -115,7 +114,7 @@ def get_available_agents() -> List[Dict[str, Any]]:
 
                     # If model is missing, provide a default
                     if "model" not in agent or not agent["model"]:
-                        agent["model"] = "openai:gpt-4o-mini"  # Updated default model
+                        agent["model"] = "openai:gpt-4.1"  # Updated default model
 
                 return agents
             else:
@@ -228,7 +227,7 @@ async def run_agent(
             try:
                 # Make a call to get the session info first if it's an existing session
                 session_endpoint = get_api_endpoint(f"sessions/{session_name}")
-                session_response = requests.get(
+                requests.get(
                     session_endpoint, 
                     headers={"x-api-key": settings.AM_API_KEY} if settings.AM_API_KEY else {},
                     timeout=10
@@ -499,7 +498,7 @@ def list_available_agents() -> None:
 
         typer.echo("\nTry creating an agent first:")
         typer.echo(
-            "  automagik-agents agent create agent --name my_agent --template simple_agent"
+            "  automagik-agents agent create agent --name my_agent --template simple"
         )
 
         typer.echo("\nOr check if you can access the API directly:")
@@ -512,7 +511,7 @@ def list_available_agents() -> None:
     for i, agent in enumerate(agents, 1):
         name = agent.get("name", "Unknown")
         description = agent.get("description", "No description")
-        model = agent.get("model", "openai:gpt-4o-mini")  # Updated default model
+        model = agent.get("model", "openai:gpt-4.1")  # Updated default model
 
         typer.echo(f"{i}. {name} - {description} (Model: {model})")
 
@@ -521,9 +520,9 @@ def list_available_agents() -> None:
         '  automagik-agents agent run message --agent <agent_name> --message "Your message here"'
     )
     typer.echo("\nFor multimodal content:")
-    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Describe this image\" --image-url \"https://example.com/image.jpg\"")
-    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Transcribe this audio\" --audio-url \"https://example.com/audio.mp3\"")
-    typer.echo(f"  automagik-agents agent run message --agent <agent_name> --message \"Summarize this document\" --document-url \"https://example.com/document.pdf\"")
+    typer.echo("  automagik-agents agent run message --agent <agent_name> --message \"Describe this image\" --image-url \"https://example.com/image.jpg\"")
+    typer.echo("  automagik-agents agent run message --agent <agent_name> --message \"Transcribe this audio\" --audio-url \"https://example.com/audio.mp3\"")
+    typer.echo("  automagik-agents agent run message --agent <agent_name> --message \"Summarize this document\" --document-url \"https://example.com/document.pdf\"")
 
 
 @run_app.command()

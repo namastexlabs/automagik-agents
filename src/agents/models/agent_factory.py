@@ -1,13 +1,15 @@
-from typing import Dict, Optional, Type, Union, List
+from typing import Dict, Optional, Type, List
 import logging
 import os
 import traceback
 import uuid
 import importlib
 from pathlib import Path
+from threading import Lock
+import inspect  # NEW - to help debug callable methods
+import asyncio  # NEW
 
 from src.agents.models.automagik_agent import AutomagikAgent
-from src.agents.models.dependencies import BaseDependencies
 from src.agents.models.placeholder import PlaceholderAgent
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,12 @@ class AgentFactory:
 
     _agent_classes = {}
     _agent_creators = {}
-    _initialized_agents = {}  # Store initialized agents for re-use
+    _agent_templates: Dict[str, AutomagikAgent] = {}  # Store one template per agent
+    _agent_locks: Dict[str, Lock] = {}  # Per-agent creation locks
+    _agent_locks_async: Dict[str, asyncio.Lock] = {}  # NEW asyncio-based locks per agent
+    _lock_creation_lock = asyncio.Lock()  # NEW global lock to protect _agent_locks_async
+    
+
     
     @classmethod
     def register_agent_class(cls, name: str, agent_class: Type[AutomagikAgent]) -> None:
@@ -56,23 +63,19 @@ class AgentFactory:
         if config is None:
             config = {}
             
-        logger.info(f"Creating agent of type {agent_type}")
+        logger.debug(f"Creating agent of type {agent_type}")
         
         # Default to simple agent
         if not agent_type:
             agent_type = "simple"
         
-        # Normalize agent type
-        base_agent_type = agent_type
-        if not agent_type.endswith("_agent"):
-            base_agent_type = f"{agent_type}_agent"
+        # Use agent type as-is, no normalization
         
         # Try to create using a registered creator function
-        if base_agent_type in cls._agent_creators or agent_type in cls._agent_creators:
+        if agent_type in cls._agent_creators:
             try:
-                creator_key = base_agent_type if base_agent_type in cls._agent_creators else agent_type
-                agent = cls._agent_creators[creator_key](config)
-                logger.info(f"Successfully created {agent_type} agent using creator function")
+                agent = cls._agent_creators[agent_type](config)
+                logger.debug(f"Successfully created {agent_type} agent using creator function")
                 return agent
             except Exception as e:
                 logger.error(f"Error creating {agent_type} agent: {str(e)}")
@@ -80,11 +83,10 @@ class AgentFactory:
                 return PlaceholderAgent({"name": f"{agent_type}_error", "error": str(e)})
         
         # Try to create using a registered class
-        if base_agent_type in cls._agent_classes or agent_type in cls._agent_classes:
+        if agent_type in cls._agent_classes:
             try:
-                class_key = base_agent_type if base_agent_type in cls._agent_classes else agent_type
-                agent = cls._agent_classes[class_key](config)
-                logger.info(f"Successfully created {agent_type} agent using agent class")
+                agent = cls._agent_classes[agent_type](config)
+                logger.debug(f"Successfully created {agent_type} agent using agent class")
                 return agent
             except Exception as e:
                 logger.error(f"Error creating {agent_type} agent: {str(e)}")
@@ -94,19 +96,19 @@ class AgentFactory:
         # Try dynamic import for agent types not explicitly registered
         try:
             # Try to import from simple agents folder
-            module_path = f"src.agents.simple.{base_agent_type}"
+            module_path = f"src.agents.simple.{agent_type}"
             module = importlib.import_module(module_path)
             
             if hasattr(module, "create_agent"):
                 agent = module.create_agent(config)
                 # Register for future use
-                cls.register_agent_creator(base_agent_type, module.create_agent)
-                logger.info(f"Successfully created {agent_type} agent via dynamic import")
+                cls.register_agent_creator(agent_type, module.create_agent)
+                logger.debug(f"Successfully created {agent_type} agent via dynamic import")
                 return agent
         except ImportError:
-            logger.warning(f"Could not import agent module for {base_agent_type}")
+            logger.warning(f"Could not import agent module for {agent_type}")
         except Exception as e:
-            logger.error(f"Error dynamically creating agent {base_agent_type}: {str(e)}")
+            logger.error(f"Error dynamically creating agent {agent_type}: {str(e)}")
             logger.error(traceback.format_exc())
             return PlaceholderAgent({"name": f"{agent_type}_error", "error": str(e)})
                 
@@ -140,13 +142,9 @@ class AgentFactory:
                     
                     # Check if the module has a create_agent function
                     if hasattr(module, "create_agent") and callable(module.create_agent):
-                        agent_name = item.name
-                        # Register both with and without _agent suffix for flexibility
-                        cls.register_agent_creator(agent_name, module.create_agent)
-                        base_name = agent_name.replace("_agent", "")
-                        if base_name != agent_name:
-                            cls.register_agent_creator(base_name, module.create_agent)
-                        logger.info(f"Discovered and registered agent: {agent_name}")
+                        # Use agent name as-is, no normalization
+                        cls.register_agent_creator(item.name, module.create_agent)
+                        logger.debug(f"Discovered and registered agent: {item.name}")
                 except Exception as e:
                     logger.error(f"Error importing agent from {item.name}: {str(e)}")
     
@@ -157,11 +155,14 @@ class AgentFactory:
         Returns:
             List of available agent names
         """
-        # Combine creators and classes
-        agents = list(cls._agent_creators.keys()) + list(cls._agent_classes.keys())
+        # Combine creators and classes, use names as-is
+        agents = []
         
-        # Ensure each agent is listed only once
-        return list(set(agents))
+        for name in list(cls._agent_creators.keys()) + list(cls._agent_classes.keys()):
+            if name not in agents:
+                agents.append(name)
+        
+        return agents
         
     @classmethod
     def get_agent(cls, agent_name: str) -> AutomagikAgent:
@@ -176,23 +177,52 @@ class AgentFactory:
         Raises:
             ValueError: If the agent is not found
         """
-        # Check if we already have an initialized instance
-        if agent_name in cls._initialized_agents:
-            return cls._initialized_agents[agent_name]
-            
-        # Normalize agent name
-        base_name = agent_name
-        if not agent_name.endswith("_agent"):
-            base_name = f"{agent_name}_agent"
-            
-        # Try to create a new agent
-        agent = cls.create_agent(base_name, {})
+        # Use the agent name as-is, no normalization
         
-        # Store for reuse
-        cls._initialized_agents[agent_name] = agent
-        cls._initialized_agents[base_name] = agent
+        # Ensure only one thread builds the template first time
+        lock = cls._agent_locks.setdefault(agent_name, Lock())
+        logger.debug(f"Acquired lock for agent {agent_name}")
+        
+        with lock:
+            logger.debug(f"Template cache status for {agent_name}: {'exists' if agent_name in cls._agent_templates else 'needs creation'}")
             
-        return agent
+            # Just create a fresh agent every time - simpler and safer than deepcopy
+            # Create initial configuration with name
+            config = {
+                "name": agent_name
+            }
+                
+            # Create a new agent instance from scratch - most reliable way to avoid shared state
+            logger.debug(f"Creating fresh agent instance for {agent_name}")
+            agent = cls.create_agent(agent_name, config) 
+            
+            # Set important template attributes like db_id if we had a previous template
+            if agent_name in cls._agent_templates:
+                # Copy DB ID if available - one bit of state we do want to preserve
+                template = cls._agent_templates[agent_name]
+                if hasattr(template, "db_id") and template.db_id:
+                    logger.debug(f"Copying db_id {template.db_id} from template to new agent instance")
+                    agent.db_id = template.db_id
+            else:
+                # First time, store a template for attribute reference
+                logger.debug(f"Storing new agent template for {agent_name}")
+                cls._agent_templates[agent_name] = agent
+            
+            # Verify the agent has a callable run method
+            has_run = hasattr(agent, "run") and callable(getattr(agent, "run"))
+            has_process = hasattr(agent, "process_message") and callable(getattr(agent, "process_message"))
+            
+            if not has_run or not has_process:
+                logger.error(f"INVALID AGENT: {agent_name} missing callable methods: run={has_run}, process_message={has_process}")
+                # Dump agent structure for debugging
+                for name, value in inspect.getmembers(agent):
+                    if not name.startswith('_'):  # Skip private attributes
+                        is_callable = callable(value)
+                        logger.debug(f"Agent attribute: {name}={type(value)} callable={is_callable}")
+            else:
+                logger.debug(f"Verified agent {agent_name} has required callable methods")
+            
+            return agent
     
     @classmethod
     def link_agent_to_session(cls, agent_name: str, session_id_or_name: str) -> bool:
@@ -237,32 +267,50 @@ class AgentFactory:
             if not agent_id:
                 # Try to register the agent in the database
                 try:
-                    from src.db import register_agent
+                    from src.db import register_agent, list_agents
                     
-                    # Extract agent metadata
-                    agent_type = agent_name.replace("_agent", "")
-                    description = getattr(agent, "description", f"{agent_name} agent")
-                    model = getattr(getattr(agent, "config", {}), "model", "")
-                    config = getattr(agent, "config", {})
+                    # First validate if this is a variation of an existing agent
+                    all_agents = list_agents(active_only=False)
                     
-                    # If config is not a dict, convert it
-                    if not isinstance(config, dict):
-                        if hasattr(config, "__dict__"):
-                            config = config.__dict__
-                        else:
-                            config = {"config": str(config)}
+                    # Check if this agent name is a variation of an existing agent
+                    for existing_agent in all_agents:
+                        # Check for common variations
+                        if (agent_name.lower() == f"{existing_agent.name.lower()}agent" or
+                            agent_name.lower() == f"{existing_agent.name.lower()}-agent" or
+                            agent_name.lower() == f"{existing_agent.name.lower()}_agent"):
+                            # Use the existing agent instead
+                            agent_id = existing_agent.id
+                            logger.warning(f"Agent name '{agent_name}' is a variation of '{existing_agent.name}', using existing agent ID {agent_id}")
+                            # Update the agent's db_id
+                            agent.db_id = agent_id
+                            break
                     
-                    # Register the agent
-                    agent_id = register_agent(
-                        name=agent_name,
-                        agent_type=agent_type,
-                        model=model,
-                        description=description,
-                        config=config
-                    )
-                    
-                    # Update the agent's db_id
-                    agent.db_id = agent_id
+                    # If not a variation and agent_id is still None, register as new agent
+                    if not agent_id:
+                        # Extract agent metadata
+                        agent_type = agent_name
+                        description = getattr(agent, "description", f"{agent_name} agent")
+                        model = getattr(getattr(agent, "config", {}), "model", "")
+                        config = getattr(agent, "config", {})
+                        
+                        # If config is not a dict, convert it
+                        if not isinstance(config, dict):
+                            if hasattr(config, "__dict__"):
+                                config = config.__dict__
+                            else:
+                                config = {"config": str(config)}
+                        
+                        # Register the agent
+                        agent_id = register_agent(
+                            name=agent_name,
+                            agent_type=agent_type,
+                            model=model,
+                            description=description,
+                            config=config
+                        )
+                        
+                        # Update the agent's db_id
+                        agent.db_id = agent_id
                     
                 except Exception as e:
                     logger.error(f"Error registering agent in database: {str(e)}")
@@ -311,3 +359,21 @@ class AgentFactory:
                 return None
                 
         return None
+
+    @classmethod
+    async def _get_agent_lock(cls, agent_name: str) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for a specific agent type in a threadsafe way."""
+        async with cls._lock_creation_lock:
+            if agent_name not in cls._agent_locks_async:
+                cls._agent_locks_async[agent_name] = asyncio.Lock()
+            return cls._agent_locks_async[agent_name]
+
+    @classmethod
+    async def get_agent_async(cls, agent_name: str):
+        """Asynchronous counterpart to get_agent that is safe under high concurrency."""
+        lock = await cls._get_agent_lock(agent_name)
+        async with lock:
+            # Delegate to the synchronous get_agent for the heavy lifting.
+            # This approach keeps backward-compatibility while ensuring only one concurrent
+            # coroutine builds/initializes a given agent template at a time.
+            return cls.get_agent(agent_name)

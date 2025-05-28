@@ -17,6 +17,8 @@ from .memory.tool import (
     list_memories_tool
 )
 from .notion import notion_tools
+from .airtable import airtable_tools
+from .meeting import join_meeting_with_url
 
 # Export individual tools and groups
 __all__ = [
@@ -45,4 +47,10 @@ __all__ = [
     
     # Notion tools
     "notion_tools",
-] 
+    
+    # Airtable tools
+    "airtable_tools",
+    
+    # Meeting tools
+    "join_meeting_with_url",
+]

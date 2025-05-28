@@ -2,6 +2,10 @@ import pytest
 import uuid
 from src.db import get_db_connection
 
+# Constants for setup
+_TEST_USER_EMAIL = "session_test_user@example.com"
+_TEST_USER_ID = None  # type: ignore
+
 # Test data
 test_session = {
     "id": str(uuid.uuid4()),
@@ -13,20 +17,38 @@ created_session_id = None
 
 def setup_module():
     """Setup test data before running tests"""
-    global created_session_id
+    global created_session_id, _TEST_USER_ID
     
-    # Create a test session directly in the database
     with get_db_connection() as conn:
-        # Insert directly into the database
-        conn.cursor().execute(
+        cur = conn.cursor()
+
+        # Ensure we have at least one user to satisfy FK / NOT NULL constraint.
+        cur.execute("SELECT id FROM users WHERE email = %s", (_TEST_USER_EMAIL,))
+        row = cur.fetchone()
+        if row:
+            _TEST_USER_ID = row[0]
+        else:
+            # Insert a minimal user record.
+            cur.execute(
+                """
+                INSERT INTO users (email, created_at, updated_at)
+                VALUES (%s, NOW(), NOW()) RETURNING id
+                """,
+                (_TEST_USER_EMAIL,)
+            )
+            _TEST_USER_ID = cur.fetchone()[0]
+
+        # Now insert the test session row referencing the user_id.
+        cur.execute(
             """
-            INSERT INTO sessions (id, name, created_at, updated_at) 
-            VALUES (%s, %s, NOW(), NOW())
+            INSERT INTO sessions (id, user_id, name, platform, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, NOW(), NOW())
             """,
-            (test_session["id"], test_session["name"])
+            (test_session["id"], _TEST_USER_ID, test_session["name"], "test")
         )
+
         conn.commit()
-    
+
     created_session_id = test_session["id"]
 
 def test_list_sessions(client):
@@ -87,7 +109,7 @@ def test_get_session_by_id(client):
     assert "session_id" in data
     assert data["session_id"] == created_session_id
     assert "exists" in data
-    assert data["exists"] == True
+    assert data["exists"]
     assert "messages" in data
     assert "total_messages" in data
     assert "current_page" in data
@@ -111,7 +133,7 @@ def test_get_session_by_name(client):
     assert data["session_id"] == test_session['name']
     
     assert "exists" in data
-    assert data["exists"] == True
+    assert data["exists"]
 
 def test_get_session_with_pagination(client):
     """Test getting a session with pagination parameters"""

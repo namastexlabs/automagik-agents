@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, ClassVar
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -18,7 +18,7 @@ class BaseDBModel(BaseModel):
 
 class User(BaseDBModel):
     """User model corresponding to the users table."""
-    id: Optional[int] = Field(None, description="User ID")
+    id: Optional[uuid.UUID] = Field(None, description="User ID")
     email: Optional[str] = Field(None, description="User email")
     phone_number: Optional[str] = Field(None, description="User phone number")
     user_data: Optional[Dict[str, Any]] = Field(None, description="Additional user data")
@@ -45,6 +45,7 @@ class Agent(BaseDBModel):
     active: bool = Field(True, description="Whether the agent is active")
     run_id: int = Field(0, description="Current run ID")
     system_prompt: Optional[str] = Field(None, description="System prompt for the agent")
+    active_default_prompt_id: Optional[int] = Field(None, description="ID of the active default prompt")
     created_at: Optional[datetime] = Field(None, description="Created at timestamp")
     updated_at: Optional[datetime] = Field(None, description="Updated at timestamp")
 
@@ -59,14 +60,16 @@ class Agent(BaseDBModel):
 class Session(BaseDBModel):
     """Session model corresponding to the sessions table."""
     id: Optional[uuid.UUID] = Field(None, description="Session ID")
-    user_id: Optional[int] = Field(None, description="User ID")
+    user_id: Optional[uuid.UUID] = Field(None, description="User ID")
     agent_id: Optional[int] = Field(None, description="Agent ID")
+    agent_name: Optional[str] = Field(None, description="Name of the agent associated with the session")
     name: Optional[str] = Field(None, description="Session name")
     platform: Optional[str] = Field(None, description="Platform")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
     created_at: Optional[datetime] = Field(None, description="Created at timestamp")
     updated_at: Optional[datetime] = Field(None, description="Updated at timestamp")
     run_finished_at: Optional[datetime] = Field(None, description="Run finished at timestamp")
+    message_count: Optional[int] = Field(None, description="Number of messages in the session")
 
     @classmethod
     def from_db_row(cls, row: Dict[str, Any]) -> "Session":
@@ -80,7 +83,7 @@ class Message(BaseDBModel):
     """Message model corresponding to the messages table."""
     id: Optional[uuid.UUID] = Field(None, description="Message ID")
     session_id: Optional[uuid.UUID] = Field(None, description="Session ID")
-    user_id: Optional[int] = Field(None, description="User ID")
+    user_id: Optional[uuid.UUID] = Field(None, description="User ID")
     agent_id: Optional[int] = Field(None, description="Agent ID")
     role: str = Field(..., description="Message role (user, assistant, system)")
     text_content: Optional[str] = Field(None, description="Message text content")
@@ -113,7 +116,7 @@ class Memory(BaseDBModel):
     description: Optional[str] = Field(None, description="Memory description")
     content: Optional[str] = Field(None, description="Memory content")
     session_id: Optional[uuid.UUID] = Field(None, description="Session ID")
-    user_id: Optional[int] = Field(None, description="User ID")
+    user_id: Optional[uuid.UUID] = Field(None, description="User ID")
     agent_id: Optional[int] = Field(None, description="Agent ID")
     read_mode: Optional[str] = Field(None, description="Read mode")
     access: Optional[str] = Field(None, description="Access permissions")
@@ -124,6 +127,137 @@ class Memory(BaseDBModel):
     @classmethod
     def from_db_row(cls, row: Dict[str, Any]) -> "Memory":
         """Create a Memory instance from a database row dictionary."""
+        if not row:
+            return None
+        return cls(**row)
+
+
+# Prompt Models
+class PromptBase(BaseDBModel):
+    """Base class for Prompt models."""
+    
+    agent_id: int = Field(..., description="ID of the agent this prompt belongs to")
+    prompt_text: str = Field(..., description="The actual prompt text content")
+    version: int = Field(default=1, description="Version number for this prompt")
+    is_active: bool = Field(default=False, description="Whether this prompt is currently active")
+    is_default_from_code: bool = Field(default=False, description="Whether this prompt was defined in code")
+    status_key: str = Field(default="default", description="Status key this prompt applies to (e.g., 'default', 'APPROVED', etc.)")
+    name: Optional[str] = Field(default=None, description="Optional descriptive name for this prompt")
+
+
+class PromptCreate(PromptBase):
+    """Data needed to create a new Prompt."""
+    pass
+
+
+class PromptUpdate(BaseModel):
+    """Data for updating an existing Prompt."""
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        validate_assignment=True,
+    )
+    
+    prompt_text: Optional[str] = Field(default=None, description="Updated prompt text")
+    is_active: Optional[bool] = Field(default=None, description="Whether to set this prompt as active")
+    name: Optional[str] = Field(default=None, description="Updated prompt name")
+
+
+class Prompt(PromptBase):
+    """Complete Prompt model, including database fields."""
+    
+    id: int = Field(..., description="Unique identifier")
+    created_at: datetime = Field(..., description="Timestamp when this prompt was created")
+    updated_at: datetime = Field(..., description="Timestamp when this prompt was last updated")
+    
+    DB_TABLE: ClassVar[str] = "prompts"
+    
+    @classmethod
+    def from_db_row(cls, row: Dict[str, Any]) -> "Prompt":
+        """Create a Prompt instance from a database row.
+        
+        Args:
+            row: Database row as dictionary
+            
+        Returns:
+            Prompt instance
+        """
+        if not row:
+            return None
+            
+        # Convert database row to model
+        return cls(
+            id=row["id"],
+            agent_id=row["agent_id"],
+            prompt_text=row["prompt_text"],
+            version=row["version"],
+            is_active=row["is_active"],
+            is_default_from_code=row["is_default_from_code"],
+            status_key=row["status_key"],
+            name=row["name"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"]
+        )
+
+
+# MCP Models
+class MCPServerDB(BaseDBModel):
+    """MCP Server model corresponding to the mcp_servers table."""
+    id: Optional[int] = Field(None, description="MCP Server ID")
+    name: str = Field(..., description="Unique server name")
+    server_type: str = Field(..., description="Server type (stdio or http)")
+    description: Optional[str] = Field(None, description="Server description")
+    
+    # Connection configuration
+    command: Optional[List[str]] = Field(None, description="Command array for stdio servers")
+    env: Optional[Dict[str, str]] = Field(None, description="Environment variables")
+    http_url: Optional[str] = Field(None, description="HTTP URL for http servers")
+    
+    # Behavior configuration
+    auto_start: bool = Field(True, description="Whether to auto-start the server")
+    max_retries: int = Field(3, description="Maximum connection retries")
+    timeout_seconds: int = Field(30, description="Connection timeout in seconds")
+    tags: Optional[List[str]] = Field(None, description="Tags for categorization")
+    priority: int = Field(0, description="Server priority")
+    
+    # State tracking
+    status: str = Field("stopped", description="Current server status")
+    enabled: bool = Field(True, description="Whether server is enabled")
+    started_at: Optional[datetime] = Field(None, description="When server was started")
+    last_error: Optional[str] = Field(None, description="Last error message")
+    error_count: int = Field(0, description="Number of errors")
+    connection_attempts: int = Field(0, description="Number of connection attempts")
+    last_ping: Optional[datetime] = Field(None, description="Last successful ping")
+    
+    # Discovery results
+    tools_discovered: Optional[List[str]] = Field(None, description="Discovered tool names")
+    resources_discovered: Optional[List[str]] = Field(None, description="Discovered resource URIs")
+    
+    # Audit trail
+    created_at: Optional[datetime] = Field(None, description="Created timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Updated timestamp")
+    last_started: Optional[datetime] = Field(None, description="Last started timestamp")
+    last_stopped: Optional[datetime] = Field(None, description="Last stopped timestamp")
+
+    @classmethod
+    def from_db_row(cls, row: Dict[str, Any]) -> "MCPServerDB":
+        """Create an MCPServerDB instance from a database row dictionary."""
+        if not row:
+            return None
+        return cls(**row)
+
+
+class AgentMCPServerDB(BaseDBModel):
+    """Agent MCP Server assignment model corresponding to the agent_mcp_servers table."""
+    id: Optional[int] = Field(None, description="Assignment ID")
+    agent_id: int = Field(..., description="Agent ID")
+    mcp_server_id: int = Field(..., description="MCP Server ID")
+    created_at: Optional[datetime] = Field(None, description="Created timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Updated timestamp")
+
+    @classmethod
+    def from_db_row(cls, row: Dict[str, Any]) -> "AgentMCPServerDB":
+        """Create an AgentMCPServerDB instance from a database row dictionary."""
         if not row:
             return None
         return cls(**row)

@@ -7,76 +7,95 @@ import logging
 from dotenv import load_dotenv
 import psycopg2
 from pathlib import Path
+from src.config import settings
 
 # Create the database command group
 db_app = typer.Typer()
 
 def apply_migrations(cursor, logger=None):
-    """Apply all SQL migrations from the migrations directory."""
+    """Apply database migrations"""
     if logger is None:
         logger = logging.getLogger("apply_migrations")
     
-    try:
-        # Get the migrations directory path
-        migrations_dir = Path("src/db/migrations")
-        if not migrations_dir.exists():
-            logger.info("No migrations directory found, skipping migrations")
-            return
-        
-        # Get all SQL files and sort them by name (which includes timestamp)
-        migration_files = sorted(migrations_dir.glob("*.sql"))
-        
-        if not migration_files:
-            logger.info("No migration files found")
-            return
-        
-        logger.info(f"Found {len(migration_files)} migration files")
-        
-        # Create migrations table if it doesn't exist
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS migrations (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                applied_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
-        
-        # Get list of already applied migrations
-        cursor.execute("SELECT name FROM migrations")
-        applied_migrations = {row[0] for row in cursor.fetchall()}
-        
-        # Apply each migration that hasn't been applied yet
-        for migration_file in migration_files:
-            migration_name = migration_file.name
+    # Create migrations table if it doesn't exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS migrations (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) UNIQUE NOT NULL,
+            applied_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    
+    # Define migrations
+    migrations = [
+        ("add_user_data_column", """
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS user_data JSONB;
+        """),
+        ("add_run_finished_at_column", """
+            ALTER TABLE sessions 
+            ADD COLUMN IF NOT EXISTS run_finished_at TIMESTAMPTZ;
+        """),
+        ("add_agents_unique_name_constraint", """
+            -- First remove any duplicate agents keeping the one with the lowest ID
+            DELETE FROM agents a1
+            WHERE EXISTS (
+                SELECT 1 FROM agents a2 
+                WHERE LOWER(a2.name) = LOWER(a1.name) 
+                AND a2.id < a1.id
+            );
             
-            if migration_name in applied_migrations:
-                logger.info(f"Migration {migration_name} already applied, skipping")
+            -- Add unique constraint on name (case-insensitive)
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint 
+                    WHERE conname = 'agents_name_unique'
+                ) THEN
+                    ALTER TABLE agents ADD CONSTRAINT agents_name_unique UNIQUE (name);
+                END IF;
+            END
+            $$;
+        """),
+    ]
+    
+    # Apply migrations
+    migration_success_count = 0
+    migration_error_count = 0
+    
+    for migration_name, migration_sql in migrations:
+        try:
+            # Check if migration has already been applied
+            cursor.execute(
+                "SELECT 1 FROM migrations WHERE name = %s",
+                (migration_name,)
+            )
+            if cursor.fetchone():
+                logger.info(f"Migration '{migration_name}' already applied, skipping.")
                 continue
             
+            # Apply migration
             logger.info(f"Applying migration: {migration_name}")
-            
-            # Read and execute the migration file
-            with open(migration_file, 'r') as f:
-                migration_sql = f.read()
-            
-            # Execute the migration
             cursor.execute(migration_sql)
             
-            # Record the migration as applied
+            # Record migration
             cursor.execute(
                 "INSERT INTO migrations (name) VALUES (%s)",
                 (migration_name,)
             )
+            migration_success_count += 1
+            logger.info(f"✅ Migration '{migration_name}' applied successfully")
             
-            logger.info(f"Successfully applied migration: {migration_name}")
-        
-        logger.info("All migrations applied successfully")
-        
-    except Exception as e:
-        logger.error(f"Error applying migrations: {e}")
-        import traceback
-        logger.error(f"Detailed error: {traceback.format_exc()}")
-        raise
+        except Exception as e:
+            migration_error_count += 1
+            logger.error(f"❌ Failed to apply migration '{migration_name}': {e}")
+            # Continue with other migrations
+            continue
+    
+    if migration_error_count == 0:
+        logger.info(f"✅ All {migration_success_count} migrations completed successfully")
+    else:
+        logger.warning(f"Migrations completed with {migration_error_count} errors and {migration_success_count} successes")
 
 @db_app.callback()
 def db_callback(
@@ -110,15 +129,15 @@ def db_init(
     # Load environment variables
     load_dotenv()
     
-    # Get database connection parameters from environment
-    db_host = os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST", "localhost") 
-    db_port = os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("POSTGRES_DB") or os.getenv("DB_NAME", "automagik_agents")
-    db_user = os.getenv("POSTGRES_USER") or os.getenv("DB_USER", "postgres")
-    db_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD", "postgres")
+    # Get database connection parameters from settings
+    db_host = settings.POSTGRES_HOST
+    db_port = str(settings.POSTGRES_PORT)
+    db_name = settings.POSTGRES_DB
+    db_user = settings.POSTGRES_USER
+    db_password = settings.POSTGRES_PASSWORD
     
     # Try to parse from DATABASE_URL if available
-    database_url = os.getenv("DATABASE_URL")
+    database_url = settings.DATABASE_URL
     if database_url:
         try:
             import urllib.parse
@@ -222,6 +241,8 @@ def create_required_tables(
             cursor.execute("DROP TABLE IF EXISTS messages CASCADE")
             cursor.execute("DROP TABLE IF EXISTS sessions CASCADE")
             cursor.execute("DROP TABLE IF EXISTS users CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS prompts CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS migrations CASCADE")
             cursor.execute("DROP TABLE IF EXISTS agents CASCADE")
             logger.info("Existing tables dropped.")
         
@@ -240,6 +261,7 @@ def create_required_tables(
                 active BOOLEAN DEFAULT TRUE,
                 run_id INTEGER DEFAULT 0,
                 system_prompt TEXT,
+                active_default_prompt_id INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
@@ -342,6 +364,57 @@ def create_required_tables(
         else:
             logger.info("Created memories table")
         
+        # Create the prompts table
+        cursor.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'prompts')")
+        table_exists = cursor.fetchone()[0]
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS prompts (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+                prompt_text TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                is_active BOOLEAN NOT NULL DEFAULT FALSE,
+                is_default_from_code BOOLEAN NOT NULL DEFAULT FALSE,
+                status_key VARCHAR(255) NOT NULL DEFAULT 'default',
+                name VARCHAR(255),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(agent_id, status_key, version)
+            )
+        """)
+        if table_exists:
+            logger.info("Verified prompts table exists")
+        else:
+            logger.info("Created prompts table")
+        
+        # Add index on agent_id and status_key for faster lookups if it doesn't exist
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes 
+                    WHERE indexname = 'idx_prompts_agent_id_status_key'
+                ) THEN
+                    CREATE INDEX idx_prompts_agent_id_status_key ON prompts(agent_id, status_key);
+                END IF;
+            END
+            $$;
+        """)
+        
+        # Add index to find active prompts quickly if it doesn't exist
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes 
+                    WHERE indexname = 'idx_prompts_active'
+                ) THEN
+                    CREATE INDEX idx_prompts_active ON prompts(agent_id, status_key) WHERE is_active = TRUE;
+                END IF;
+            END
+            $$;
+        """)
+        
         # Create default user if needed
         cursor.execute("SELECT COUNT(*) FROM users")
         count = cursor.fetchone()[0]
@@ -400,15 +473,15 @@ def db_clear(
     # Load environment variables
     load_dotenv()
     
-    # Get database connection parameters from environment
-    db_host = os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST", "localhost") 
-    db_port = os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("POSTGRES_DB") or os.getenv("DB_NAME", "automagik_agents")
-    db_user = os.getenv("POSTGRES_USER") or os.getenv("DB_USER", "postgres")
-    db_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD", "postgres")
+    # Get database connection parameters from settings
+    db_host = settings.POSTGRES_HOST
+    db_port = str(settings.POSTGRES_PORT)
+    db_name = settings.POSTGRES_DB
+    db_user = settings.POSTGRES_USER
+    db_password = settings.POSTGRES_PASSWORD
     
     # Try to parse from DATABASE_URL if available
-    database_url = os.getenv("DATABASE_URL")
+    database_url = settings.DATABASE_URL
     if database_url:
         try:
             import urllib.parse
@@ -456,7 +529,9 @@ def db_clear(
             "messages",       # References sessions, users, and agents
             "sessions",       # References users and agents
             "users",          # Base table
-            "agents"          # Base table
+            "agents",         # Base table
+            "migrations",     # Migrations tracking table
+            "prompts"         # Prompts reference agents
         ]
         
         # Sort tables based on defined order
@@ -489,9 +564,9 @@ def db_clear(
                         try:
                             cursor.execute(f'TRUNCATE TABLE "{table_name}";')
                             typer.echo(f"    ✓ Table {table_name} cleared successfully")
-                        except Exception as e2:
+                        except Exception:
                             # If regular TRUNCATE fails too, try DELETE as a last resort
-                            typer.echo(f"    ⚠️ TRUNCATE failed, trying DELETE FROM...")
+                            typer.echo("    ⚠️ TRUNCATE failed, trying DELETE FROM...")
                             cursor.execute(f'DELETE FROM "{table_name}";')
                             typer.echo(f"    ✓ Table {table_name} cleared using DELETE (might be slower)")
                     else:
@@ -499,19 +574,9 @@ def db_clear(
             except Exception as e:
                 typer.echo(f"    ✗ Failed to clear table {table_name}: {str(e)}")
         
-        # Create default user if not exists
-        if not no_default_user:
-            cursor.execute("SELECT COUNT(*) FROM users WHERE id = 1")
-            if cursor.fetchone()[0] == 0:
-                logger.info("Creating default user...")
-                cursor.execute("""
-                    INSERT INTO users (id, email, created_at, updated_at)
-                    VALUES (1, 'admin@automagik', NOW(), NOW())
-                """)
-                conn.commit()
-                typer.echo("✅ Created default user (ID: 1)")
-        else:
-            typer.echo("Skipping default user creation as requested")
+        # Removed outdated default user creation logic
+        # The default user should be managed by ensure_default_user_exists
+        # during application startup or via a separate command if needed.
         
         # Close the connection
         cursor.close()

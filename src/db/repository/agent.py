@@ -3,10 +3,10 @@
 import uuid
 import json
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from src.db.connection import execute_query
-from src.db.models import Agent, Session
+from src.db.models import Agent
 from src.version import SERVICE_INFO
 
 # Configure logger
@@ -105,11 +105,11 @@ def create_agent(agent: Agent) -> Optional[int]:
             """
             INSERT INTO agents (
                 name, type, model, description, 
-                config, version, active, run_id, system_prompt,
+                config, version, active, run_id,
                 created_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, 
-                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
                 NOW(), NOW()
             ) RETURNING id
             """,
@@ -121,8 +121,7 @@ def create_agent(agent: Agent) -> Optional[int]:
                 config_json,
                 agent.version,
                 agent.active,
-                agent.run_id,
-                agent.system_prompt
+                agent.run_id
             )
         )
         
@@ -164,7 +163,6 @@ def update_agent(agent: Agent) -> Optional[int]:
                 version = %s,
                 active = %s,
                 run_id = %s,
-                system_prompt = %s,
                 updated_at = NOW()
             WHERE id = %s
             """,
@@ -177,7 +175,6 @@ def update_agent(agent: Agent) -> Optional[int]:
                 agent.version,
                 agent.active,
                 agent.run_id,
-                agent.system_prompt,
                 agent.id
             ),
             fetch=False
@@ -216,7 +213,7 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
     """Register an agent in the database or update an existing one.
     
     Args:
-        name: The agent name
+        name: The agent name (used as-is, no normalization)
         agent_type: The agent type (will be stored in the 'type' column)
         model: The model used by the agent
         description: Optional description
@@ -226,10 +223,40 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
         The agent ID if successful, None otherwise
     """
     try:
-        # Check if agent already exists with this name
-        existing = get_agent_by_name(name)
+        # Use the name as-is, no normalization
+        agent_name = name
+        
+        # Validate agent name - check if it's a variation of an existing agent
+        # Get all existing agents to check against
+        existing_agents = list_agents(active_only=False)
+        
+        # Check if this agent name is a variation of an existing agent
+        for existing in existing_agents:
+            # Check if the new name is the existing name with "agent" suffix
+            if agent_name.lower() == f"{existing.name.lower()}agent":
+                logger.warning(f"Blocked registration of '{agent_name}' - variation of existing agent '{existing.name}'")
+                # Return the existing agent's ID instead
+                return existing.id
+            
+            # Check if the new name is the existing name with "-agent" suffix  
+            if agent_name.lower() == f"{existing.name.lower()}-agent":
+                logger.warning(f"Blocked registration of '{agent_name}' - variation of existing agent '{existing.name}'")
+                # Return the existing agent's ID instead
+                return existing.id
+                
+            # Check if the new name is the existing name with "_agent" suffix
+            if agent_name.lower() == f"{existing.name.lower()}_agent":
+                logger.warning(f"Blocked registration of '{agent_name}' - variation of existing agent '{existing.name}'")
+                # Return the existing agent's ID instead
+                return existing.id
+        
+        # Check for existing agent with the exact name
+        existing = get_agent_by_name(agent_name)
+        
         if existing:
             # Update existing agent
+            logger.info(f"Found existing agent with name {existing.name} (ID: {existing.id})")
+            
             existing.type = agent_type
             existing.model = model
             existing.description = description or existing.description
@@ -239,6 +266,9 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
             # Use update_agent
             return update_agent(existing)
         
+        # Create new agent with the provided name
+        logger.info(f"Creating new agent with name: {agent_name}")
+        
         # Serialize config to JSON if needed
         config_json = json.dumps(config) if config else None
         
@@ -247,14 +277,14 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
             """
             INSERT INTO agents (
                 name, type, model, description, config, active, 
-                version, run_id, system_prompt, created_at, updated_at
+                version, run_id, created_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, true, 
-                %s, 1, NULL, NOW(), NOW()
+                %s, 1, NOW(), NOW()
             ) RETURNING id
             """,
             (
-                name, 
+                agent_name, 
                 agent_type, 
                 model, 
                 description,
@@ -265,7 +295,7 @@ def register_agent(name: str, agent_type: str, model: str, description: Optional
         
         if result:
             agent_id = result[0]["id"]
-            logger.info(f"Registered agent {name} with ID {agent_id}")
+            logger.info(f"Registered agent {agent_name} with ID {agent_id}")
             return agent_id
         
         return None
@@ -367,4 +397,32 @@ def link_session_to_agent(session_id: uuid.UUID, agent_id: int) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error linking session {session_id} to agent {agent_id}: {str(e)}")
+        return False
+
+
+def update_agent_active_prompt_id(agent_id: int, prompt_id: int) -> bool:
+    """Update the active_default_prompt_id for an agent.
+    
+    Args:
+        agent_id: The agent ID
+        prompt_id: The prompt ID to set as active default
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        execute_query(
+            """
+            UPDATE agents SET
+                active_default_prompt_id = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (prompt_id, agent_id),
+            fetch=False
+        )
+        logger.info(f"Updated agent {agent_id} with active_default_prompt_id {prompt_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating agent {agent_id} active prompt: {str(e)}")
         return False

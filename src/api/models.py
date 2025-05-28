@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, Literal
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field
+import uuid
 
 class BaseResponseModel(BaseModel):
     """Base model for all response models with common configuration."""
@@ -67,15 +68,19 @@ class DocumentBinaryContent(DocumentContent, BinaryMediaContent):
     """Document content with binary data."""
     pass
 
+# Define UserCreate before it's referenced by AgentRunRequest
+class UserCreate(BaseResponseModel):
+    """Request model for creating a new user."""
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    user_data: Optional[Dict[str, Any]] = None
+
 # Update AgentRunRequest to support multimodal content
 class AgentRunRequest(BaseResponseModel):
     """Request model for running an agent."""
     message_content: str
     message_type: Optional[str] = None
-    # Legacy single media fields (maintained for backward compatibility)
-    mediaUrl: Optional[str] = None
-    mime_type: Optional[str] = None
-    # New multimodal content support
+    # Multimodal content support
     media_contents: Optional[List[Union[
         ImageUrlContent, ImageBinaryContent,
         AudioUrlContent, AudioBinaryContent,
@@ -85,15 +90,95 @@ class AgentRunRequest(BaseResponseModel):
     context: dict = {}
     session_id: Optional[str] = None
     session_name: Optional[str] = None  # Optional friendly name for the session
-    user_id: Optional[int] = 1  # User ID is now an integer with default value 1
+    user_id: Optional[Union[uuid.UUID, str, int]] = None  # User ID as UUID, string, or int
     message_limit: Optional[int] = 10  # Default to last 10 messages
-    session_origin: Optional[Literal["web", "whatsapp", "automagik-agent", "telegram", "discord", "slack", "cli"]] = "automagik-agent"  # Origin of the session
+    session_origin: Optional[Literal["web", "whatsapp", "automagik-agent", "telegram", "discord", "slack", "cli", "app", "manychat"]] = "automagik-agent"  # Origin of the session
     agent_id: Optional[Any] = None  # Agent ID to store with messages, can be int or string
     parameters: Optional[Dict[str, Any]] = None  # Agent parameters
     messages: Optional[List[Any]] = None  # Optional message history
+    system_prompt: Optional[str] = None  # Optional system prompt override
+    user: Optional[UserCreate] = None  # Optional user data for creation/update
+    
+    model_config = ConfigDict(
+        exclude_none=True,
+        json_schema_extra={
+            "example": {
+                "message_content": "string",
+                "message_type": "string",
+                "media_contents": [
+                    {
+                        "mime_type": "image/",
+                        "media_url": "string",
+                        "width": 0,
+                        "height": 0,
+                        "alt_text": "string"
+                    },
+                    {
+                        "mime_type": "image/",
+                        "data": "string",
+                        "width": 0,
+                        "height": 0,
+                        "alt_text": "string",
+                        "thumbnail_url": "string"
+                    },
+                    {
+                        "mime_type": "audio/",
+                        "media_url": "string",
+                        "duration_seconds": 0,
+                        "transcript": "string"
+                    },
+                    {
+                        "mime_type": "audio/",
+                        "data": "string",
+                        "duration_seconds": 0,
+                        "transcript": "string"
+                    },
+                    {
+                        "mime_type": "application/",
+                        "media_url": "string",
+                        "name": "string",
+                        "size_bytes": 0,
+                        "page_count": 0
+                    },
+                    {
+                        "mime_type": "application/",
+                        "data": "string",
+                        "name": "string",
+                        "size_bytes": 0,
+                        "page_count": 0
+                    }
+                ],
+                "channel_payload": {
+                    "additionalProp1": {}
+                },
+                "context": {},
+                "session_id": "string",
+                "session_name": "string",
+                "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "message_limit": 10,
+                "session_origin": "automagik-agent",
+                "agent_id": "string",
+                "parameters": {
+                    "additionalProp1": {}
+                },
+                "messages": [
+                    "string"
+                ],
+                "system_prompt": "string",
+                "user": {
+                    "email": "string",
+                    "phone_number": "string",
+                    "user_data": {
+                        "additionalProp1": {}
+                    }
+                }
+            }
+        }
+    )
 
 class AgentInfo(BaseResponseModel):
     """Information about an available agent."""
+    id: int
     name: str
     description: Optional[str] = None
 
@@ -127,10 +212,7 @@ class MessageModel(BaseResponseModel):
     role: str
     content: str
     assistant_name: Optional[str] = None
-    # Legacy media fields (maintained for backward compatibility)
-    media_url: Optional[str] = None
-    mime_type: Optional[str] = None
-    # New multimodal content support
+    # Multimodal content support
     media_contents: Optional[List[Union[
         ImageUrlContent, ImageBinaryContent, 
         AudioUrlContent, AudioBinaryContent,
@@ -138,6 +220,7 @@ class MessageModel(BaseResponseModel):
     ]]] = None
     tool_calls: Optional[List[ToolCallModel]] = None
     tool_outputs: Optional[List[ToolOutputModel]] = None
+    system_prompt: Optional[str] = None
 
     model_config = ConfigDict(
         exclude_none=True,
@@ -158,11 +241,12 @@ class SessionResponse(BaseResponseModel):
     total_messages: int
     current_page: int
     total_pages: int
+    system_prompt: Optional[str] = None
 
 class SessionInfo(BaseResponseModel):
     """Information about a session."""
     session_id: str
-    user_id: Optional[int] = None
+    user_id: Optional[uuid.UUID] = None
     agent_id: Optional[int] = None
     session_name: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -170,6 +254,7 @@ class SessionInfo(BaseResponseModel):
     message_count: Optional[int] = None
     agent_name: Optional[str] = None
     session_origin: Optional[str] = None  # Origin of the session (e.g., "web", "api", "discord")
+    system_prompt: Optional[str] = None
 
 class SessionListResponse(BaseResponseModel):
     """Response model for listing all sessions."""
@@ -182,16 +267,11 @@ class SessionListResponse(BaseResponseModel):
     
     # Make sure both total and total_count have the same value for backward compatibility
     def __init__(self, **data):
+        if 'total' in data and 'total_count' not in data:
+            data['total_count'] = data['total']
         super().__init__(**data)
-        # Set total_count to total if only total is provided
-        if self.total_count is None and hasattr(self, 'total'):
-            self.total_count = self.total
 
-class UserCreate(BaseResponseModel):
-    """Request model for creating a new user."""
-    email: Optional[str] = None
-    phone_number: Optional[str] = None
-    user_data: Optional[Dict[str, Any]] = None
+# UserCreate moved to before AgentRunRequest
 
 class UserUpdate(BaseResponseModel):
     """Request model for updating an existing user."""
@@ -201,7 +281,7 @@ class UserUpdate(BaseResponseModel):
 
 class UserInfo(BaseResponseModel):
     """Response model for user information."""
-    id: int
+    id: uuid.UUID
     email: Optional[str] = None
     phone_number: Optional[str] = None
     user_data: Optional[Dict[str, Any]] = None
@@ -216,4 +296,44 @@ class UserListResponse(BaseResponseModel):
     page_size: int = 50
     total_pages: int = 1
     has_next: Optional[bool] = None
-    has_prev: Optional[bool] = None 
+    has_prev: Optional[bool] = None
+
+class DeleteMessageResponse(BaseResponseModel):
+    """Response model for message deletion."""
+    status: str = "success"
+    message_id: uuid.UUID
+    detail: str = "Message deleted successfully"
+
+# Prompt API models
+class PromptResponse(BaseResponseModel):
+    """Response model for a single prompt."""
+    id: int
+    agent_id: int
+    prompt_text: str
+    version: int
+    is_active: bool
+    is_default_from_code: bool
+    status_key: str
+    name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+class PromptListResponse(BaseResponseModel):
+    """Response model for listing prompts."""
+    prompts: List[PromptResponse]
+    total: int
+    agent_id: int
+
+class PromptCreateRequest(BaseResponseModel):
+    """Request model for creating a new prompt."""
+    prompt_text: str
+    status_key: str = "default"
+    name: Optional[str] = None
+    is_active: bool = False
+    version: int = 1
+
+class PromptUpdateRequest(BaseResponseModel):
+    """Request model for updating an existing prompt."""
+    prompt_text: Optional[str] = None
+    name: Optional[str] = None
+    is_active: Optional[bool] = None 

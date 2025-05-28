@@ -8,6 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+mem0/
 build/
 develop-eggs/
 dist/
@@ -129,6 +130,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.prod
 .venv
 env/
 venv/
@@ -176,6 +178,44 @@ cython_debug/
 # Credentials
 credentials/
 
+# Makefile artifacts
+.make/
+.makefile-state
+.makefile-cache/
 
-scripts/solid_stan/cards_processing/
-scripts/solid_stan/*
+# Added by Claude Task Master
+# Logs
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+# Dependency directories
+node_modules/
+# Environment variables
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+.DS_Store
+# Task files
+tasks.json
+tasks/ 
+.taskmasterconfig
+
+# Development script organization
+# Track the dev directory structure but manage temp files
+dev/temp/*
+!dev/temp/README.md
+# Allow versioning of development tools and sandbox experiments
+# but ignore common temporary files
+dev/**/*.tmp
+dev/**/*.temp
+dev/**/*.bak
+dev/**/.DS_Store
+dev/

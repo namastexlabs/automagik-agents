@@ -2,7 +2,7 @@
 
 This module provides helper functions and decorators for memory tools.
 """
-from typing import Dict, Any, Optional, Callable
+from typing import Any, Callable
 import logging
 import re
 from functools import wraps
@@ -121,6 +121,7 @@ def invalidate_memory_cache(func: Callable) -> Callable:
         return result
     
     return wrapper
+
 
 def validate_memory_name(name: str) -> bool:
     """Validate that a memory name contains only allowed characters.

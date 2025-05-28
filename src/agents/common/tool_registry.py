@@ -52,9 +52,12 @@ class ToolRegistry:
         Args:
             tool_func: The tool function to register
         """
-        name = getattr(tool_func, "__name__", str(tool_func))
+        # Handle PydanticAI Tool objects properly
+        if isinstance(tool_func, PydanticTool):
+            name = tool_func.name
+        else:
+            name = getattr(tool_func, "__name__", str(tool_func))
         self._registered_tools[name] = tool_func
-        logger.info(f"Registered tool: {name}")
     
     def register_tool_with_context(self, tool_func: Callable, context: Dict[str, Any]) -> None:
         """Register a tool with the registry, automatically injecting context.
@@ -66,7 +69,11 @@ class ToolRegistry:
             tool_func: The tool function to register
             context: Context to inject into the tool
         """
-        name = getattr(tool_func, "__name__", str(tool_func))
+        # Handle PydanticAI Tool objects properly
+        if isinstance(tool_func, PydanticTool):
+            name = tool_func.name
+        else:
+            name = getattr(tool_func, "__name__", str(tool_func))
         
         # Special handling for verificar_cnpj which has caused issues
         if name == "verificar_cnpj":
@@ -125,8 +132,11 @@ class ToolRegistry:
             agent: The agent to register as a tool
             context: Context to inject into the agent's tool functions
         """
-        # Get the agent name for logging
-        agent_name = getattr(agent, "__name__", str(agent))
+        # Handle PydanticAI Tool objects properly
+        if isinstance(agent, PydanticTool):
+            agent_name = agent.name
+        else:
+            agent_name = getattr(agent, "__name__", str(agent))
         
         # Register the agent with context
         self.register_tool_with_context(agent, context)
@@ -161,7 +171,7 @@ class ToolRegistry:
                 Returns:
                     Confirmation message
                 """
-                return await store_memory_tool(key, content, ctx=context)
+                return await store_memory_tool(context, key, content)
             
             # Create and register wrapper for get_memory_tool that includes the context
             async def get_memory_wrapper(key: str) -> Any:
@@ -209,7 +219,44 @@ class ToolRegistry:
             self.register_tool(get_memory_tool)
             self.register_tool(list_memories_tool)
             
-        logger.info("Default tools registered")
+        logger.debug("Default tools registered")
+    
+    async def register_mcp_tools(self, agent_name: str) -> None:
+        """Register MCP tools for a specific agent.
+        
+        Simple approach: Try to get MCP client manager, if it's not ready yet, just skip.
+        This handles the timing issue without complex dependency injection.
+        
+        Args:
+            agent_name: Name of the agent to register MCP tools for
+        """
+        try:
+            # Try to get MCP client manager - if it's not ready, this will fail gracefully
+            from src.mcp.client import get_mcp_client_manager
+            mcp_client_manager = await get_mcp_client_manager()
+            
+            # Get MCP tools for this agent (returns List[PydanticTool])
+            mcp_tools = mcp_client_manager.get_tools_for_agent(agent_name)
+            
+            # Register each MCP tool - they're already PydanticTool objects
+            for tool in mcp_tools:
+                if isinstance(tool, PydanticTool):
+                    # Register the PydanticTool directly
+                    tool_name = getattr(tool, 'name', f"mcp_tool_{len(self._registered_tools)}")
+                    self._registered_tools[tool_name] = tool
+                    logger.debug(f"Registered MCP PydanticTool: {tool_name}")
+                else:
+                    logger.warning(f"Unexpected MCP tool type: {type(tool)}")
+            
+            if mcp_tools:
+                logger.info(f"Registered {len(mcp_tools)} MCP tools for agent {agent_name}")
+            else:
+                logger.debug(f"No MCP tools found for agent {agent_name}")
+                
+        except Exception as e:
+            # MCP client manager not ready yet or other error - just skip MCP tools for now
+            logger.debug(f"MCP tools not available for agent {agent_name}: {str(e)}")
+            # Don't raise exception to avoid breaking agent initialization
     
     def get_registered_tools(self) -> Dict[str, Callable]:
         """Get all registered tools.
@@ -228,15 +275,15 @@ class ToolRegistry:
         tools = []
         for name, func in self._registered_tools.items():
             try:
-                if hasattr(func, "get_pydantic_tool"):
+                if isinstance(func, PydanticTool):
+                    # If it's already a PydanticTool instance, use it directly
+                    tools.append(func)
+                    logger.debug(f"Added existing PydanticTool: {name}")
+                elif hasattr(func, "get_pydantic_tool"):
                     # Use the PydanticAI tool definition if available
                     tool = func.get_pydantic_tool()
                     tools.append(tool)
                     logger.debug(f"Converted to PydanticAI tool: {name}")
-                elif isinstance(func, PydanticTool):
-                    # If it's already a PydanticTool instance, use it directly
-                    tools.append(func)
-                    logger.debug(f"Added existing PydanticTool: {name}")
                 elif hasattr(func, "__doc__") and callable(func):
                     # Create a basic wrapper for regular functions
                     doc = func.__doc__ or f"Tool for {name}"
@@ -289,7 +336,7 @@ class ToolRegistry:
                 Returns:
                     Confirmation message
                 """
-                return await store_memory_tool(key, content, ctx=new_context)
+                return await store_memory_tool(new_context, key, content)
                 
             # Create wrapper for get_memory_tool  
             async def get_memory_wrapper(key: str) -> Any:

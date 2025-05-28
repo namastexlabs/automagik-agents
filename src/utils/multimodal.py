@@ -6,13 +6,11 @@ such as images, audio, and documents.
 
 import base64
 import logging
-import json
 import re
 import mimetypes
-from typing import Dict, Any, Optional, Tuple, List, Union
+from typing import Dict, Any, Tuple, List, Union
 import requests
 from pathlib import Path
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -257,14 +255,6 @@ def extract_from_context(context: Dict[str, Any]) -> List[Dict[str, Any]]:
         if "document_data" in mc and mc["document_data"]:
             result.append(prepare_for_db_storage("document", mc["document_data"]))
     
-    # Handle legacy single media fields
-    elif "media_url" in context and "mime_type" in context:
-        mime_type = context["mime_type"]
-        if is_image_type(mime_type):
-            result.append(prepare_for_db_storage("image", context["media_url"]))
-        elif is_audio_type(mime_type):
-            result.append(prepare_for_db_storage("audio", context["media_url"]))
-        elif is_document_type(mime_type):
-            result.append(prepare_for_db_storage("document", context["media_url"]))
+
     
     return result 

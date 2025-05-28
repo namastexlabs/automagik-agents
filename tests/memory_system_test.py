@@ -2,10 +2,9 @@ import asyncio
 import sys
 import logging
 import os
-import time
 import uuid
-from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+import pytest
 
 # Configure logging
 logging.basicConfig(
@@ -17,9 +16,10 @@ logger = logging.getLogger("memory_system_test")
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.agents.simple.simple_agent.agent import SimpleAgent
-from src.tools.memory_tools.provider import MemoryProvider
+from src.agents.simple.simple.agent import SimpleAgent
+from src.tools.memory.provider import MemoryProvider
 
+@pytest.mark.asyncio
 async def test_memory_provider():
     """Test the memory provider directly."""
     logger.info("Testing memory provider functionality")
@@ -44,9 +44,9 @@ async def test_memory_provider():
     retrieved_memory = provider.get_memory(test_memory_name)
     
     if retrieved_memory == test_memory_value:
-        logger.info(f"✅ PASSED: Memory retrieval works - value matches expected")
+        logger.info("✅ PASSED: Memory retrieval works - value matches expected")
     else:
-        logger.error(f"❌ FAILED: Memory retrieval failed or values don't match")
+        logger.error("❌ FAILED: Memory retrieval failed or values don't match")
         logger.error(f"Expected: {test_memory_value}")
         logger.error(f"Got: {retrieved_memory}")
         return False
@@ -58,10 +58,10 @@ async def test_memory_provider():
     post_invalidation = provider.get_memory(test_memory_name)
     
     if post_invalidation is None:
-        logger.info(f"✅ PASSED: Cache invalidation works correctly")
+        logger.info("✅ PASSED: Cache invalidation works correctly")
     else:
-        logger.error(f"❌ FAILED: Cache not properly invalidated")
-        logger.error(f"Expected: None")
+        logger.error("❌ FAILED: Cache not properly invalidated")
+        logger.error("Expected: None")
         logger.error(f"Got: {post_invalidation}")
         return False
     
@@ -70,9 +70,9 @@ async def test_memory_provider():
     
     # The function should exist and have the right name
     if prompt_fn.__name__ == f"memory_{test_memory_name}":
-        logger.info(f"✅ PASSED: System prompt function correctly named")
+        logger.info("✅ PASSED: System prompt function correctly named")
     else:
-        logger.error(f"❌ FAILED: System prompt function has wrong name")
+        logger.error("❌ FAILED: System prompt function has wrong name")
         logger.error(f"Expected: memory_{test_memory_name}")
         logger.error(f"Got: {prompt_fn.__name__}")
         return False
@@ -85,9 +85,9 @@ async def test_memory_provider():
     expected_text = f"Memory content: {test_memory_value2}"
     
     if prompt_text == expected_text:
-        logger.info(f"✅ PASSED: System prompt function returns correctly formatted memory")
+        logger.info("✅ PASSED: System prompt function returns correctly formatted memory")
     else:
-        logger.error(f"❌ FAILED: System prompt function returned wrong text")
+        logger.error("❌ FAILED: System prompt function returned wrong text")
         logger.error(f"Expected: '{expected_text}'")
         logger.error(f"Got: '{prompt_text}'")
         return False
@@ -95,12 +95,13 @@ async def test_memory_provider():
     logger.info("✅ All memory provider tests PASSED")
     return True
 
+@pytest.mark.asyncio
 async def test_template_extraction():
     """Test the template variable extraction from SimpleAgent."""
     logger.info("Testing template variable extraction")
     
     # Create a minimal SimpleAgent instance for testing
-    agent = SimpleAgent({})
+    SimpleAgent({})
     
     # Test template with variables
     test_template = """
@@ -112,14 +113,16 @@ async def test_template_extraction():
     And here's a {{third_variable}} with underscores.
     """
     
-    vars = agent._extract_template_vars(test_template)
+    # Import the correct method
+    from src.agents.common.prompt_builder import PromptBuilder
+    vars = PromptBuilder.extract_template_variables(test_template)
     expected_vars = {"variable1", "variable2", "third_variable"}
     
     if set(vars) == expected_vars:
-        logger.info(f"✅ PASSED: Template variable extraction works correctly")
+        logger.info("✅ PASSED: Template variable extraction works correctly")
         logger.info(f"Extracted variables: {vars}")
     else:
-        logger.error(f"❌ FAILED: Template variable extraction didn't work as expected")
+        logger.error("❌ FAILED: Template variable extraction didn't work as expected")
         logger.error(f"Expected: {sorted(list(expected_vars))}")
         logger.error(f"Got: {sorted(vars)}")
         return False
