@@ -161,7 +161,7 @@ class Settings(BaseSettings):
     )
     AM_AGENTS_NAMES: Optional[str] = Field(
         default=None,
-        description="Comma-separated list of agent names to pre-instantiate at startup (e.g., 'simple,stan')"
+        description="Comma-separated list of agent names to pre-instantiate at startup (e.g., 'simple')"
     )
 
     # Supabase
